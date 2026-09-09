@@ -1,0 +1,684 @@
+//! `CreateOrder.create_order` (產生 All-in-One 訂單) — the typed port.
+//!
+//! The official SDK takes a free-form dict, merges in the parameter groups
+//! selected by `ChoosePayment`/invoice, validates, and signs. Here the groups
+//! are typed [`Option`] fields: `None` is the "absent" that the SDK's filter
+//! stage deletes, and required fields are plain `String`/`i64` enforced at
+//! compile time and re-checked for emptiness/length at runtime (same messages
+//! as the SDK).
+//!
+//! Two intentional deviations, both documented in the README: fields set for
+//! a payment method they do not belong to are a validation error (the SDK
+//! silently signs and sends them), and the invoice text fields are urlencoded
+//! without lowercasing (the SDK's `.lower()` corrupts ASCII letter case in
+//! customer data; ECPay url-decodes the value either way).
+
+use std::collections::{BTreeMap, HashMap};
+
+use crate::crypto::query_escape;
+use crate::error::{Error, Result};
+use crate::payment::ChoosePayment;
+use crate::Ecpay;
+
+/// The All-in-One checkout parameters (`AioCheckOutParam`). Required fields
+/// are non-`Option`; optional fields are `None`-absent and only sent when
+/// set (strings non-empty, ints `>= 0`, exactly like the SDK's filter stage).
+#[derive(Debug, Clone, Default)]
+pub struct AioCheckOutParams {
+    // --- 訂單基本參數 (ORDER_REQUIRED_PARAMETERS) ---
+    /// 特店交易編號。特店產生不重複的交易編號(最大 20 字元,不可與已成交訂單重複)。
+    pub merchant_trade_no: String,
+    /// 特店旗下店舖代號(最大 20 字元)。
+    pub store_id: Option<String>,
+    /// 特店交易時間,格式為 yyyy/MM/dd HH:mm:ss(最大 20 字元)。
+    pub merchant_trade_date: String,
+    /// 交易類型,固定填 `aio`(預設)。
+    pub payment_type: String,
+    /// 交易金額,僅限新台幣(整數)。
+    pub total_amount: i64,
+    /// 交易描述(最大 200 字元)。
+    pub trade_desc: String,
+    /// 商品名稱,多筆以 `#` 分隔(最大 200 字元)。
+    pub item_name: String,
+    /// 付款結果通知 URL(最大 200 字元)。
+    pub return_url: String,
+    /// 付款方式。
+    pub choose_payment: ChoosePayment,
+    /// 用戶取消或付款失敗時要返回的 URL(最大 200 字元)。
+    pub client_back_url: Option<String>,
+    /// 商品銷售網址(最大 200 字元)。
+    pub item_url: Option<String>,
+    /// 備註(最大 100 字元)。平台特店合作模式時不可使用。
+    pub remark: Option<String>,
+    /// 付款方式子項目(見 [`crate::payment::choose_sub_payment`] 常數,最大 20 字元)。
+    pub choose_sub_payment: Option<String>,
+    /// 用戶於付款完成頁要返回的 URL(最大 200 字元)。
+    pub order_result_url: Option<String>,
+    /// 是否需要額外的付款資訊:`Y`/`N`(見 [`crate::payment::need_extra_paid_info`])。
+    pub need_extra_paid_info: Option<String>,
+    /// 裝置來源;請帶空值由系統自動判定(預設不送出)。
+    pub device_source: Option<String>,
+    /// 隱藏付款方式,如 `WebATM#ATM`(最大 100 字元)。
+    pub ignore_payment: Option<String>,
+    /// 平台特店合作專用(最大 10 字元)。
+    pub platform_id: Option<String>,
+    /// 自訂名稱欄位 1(最大 50 字元)。
+    pub custom_field1: Option<String>,
+    /// 自訂名稱欄位 2(最大 50 字元)。
+    pub custom_field2: Option<String>,
+    /// 自訂名稱欄位 3(最大 50 字元)。
+    pub custom_field3: Option<String>,
+    /// 自訂名稱欄位 4(最大 50 字元)。
+    pub custom_field4: Option<String>,
+    /// CheckMacValue 加密類別:1 = SHA-256(預設)、0 = MD5(ECPay 已淘汰)。
+    pub encrypt_type: i64,
+
+    // --- ATM 延伸參數 (ALL 或 ATM) ---
+    /// ATM 付款有效繳費期限(天),最小 1 天、最大 60 天。
+    pub expire_date: Option<i64>,
+    /// ATM/CVS/BARCODE:付款人繳費資訊通知 URL(最大 200 字元)。
+    pub payment_info_url: Option<String>,
+    /// ATM/CVS/BARCODE:付款人於超商/ATM 付款完成後導回的 URL(最大 200 字元)。
+    pub client_redirect_url: Option<String>,
+
+    // --- CVS / BARCODE 延伸參數 (ALL 或 CVS 或 BARCODE) ---
+    /// 超商繳費有效期限(分鐘或天數,依規格)。
+    pub store_expire_date: Option<i64>,
+    /// 超商繳費資訊顯示用欄位 1(最大 20 字元)。
+    pub desc_1: Option<String>,
+    /// 超商繳費資訊顯示用欄位 2(最大 20 字元)。
+    pub desc_2: Option<String>,
+    /// 超商繳費資訊顯示用欄位 3(最大 20 字元)。
+    pub desc_3: Option<String>,
+    /// 超商繳費資訊顯示用欄位 4(最大 20 字元)。
+    pub desc_4: Option<String>,
+
+    // --- 信用卡延伸參數 (ALL 或 Credit) ---
+    /// 是否綁卡:1 = 綁卡。
+    pub binding_card: Option<i64>,
+    /// 特店會員編號(最大 30 字元),使用記憶卡號功能時必填。
+    pub merchant_member_id: Option<String>,
+    /// 語系設定(Credit 限定,最大 3 字元),預設 `zh-TW` 由綠界處理。
+    pub language: Option<String>,
+    /// 一次付清:紅利折抵 `Y`/`N`(最大 1 字元)。
+    pub redeem: Option<String>,
+    /// 銀聯卡交易選項(見 [`crate::payment::union_pay`])。
+    pub union_pay: Option<i64>,
+    /// 分期付款期數,如 `3,6,12`(最大 20 字元)。
+    pub credit_installment: Option<String>,
+    /// 定期定額:每次要付費的金額。
+    pub period_amount: Option<i64>,
+    /// 定期定額:週期種類 `Y`/`M`/`D`(見 [`crate::payment::period_type`])。
+    pub period_type: Option<String>,
+    /// 定期定額:執行頻率,每幾個週期。
+    pub frequency: Option<i64>,
+    /// 定期定額:總執行次數。
+    pub exec_times: Option<i64>,
+    /// 定期定額:每次執行時的付款結果通知 URL(最大 200 字元)。
+    pub period_return_url: Option<String>,
+
+    // --- 電子發票延伸參數 (InvoiceMark = Y) ---
+    /// 需要開立電子發票時填寫;設定後自動帶 `InvoiceMark=Y` 並套用發票欄位驗證。
+    pub invoice: Option<InvoiceExtend>,
+
+    /// Escape hatch for parameters this SDK version does not model yet
+    /// (ECPay adds fields over time). These are signed and sent as-is; a key
+    /// colliding with a modeled field is a validation error.
+    pub extra: BTreeMap<String, String>,
+}
+
+/// 電子發票延伸參數 (`INVOICE_EXTEND_PARAMETERS`)。欄位規則與官方 SDK 的
+/// create_order 驗證一致(統一編號、列印/捐贈互斥、載具限制、Email/手機
+/// 至少一個)。
+#[derive(Debug, Clone, Default)]
+pub struct InvoiceExtend {
+    /// 特店自訂編號,該筆交易的發票唯一識別(必填,最大 30 字元)。
+    pub relate_number: String,
+    /// 客戶編號(最大 20 字元)。
+    pub customer_id: Option<String>,
+    /// 統一編號(固定 8 碼數字;有值時 Print=1、Donation=0、不得填載具)。
+    pub customer_identifier: Option<String>,
+    /// 客戶名稱(最大 30 字元;Print=1 或有統一編號時必填)。
+    pub customer_name: Option<String>,
+    /// 客戶地址(最大 200 字元;Print=1 時必填)。
+    pub customer_addr: Option<String>,
+    /// 客戶手機號碼(最大 20 字元;與 Email 至少一個)。
+    pub customer_phone: Option<String>,
+    /// 客戶電子信箱(最大 200 字元;與手機號碼至少一個)。
+    pub customer_email: Option<String>,
+    /// 通關方式 `1`/`2`(見 [`crate::payment::clearance_mark`];TaxType=2 時必填)。
+    pub clearance_mark: Option<String>,
+    /// 課稅類別(必填,見 [`crate::payment::tax_type`])。
+    pub tax_type: String,
+    /// 載具類別(見 [`crate::payment::carruer_type`])。
+    pub carruer_type: Option<String>,
+    /// 載具編號(最大 64 字元;CarruerType 為 2/3 時必填)。
+    pub carruer_num: Option<String>,
+    /// 捐贈註記(必填,`1` 捐贈 / `2` 不捐贈,見 [`crate::payment::donation`])。
+    pub donation: String,
+    /// 捐贈碼(3~7 碼;Donation=1 時必填)。
+    pub love_code: Option<String>,
+    /// 列印註記(必填,`0` 不列印 / `1` 列印,見 [`crate::payment::print_mark`])。
+    pub print: String,
+    /// 商品名稱,多筆以 `#` 分隔(必填,最大 100 字元)。
+    pub invoice_item_name: String,
+    /// 商品數量,多筆以 `#` 分隔(必填)。
+    pub invoice_item_count: String,
+    /// 商品單位,多筆以 `#` 分隔(必填)。
+    pub invoice_item_word: String,
+    /// 商品單價,多筆以 `#` 分隔(必填)。
+    pub invoice_item_price: String,
+    /// 商品課稅別,多筆以 `#` 分隔(TaxType=9 時必填)。
+    pub invoice_item_tax_type: Option<String>,
+    /// 發票備註。
+    pub invoice_remark: Option<String>,
+    /// 延遲天數,0 為立即開立(必填;若延遲,最長依法規限制)。
+    pub delay_day: i64,
+    /// 字軌類別 `07` 一般稅額 / `08` 特種稅額(必填)。
+    pub inv_type: String,
+}
+
+/// The signed All-in-One checkout payload `aio_check_out` returns: the
+/// final parameters (sorted by key, `CheckMacValue` included, ready to POST)
+/// plus helpers to render them.
+#[derive(Debug, Clone)]
+pub struct AioCheckOut {
+    params: Vec<(String, String)>,
+    action: String,
+}
+
+impl AioCheckOut {
+    /// The final POST parameters, sorted by key, `CheckMacValue` included.
+    pub fn params(&self) -> &[(String, String)] {
+        &self.params
+    }
+
+    /// The signed `CheckMacValue`.
+    pub fn check_mac_value(&self) -> &str {
+        &self
+            .params
+            .iter()
+            .find(|(k, _)| k == "CheckMacValue")
+            .expect("aio_check_out always appends CheckMacValue")
+            .1
+    }
+
+    /// The checkout endpoint the form posts to (follows the client's
+    /// `payment_api_url`, production by default).
+    pub fn action(&self) -> &str {
+        &self.action
+    }
+
+    /// Port of `ExtendFunction.gen_html_post_form`: an auto-submitting HTML
+    /// form that sends the browser to ECPay's payment page. Attribute values
+    /// are HTML-escaped (the official SDK does not, which breaks on `"` and
+    /// is an injection vector).
+    pub fn html_form(&self) -> String {
+        let mut html = format!(
+            "<form id=\"data_set\" action=\"{}\" method=\"post\">",
+            html_escape(self.action())
+        );
+        for (k, v) in &self.params {
+            html.push_str(&format!(
+                "<input type=\"hidden\" name=\"{}\" value=\"{}\" />",
+                html_escape(k),
+                html_escape(v)
+            ));
+        }
+        html.push_str("<script type=\"text/javascript\">document.getElementById(\"data_set\").submit();</script>");
+        html.push_str("</form>");
+        html
+    }
+
+    /// Consume into the raw key/value pairs.
+    pub fn into_pairs(self) -> Vec<(String, String)> {
+        self.params
+    }
+}
+
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Python `len()` on a `str` counts Unicode scalar values.
+fn py_len(s: &str) -> usize {
+    s.chars().count()
+}
+
+fn required_str(name: &str, v: &str, max: usize) -> Result<()> {
+    if v.is_empty() {
+        return Err(Error::Validation(format!("{name} content is required.")));
+    }
+    if py_len(v) > max {
+        return Err(Error::Validation(format!("{name} max length is {max}.")));
+    }
+    Ok(())
+}
+
+fn optional_str(name: &str, v: &Option<String>, max: usize) -> Result<()> {
+    if let Some(v) = v {
+        if py_len(v) > max {
+            return Err(Error::Validation(format!("{name} max length is {max}.")));
+        }
+    }
+    Ok(())
+}
+
+fn insert_optional_str(m: &mut HashMap<String, String>, key: &str, v: &Option<String>) {
+    // filter_parameter: non-required strings are dropped when empty.
+    if let Some(v) = v {
+        if !v.is_empty() {
+            m.insert(key.to_owned(), v.clone());
+        }
+    }
+}
+
+fn insert_optional_int(m: &mut HashMap<String, String>, key: &str, v: &Option<i64>) {
+    // filter_parameter: non-required ints are dropped when negative; 0 stays.
+    if let Some(n) = v {
+        if *n >= 0 {
+            m.insert(key.to_owned(), n.to_string());
+        }
+    }
+}
+
+impl Ecpay {
+    /// `CreateOrder.create_order`: validate `params`, fill the client's
+    /// MerchantID and the defaults (PaymentType=aio, EncryptType=1,
+    /// InvoiceMark=Y when an invoice is present), sign with CheckMacValue,
+    /// and return the ready-to-POST payload. No network is performed — the
+    /// caller renders [`AioCheckOut::html_form`] and the user's browser does
+    /// the POST.
+    pub fn aio_check_out(&self, p: &AioCheckOutParams) -> Result<AioCheckOut> {
+        // --- 訂單基本參數 ---
+        required_str("MerchantTradeNo", &p.merchant_trade_no, 20)?;
+        required_str("MerchantTradeDate", &p.merchant_trade_date, 20)?;
+        required_str("TradeDesc", &p.trade_desc, 200)?;
+        required_str("ItemName", &p.item_name, 200)?;
+        required_str("ReturnURL", &p.return_url, 200)?;
+        required_str("PaymentType", &p.payment_type, 20)?;
+        optional_str("StoreID", &p.store_id, 20)?;
+        optional_str("ClientBackURL", &p.client_back_url, 200)?;
+        optional_str("ItemURL", &p.item_url, 200)?;
+        optional_str("Remark", &p.remark, 100)?;
+        optional_str("ChooseSubPayment", &p.choose_sub_payment, 20)?;
+        optional_str("OrderResultURL", &p.order_result_url, 200)?;
+        optional_str("NeedExtraPaidInfo", &p.need_extra_paid_info, 1)?;
+        optional_str("DeviceSource", &p.device_source, 10)?;
+        optional_str("IgnorePayment", &p.ignore_payment, 100)?;
+        optional_str("PlatformID", &p.platform_id, 10)?;
+        optional_str("CustomField1", &p.custom_field1, 50)?;
+        optional_str("CustomField2", &p.custom_field2, 50)?;
+        optional_str("CustomField3", &p.custom_field3, 50)?;
+        optional_str("CustomField4", &p.custom_field4, 50)?;
+
+        // 付款子方式 WebATM 大眾銀行跟永豐銀行已經無法使用
+        if let Some(sub) = &p.choose_sub_payment {
+            if sub == crate::payment::choose_sub_payment::web_atm::TACHONG
+                || sub == crate::payment::choose_sub_payment::web_atm::SINOPAC
+            {
+                return Err(Error::Validation(
+                    "ChooseSubPayment is not supported with TACHONG or SINOPAC.".into(),
+                ));
+            }
+        }
+
+        // --- 付款方式延伸參數:組別歸屬檢查 ---
+        // The official SDK merges exactly one group set per ChoosePayment; a
+        // field set for an inactive group would be silently signed and sent,
+        // so the typed API rejects it loudly instead.
+        let is_all_or =
+            |a: ChoosePayment| p.choose_payment == ChoosePayment::All || p.choose_payment == a;
+        let atm_group = is_all_or(ChoosePayment::Atm);
+        let cvs_barcode_group = is_all_or(ChoosePayment::Cvs) || is_all_or(ChoosePayment::Barcode);
+        let credit_group = is_all_or(ChoosePayment::Credit);
+        let credit_only = p.choose_payment == ChoosePayment::Credit;
+
+        let group = |name: &str| -> Error {
+            Error::Validation(format!(
+                "{name} is only valid with its ChoosePayment group (the official SDK would not send it)."
+            ))
+        };
+        if p.expire_date.is_some() && !atm_group {
+            return Err(group("ExpireDate"));
+        }
+        let cvs_fields_set = p.store_expire_date.is_some()
+            || p.desc_1.is_some()
+            || p.desc_2.is_some()
+            || p.desc_3.is_some()
+            || p.desc_4.is_some();
+        if cvs_fields_set && !cvs_barcode_group {
+            return Err(group(
+                "a CVS/BARCODE extend field (StoreExpireDate/Desc_1..4)",
+            ));
+        }
+        if (p.payment_info_url.is_some() || p.client_redirect_url.is_some())
+            && !atm_group
+            && !cvs_barcode_group
+        {
+            return Err(group(
+                "PaymentInfoURL/ClientRedirectURL (ATM/CVS/BARCODE groups)",
+            ));
+        }
+
+        // --- 信用卡延伸參數 (三擇一) ---
+        let one_off = p.redeem.is_some() || p.union_pay.is_some(); // 一次付清
+        let installment = p.credit_installment.is_some(); // 分期付款
+        let periodic = p.period_amount.is_some()
+            || p.period_type.is_some()
+            || p.frequency.is_some()
+            || p.exec_times.is_some()
+            || p.period_return_url.is_some(); // 定期定額
+        if (p.binding_card.is_some() || p.merchant_member_id.is_some()) && !credit_group {
+            return Err(group(
+                "a Credit bind-card field (BindingCard/MerchantMemberID)",
+            ));
+        }
+        if p.language.is_some() && !credit_only {
+            return Err(group("Language"));
+        }
+        if (one_off || installment || periodic) && !credit_group {
+            return Err(group(
+                "a Credit payment-plan field (Redeem/UnionPay/CreditInstallment/Period*)",
+            ));
+        }
+        // The official SDK picks one plan group via an if/elif chain; setting
+        // more than one silently signs the mixture. Reject it instead.
+        if [one_off, installment, periodic]
+            .iter()
+            .filter(|b| **b)
+            .count()
+            > 1
+        {
+            return Err(Error::Validation(
+                "choose only one of Redeem/UnionPay (一次付清), CreditInstallment (分期付款), or the Period* group (定期定額).".into(),
+            ));
+        }
+
+        // --- 電子發票延伸參數 ---
+        let mut m: HashMap<String, String> = HashMap::new();
+        m.insert("MerchantID".to_owned(), self.merchant_id.clone());
+        m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
+        insert_optional_str(&mut m, "StoreID", &p.store_id);
+        m.insert(
+            "MerchantTradeDate".to_owned(),
+            p.merchant_trade_date.clone(),
+        );
+        m.insert("PaymentType".to_owned(), p.payment_type.clone());
+        m.insert("TotalAmount".to_owned(), p.total_amount.to_string());
+        m.insert("TradeDesc".to_owned(), p.trade_desc.clone());
+        m.insert("ItemName".to_owned(), p.item_name.clone());
+        m.insert("ReturnURL".to_owned(), p.return_url.clone());
+        m.insert(
+            "ChoosePayment".to_owned(),
+            p.choose_payment.as_str().to_owned(),
+        );
+        insert_optional_str(&mut m, "ClientBackURL", &p.client_back_url);
+        insert_optional_str(&mut m, "ItemURL", &p.item_url);
+        insert_optional_str(&mut m, "Remark", &p.remark);
+        insert_optional_str(&mut m, "ChooseSubPayment", &p.choose_sub_payment);
+        insert_optional_str(&mut m, "OrderResultURL", &p.order_result_url);
+        insert_optional_str(&mut m, "NeedExtraPaidInfo", &p.need_extra_paid_info);
+        insert_optional_str(&mut m, "DeviceSource", &p.device_source);
+        insert_optional_str(&mut m, "IgnorePayment", &p.ignore_payment);
+        insert_optional_str(&mut m, "PlatformID", &p.platform_id);
+        insert_optional_str(&mut m, "CustomField1", &p.custom_field1);
+        insert_optional_str(&mut m, "CustomField2", &p.custom_field2);
+        insert_optional_str(&mut m, "CustomField3", &p.custom_field3);
+        insert_optional_str(&mut m, "CustomField4", &p.custom_field4);
+        m.insert("EncryptType".to_owned(), p.encrypt_type.to_string());
+
+        if atm_group {
+            insert_optional_int(&mut m, "ExpireDate", &p.expire_date);
+            insert_optional_str(&mut m, "PaymentInfoURL", &p.payment_info_url);
+            insert_optional_str(&mut m, "ClientRedirectURL", &p.client_redirect_url);
+        }
+        if cvs_barcode_group {
+            insert_optional_int(&mut m, "StoreExpireDate", &p.store_expire_date);
+            insert_optional_str(&mut m, "Desc_1", &p.desc_1);
+            insert_optional_str(&mut m, "Desc_2", &p.desc_2);
+            insert_optional_str(&mut m, "Desc_3", &p.desc_3);
+            insert_optional_str(&mut m, "Desc_4", &p.desc_4);
+        }
+        if credit_group {
+            insert_optional_int(&mut m, "BindingCard", &p.binding_card);
+            insert_optional_str(&mut m, "MerchantMemberID", &p.merchant_member_id);
+            if let Some(plan) = credit_plan_pairs(p) {
+                for (k, v) in plan {
+                    m.insert(k, v);
+                }
+            }
+        }
+
+        if let Some(inv) = &p.invoice {
+            validate_invoice(inv)?;
+            m.insert(
+                "InvoiceMark".to_owned(),
+                crate::payment::INVOICE_MARK.to_owned(),
+            );
+            m.insert("RelateNumber".to_owned(), query_escape(&inv.relate_number));
+            insert_optional_str(&mut m, "CustomerID", &inv.customer_id);
+            insert_optional_str(&mut m, "CustomerIdentifier", &inv.customer_identifier);
+            // The six free-text invoice fields are urlencoded before signing
+            // (the official SDK does too), but NOT lowercased — see README.
+            insert_escaped(&mut m, "CustomerName", &inv.customer_name);
+            insert_escaped(&mut m, "CustomerAddr", &inv.customer_addr);
+            insert_optional_str(&mut m, "CustomerPhone", &inv.customer_phone);
+            insert_escaped(&mut m, "CustomerEmail", &inv.customer_email);
+            insert_optional_str(&mut m, "ClearanceMark", &inv.clearance_mark);
+            m.insert("TaxType".to_owned(), inv.tax_type.clone());
+            insert_optional_str(&mut m, "CarruerType", &inv.carruer_type);
+            insert_optional_str(&mut m, "CarruerNum", &inv.carruer_num);
+            m.insert("Donation".to_owned(), inv.donation.clone());
+            insert_optional_str(&mut m, "LoveCode", &inv.love_code);
+            m.insert("Print".to_owned(), inv.print.clone());
+            m.insert(
+                "InvoiceItemName".to_owned(),
+                query_escape(&inv.invoice_item_name),
+            );
+            m.insert(
+                "InvoiceItemCount".to_owned(),
+                inv.invoice_item_count.clone(),
+            );
+            m.insert(
+                "InvoiceItemWord".to_owned(),
+                query_escape(&inv.invoice_item_word),
+            );
+            m.insert(
+                "InvoiceItemPrice".to_owned(),
+                inv.invoice_item_price.clone(),
+            );
+            insert_optional_str(&mut m, "InvoiceItemTaxType", &inv.invoice_item_tax_type);
+            insert_escaped(&mut m, "InvoiceRemark", &inv.invoice_remark);
+            m.insert("DelayDay".to_owned(), inv.delay_day.to_string());
+            m.insert("InvType".to_owned(), inv.inv_type.clone());
+        }
+
+        for (k, v) in &p.extra {
+            if m.contains_key(k) || k == "CheckMacValue" {
+                return Err(Error::Validation(format!(
+                    "extra parameter {k:?} collides with a modeled field"
+                )));
+            }
+            m.insert(k.clone(), v.clone());
+        }
+
+        let mac = self.generate_check_value(&m)?;
+        m.insert("CheckMacValue".to_owned(), mac);
+
+        let mut pairs: Vec<(String, String)> = m.into_iter().collect();
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        let action = format!("{}AioCheckOut/V5", self.payment_base_url());
+        Ok(AioCheckOut {
+            params: pairs,
+            action,
+        })
+    }
+}
+
+/// The active Credit plan group's wire pairs (Python's if/elif chain over
+/// `__CREDIT_EXTEND_PARAMETERS_3/4/5`).
+fn credit_plan_pairs(p: &AioCheckOutParams) -> Option<Vec<(String, String)>> {
+    if p.redeem.is_some() || p.union_pay.is_some() {
+        let mut v = Vec::new();
+        insert_optional_str_map(&mut v, "Redeem", &p.redeem);
+        insert_optional_int_map(&mut v, "UnionPay", &p.union_pay);
+        return Some(v);
+    }
+    if let Some(installment) = &p.credit_installment {
+        return Some(vec![("CreditInstallment".to_owned(), installment.clone())]);
+    }
+    if p.period_amount.is_some()
+        || p.period_type.is_some()
+        || p.frequency.is_some()
+        || p.exec_times.is_some()
+        || p.period_return_url.is_some()
+    {
+        let mut v = Vec::new();
+        insert_optional_int_map(&mut v, "PeriodAmount", &p.period_amount);
+        insert_optional_str_map(&mut v, "PeriodType", &p.period_type);
+        insert_optional_int_map(&mut v, "Frequency", &p.frequency);
+        insert_optional_int_map(&mut v, "ExecTimes", &p.exec_times);
+        insert_optional_str_map(&mut v, "PeriodReturnURL", &p.period_return_url);
+        return Some(v);
+    }
+    None
+}
+
+fn insert_optional_str_map(v: &mut Vec<(String, String)>, key: &str, value: &Option<String>) {
+    if let Some(s) = value {
+        if !s.is_empty() {
+            v.push((key.to_owned(), s.clone()));
+        }
+    }
+}
+
+fn insert_optional_int_map(v: &mut Vec<(String, String)>, key: &str, value: &Option<i64>) {
+    if let Some(n) = value {
+        if *n >= 0 {
+            v.push((key.to_owned(), n.to_string()));
+        }
+    }
+}
+
+/// Free-text invoice fields: urlencoded (Python `quote_plus` semantics via
+/// [`query_escape`]) but NOT lowercased — the official SDK's `.lower()`
+/// corrupts ASCII letter case in customer data, and ECPay url-decodes the
+/// value either way.
+fn insert_escaped(m: &mut HashMap<String, String>, key: &str, value: &Option<String>) {
+    if let Some(v) = value {
+        if !v.is_empty() {
+            m.insert(key.to_owned(), query_escape(v));
+        }
+    }
+}
+
+fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
+    required_str("RelateNumber", &inv.relate_number, 30)?;
+    optional_str("CustomerID", &inv.customer_id, 20)?;
+    optional_str("CustomerIdentifier", &inv.customer_identifier, 8)?;
+    optional_str("CustomerName", &inv.customer_name, 30)?;
+    optional_str("CustomerAddr", &inv.customer_addr, 200)?;
+    optional_str("CustomerPhone", &inv.customer_phone, 20)?;
+    optional_str("CustomerEmail", &inv.customer_email, 200)?;
+    optional_str("ClearanceMark", &inv.clearance_mark, 1)?;
+    required_str("TaxType", &inv.tax_type, 1)?;
+    optional_str("CarruerType", &inv.carruer_type, 1)?;
+    optional_str("CarruerNum", &inv.carruer_num, 64)?;
+    required_str("Donation", &inv.donation, 1)?;
+    optional_str("LoveCode", &inv.love_code, 7)?;
+    required_str("Print", &inv.print, 1)?;
+    required_str("InvoiceItemName", &inv.invoice_item_name, 100)?;
+    required_str("InvoiceItemCount", &inv.invoice_item_count, usize::MAX)?;
+    required_str("InvoiceItemWord", &inv.invoice_item_word, usize::MAX)?;
+    required_str("InvoiceItemPrice", &inv.invoice_item_price, usize::MAX)?;
+    optional_str("InvoiceItemTaxType", &inv.invoice_item_tax_type, usize::MAX)?;
+    optional_str("InvoiceRemark", &inv.invoice_remark, usize::MAX)?;
+    required_str("InvType", &inv.inv_type, 2)?;
+
+    // 該參數有值時，請帶固定長度為數字 8 碼
+    let customer_identifier = inv.customer_identifier.as_deref().unwrap_or("");
+    if !customer_identifier.is_empty() && py_len(customer_identifier) != 8 {
+        return Err(Error::Validation(
+            "CustomerIdentifier have to fill fixed length of 8 digits.".into(),
+        ));
+    }
+    // 若統一編號 CustomerIdentifier 有值時，不可以有載具
+    let carruer_type = inv.carruer_type.as_deref().unwrap_or("");
+    if !customer_identifier.is_empty() && !carruer_type.is_empty() {
+        return Err(Error::Validation(
+            "CarruerType do not fill any value, when CustomerIdentifier have value.".into(),
+        ));
+    }
+    // 統一編號 CustomerIdentifier 有值時，一定要列印
+    if !customer_identifier.is_empty() && inv.print == "0" {
+        return Err(Error::Validation(
+            "Print have to fill \"1\", when CustomerIdentifier have value.".into(),
+        ));
+    }
+    // 統一編號 CustomerIdentifier 有值時，Donation 要為 '0'... (SDK 訊息寫 "0"，判斷為不可捐贈 '1')
+    if !customer_identifier.is_empty() && inv.donation == "1" {
+        return Err(Error::Validation(
+            "Donation have to fill \"0\", when CustomerIdentifier have value.".into(),
+        ));
+    }
+
+    // 當列印註記 Print 為 1 (列印)時，CustomerName 與 CustomerAddr 必須有值
+    if inv.print == "1" {
+        if inv.customer_name.as_deref().unwrap_or("").is_empty() {
+            return Err(Error::Validation("CustomerName have to fill value.".into()));
+        }
+        if inv.customer_addr.as_deref().unwrap_or("").is_empty() {
+            return Err(Error::Validation("CustomerAddr have to fill value.".into()));
+        }
+        if !carruer_type.is_empty() {
+            return Err(Error::Validation(
+                "CarruerType do not fill any value, when Print is \"1\".".into(),
+            ));
+        }
+    }
+
+    // 當客戶電子信箱為空字串時，CustomerPhone 必須有值；反之亦然
+    // (the official SDK has two redundant checks that net to this rule)
+    if inv.customer_email.as_deref().unwrap_or("").is_empty()
+        && inv.customer_phone.as_deref().unwrap_or("").is_empty()
+    {
+        return Err(Error::Validation(
+            "CustomerPhone have to fill value.".into(),
+        ));
+    }
+
+    // 當 Donation 為 '1' 時，Print 要為 '0'，且 LoveCode 須有值
+    if inv.donation == "1" {
+        if inv.print == "1" {
+            return Err(Error::Validation(
+                "Print have to fill \"0\", when Donation is \"1\".".into(),
+            ));
+        }
+        if inv.love_code.as_deref().unwrap_or("").is_empty() {
+            return Err(Error::Validation(
+                "LoveCode have to fill value, when Donation is \"1\".".into(),
+            ));
+        }
+    }
+    if let Some(love_code) = &inv.love_code {
+        let len = py_len(love_code);
+        if !(3..=7).contains(&len) {
+            return Err(Error::Validation(
+                "LoveCode have to fill fixed length of 3~7 digits.".into(),
+            ));
+        }
+    }
+    Ok(())
+}

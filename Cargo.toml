@@ -1,0 +1,28 @@
+[package]
+name = "ecpay"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "ECPay (綠界科技) All-in-One payment SDK in Rust — a port of the official ECPayAIO_Python SDK, plus the B2C e-invoice AES-JSON APIs"
+license = "MIT"
+readme = "README.md"
+keywords = ["ecpay", "payment", "invoice", "taiwan", "fintech"]
+categories = ["api-bindings", "finance"]
+
+[dependencies]
+aes = "0.9"
+base64 = "0.22"
+encoding_rs = "0.8"
+md-5 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls-native-roots",
+    "charset",
+    "json",
+] }
+ryu = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
