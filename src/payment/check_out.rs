@@ -28,7 +28,7 @@ pub struct AioCheckOutParams {
     // --- 訂單基本參數 (ORDER_REQUIRED_PARAMETERS) ---
     /// 特店交易編號。特店產生不重複的交易編號(最大 20 字元,不可與已成交訂單重複)。
     pub merchant_trade_no: String,
-    /// 特店旗下店舖代號(最大 20 字元)。
+    /// 特店旗下店舖代號(最大 10 字元,英數大小寫混合)。
     pub store_id: Option<String>,
     /// 特店交易時間,格式為 yyyy/MM/dd HH:mm:ss(最大 20 字元)。
     pub merchant_trade_date: String,
@@ -38,7 +38,8 @@ pub struct AioCheckOutParams {
     pub total_amount: i64,
     /// 交易描述(最大 200 字元)。
     pub trade_desc: String,
-    /// 商品名稱,多筆以 `#` 分隔(最大 200 字元)。
+    /// 商品名稱,多筆以 `#` 分隔(最大 400 字元;超過會被截斷,易生亂碼導致
+    /// 檢查碼錯誤、掉單 — 見官方「產生訂單」規格)。
     pub item_name: String,
     /// 付款結果通知 URL(最大 200 字元)。
     pub return_url: String,
@@ -101,7 +102,8 @@ pub struct AioCheckOutParams {
     pub binding_card: Option<i64>,
     /// 特店會員編號(最大 30 字元),使用記憶卡號功能時必填。
     pub merchant_member_id: Option<String>,
-    /// 語系設定(Credit 限定,最大 3 字元),預設 `zh-TW` 由綠界處理。
+    /// 語系設定 `CHT`(預設)/`ENG`/`KOR`/`JPN`/`CHI`(最大 3 字元;
+    /// 現行規格為所有付款方式的共同選填參數)。
     pub language: Option<String>,
     /// 一次付清:紅利折抵 `Y`/`N`(最大 1 字元)。
     pub redeem: Option<String>,
@@ -363,10 +365,10 @@ impl Ecpay {
         required_str("MerchantTradeNo", &p.merchant_trade_no, 20)?;
         required_str("MerchantTradeDate", &p.merchant_trade_date, 20)?;
         required_str("TradeDesc", &p.trade_desc, 200)?;
-        required_str("ItemName", &p.item_name, 200)?;
+        required_str("ItemName", &p.item_name, 400)?;
         required_str("ReturnURL", &p.return_url, 200)?;
         required_str("PaymentType", &p.payment_type, 20)?;
-        optional_str("StoreID", &p.store_id, 20)?;
+        optional_str("StoreID", &p.store_id, 10)?;
         optional_str("ClientBackURL", &p.client_back_url, 200)?;
         optional_str("ItemURL", &p.item_url, 200)?;
         optional_str("Remark", &p.remark, 100)?;
@@ -401,7 +403,6 @@ impl Ecpay {
         let atm_group = is_all_or(ChoosePayment::Atm);
         let cvs_barcode_group = is_all_or(ChoosePayment::Cvs) || is_all_or(ChoosePayment::Barcode);
         let credit_group = is_all_or(ChoosePayment::Credit);
-        let credit_only = p.choose_payment == ChoosePayment::Credit;
 
         let group = |name: &str| -> Error {
             Error::Validation(format!(
@@ -442,9 +443,6 @@ impl Ecpay {
             return Err(group(
                 "a Credit bind-card field (BindingCard/MerchantMemberID)",
             ));
-        }
-        if p.language.is_some() && !credit_only {
-            return Err(group("Language"));
         }
         if (one_off || installment || periodic) && !credit_group {
             return Err(group(
@@ -539,9 +537,9 @@ impl Ecpay {
                 }
             }
         }
-        if credit_only {
-            insert_optional_str(&mut m, "Language", &p.language);
-        }
+        // Language (CHT/ENG/KOR/JPN/CHI) is a common optional param in the
+        // current spec, valid for every payment method.
+        insert_optional_str(&mut m, "Language", &p.language);
 
         if p.invoice_mark.is_some() && !mark.is_empty() {
             m.insert("InvoiceMark".to_owned(), mark.to_owned());

@@ -159,7 +159,9 @@ pub mod carruer_type {
     pub const CELLPHONE: &str = "3"; // 買受人手機條碼
 }
 
-/// 電子發票捐贈註記 (`Donation`)
+/// 電子發票捐贈註記 (`Donation`) — **僅適用 AIO 訂單附帶發票** (InvoiceMark)
+/// 的舊版語彙,與 B2C 電子發票 API 用的 `'0'`(不捐贈)/`'1'`(捐贈)不同;
+/// 兩套不可混用。
 pub mod donation {
     pub const NO: &str = "2"; // 若為不捐贈或統一編號 [CustomerIdentifier] 有值時, 不捐贈
     pub const YES: &str = "1"; // 捐贈
@@ -172,9 +174,12 @@ pub mod print_mark {
 }
 
 /// 通關方式, 當課稅類別 TaxType 為 2 (零稅率)時 (`ClearanceMark`)
+/// ⚠ 官方文件間存在歧義:AIO 世代文件(官方 Python SDK)記 `'1'`=經海關出口、
+/// `'2'`=非經海關出口;現行 B2C 發票指南記 `'1'`=非經海關出口、`'2'`=經海關出口。
+/// 上線前請以你的應用場景向綠界確認;此常數依 AIO/Python SDK 語彙。
 pub mod clearance_mark {
-    pub const YES: &str = "1"; // 經海關出口
-    pub const NO: &str = "2"; // 非經海關出口
+    pub const YES: &str = "1"; // 經海關出口(AIO 世代文件;B2C 發票指南相反,見上)
+    pub const NO: &str = "2"; // 非經海關出口(AIO 世代文件;B2C 發票指南相反,見上)
 }
 
 /// 課稅類別 (`TaxType`)

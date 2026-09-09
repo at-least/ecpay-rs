@@ -35,6 +35,15 @@ fn test_encrypt_official_vectors() {
             want: "XeEOdHpTRvxKEqs/JD9RSd16s7VtpyWVCN6AV44pKTW3DVa6yI7vKmjBRp2eulDhXoru/qBqFDBH3fEqlkMn3bbJfJBfGAq+v+SvttutYnc=",
         },
         PrimitiveVector {
+            // alphabetical-order JSON keys (Go map / Java HashMap form);
+            // vector from ECPay's own AI-skill test-vectors/aes-encryption.json
+            name: "alphabetical-order",
+            key: INV_KEY,
+            iv: INV_IV,
+            url_encoded: "%7B%22BarCode%22%3A%22%2F1234567%22%2C%22MerchantID%22%3A%222000132%22%7D",
+            want: "r0JSyF9wVmywUav725b3rdJs3xp/ekrC/7PGb18zhKyXkPsamV9l4rPnBkaaraPcHtMSwrmSPP3wuS7b8g/aAKGs0iGiknpgpbdXKXvFrYM=",
+        },
+        PrimitiveVector {
             // special chars: ! * ' ( ) ~
             name: "special-chars",
             key: INV_KEY,

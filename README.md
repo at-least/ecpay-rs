@@ -171,6 +171,22 @@ println!("RtnMsg = {}", result["RtnMsg"]);
 另外 `gen_html_post_form` 的屬性值加了 HTML escape(官方版遇 `"` 會壞掉
 form,也是注入點)。
 
+## 規格對照(官方 AI-skill 驗證)
+
+本函式庫已對照 ECPay 官方維護的 [ECPay-API-Skill](https://github.com/ECPay/ECPay-API-Skill)
+(`test-vectors/` 與 developers.ecpay.com.tw 即時規格)完成審查:
+
+- `check_mac_value` 通過官方全部 CheckMacValue 向量(SHA-256、MD5、`'`、
+  `~` 特殊字元)— 官方向量明文 `~` 須編碼為 `%7e`,證實「差異 1」是
+  **跟隨官方後端**、官方 Python SDK 才是偏離方。
+- AES 加密通過官方 AES-128-CBC 向量(含插入序與字母序 JSON key 兩種)。
+- 依現行「產生訂單」規格修正:`ItemName` 上限 400 字元、`StoreID` 上限
+  10 字元、`Language` 為所有付款方式的共同選填參數(舊 SDK 限定 Credit)。
+- ⚠ 官方文件歧義:`Donation` 在 AIO 訂單(舊版)用 `'1'/'2'`、B2C 發票
+  API 用 `'0'/'1'`;`ClearanceMark` 的 1/2 意義在 AIO 世代文件與現行 B2C
+  指南正好相反。本函式庫 AIO 常數依官方 Python SDK,B2C 發票欄位為自由
+  字串不做強制 — 上線前請以你的場景向綠界確認。
+
 ## 開發
 
 ```bash
@@ -238,7 +254,11 @@ See the table above for the full API mapping, and
 
 ## Differences from the official Python SDK
 
-Documented and pinned by tests (`tests/python_conformance.rs`):
+Documented and pinned by tests (`tests/python_conformance.rs`); the
+CheckMacValue implementation also passes every vector in ECPay's own
+[ECPay-API-Skill](https://github.com/ECPay/ECPay-API-Skill) repository
+(SHA-256, MD5, `'`, `~` — the official vectors escape `~` to `%7e`,
+confirming this crate follows ECPay's backend):
 
 1. CheckMacValue escapes `~` as `%7e` (the .NET contract ECPay's server
    hashes); the Python SDK hashes a literal `~` and mismatches on such params.
