@@ -294,7 +294,7 @@ pub struct CheckBarcodeOutput {
     pub rtn_code: i64, // 回應代碼 1 為成功，其餘為失敗。
     #[serde(rename = "RtnMsg")]
     pub rtn_msg: String, // 回應訊息
-    /// 若回應代碼[RtnCode]為 1(成功)時，請再判斷此欄位值 Y:存在 N:不存在
+    /// 若回應代碼 RtnCode 為 1(成功)時，請再判斷此欄位值 Y:存在 N:不存在
     #[serde(rename = "IsExist")]
     pub is_exist: String, // 手機條碼是否存在
 }

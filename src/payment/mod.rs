@@ -171,7 +171,7 @@ pub mod print_mark {
     pub const YES: &str = "1"; // 若為列印或統一編號 [CustomerIdentifier] 有值時, 列印
 }
 
-/// 通關方式, 當課稅類別 [TaxType] 為 2 (零稅率)時 (`ClearanceMark`)
+/// 通關方式, 當課稅類別 TaxType 為 2 (零稅率)時 (`ClearanceMark`)
 pub mod clearance_mark {
     pub const YES: &str = "1"; // 經海關出口
     pub const NO: &str = "2"; // 非經海關出口
