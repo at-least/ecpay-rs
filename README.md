@@ -187,6 +187,20 @@ form,也是注入點)。
   指南正好相反。本函式庫 AIO 常數依官方 Python SDK,B2C 發票欄位為自由
   字串不做強制 — 上線前請以你的場景向綠界確認。
 
+## Staging 煙霧測試
+
+`tests/stage_smoke.rs` 會打**真實的 ECPay 測試環境**(`payment-stage.ecpay.com.tw`,
+使用官方公開測試帳號 3002607),預設 `#[ignore]`,離線套件不受影響:
+
+```bash
+cargo test --test stage_smoke -- --ignored --nocapture
+```
+
+實測結果(2026-09):QueryTradeInfo 往返 MAC 驗證、AioCheckOut/V5 接受
+本函式庫簽名並渲染完整付款選擇頁、篡改 MAC 得到官方 10200073
+CheckMacValue Error 頁(負向對照)、QueryCreditCardPeriodInfo / DoAction /
+QueryTrade(V2) / vendor 對帳端點皆可達。
+
 ## 開發
 
 ```bash
