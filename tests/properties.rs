@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use proptest::collection::{hash_map, vec};
 use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 use ecpay::{check_mac_value, decrypt, encrypt, hash_mac, url_encode};
 
@@ -101,7 +101,7 @@ proptest! {
         let idx = byte_index % mac.len();
         let original = flipped.as_bytes()[idx];
         let candidate = replacement.as_bytes()[0];
-        if candidate.to_ascii_uppercase() == original.to_ascii_uppercase() {
+        if candidate.eq_ignore_ascii_case(&original) {
             // Chose the same digit: flip deterministically to the other nibble.
             let other = if original == b'0' { b'1' } else { b'0' };
             flipped.replace_range(idx..idx + 1, &(other as char).to_string());
@@ -229,10 +229,9 @@ proptest! {
         let original = ciphertext.as_bytes()[idx];
         let replacement = if original == b'A' { 'B' } else { 'A' };
         ciphertext.replace_range(idx..idx + 1, &replacement.to_string());
-        match decrypt(&ciphertext, key, iv) {
-            Ok(recovered) => prop_assert_ne!(recovered, plaintext),
-            Err(_) => {} // rejected as bad padding/base64 — also acceptable
-        }
+        if let Ok(recovered) = decrypt(&ciphertext, key, iv) {
+            prop_assert_ne!(recovered, plaintext);
+        } // else: rejected as bad padding/base64 — also acceptable
     }
 
     /// check_mac_value rejects unknown EncryptTypes instead of signing with
