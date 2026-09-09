@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use proptest::collection::{hash_map, vec};
 use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 use ecpay::{check_mac_value, decrypt, encrypt, hash_mac, url_encode};
 
