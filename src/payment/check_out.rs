@@ -23,7 +23,7 @@ use crate::Ecpay;
 /// The All-in-One checkout parameters (`AioCheckOutParam`). Required fields
 /// are non-`Option`; optional fields are `None`-absent and only sent when
 /// set (strings non-empty, ints `>= 0`, exactly like the SDK's filter stage).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AioCheckOutParams {
     // --- 訂單基本參數 (ORDER_REQUIRED_PARAMETERS) ---
     /// 特店交易編號。特店產生不重複的交易編號(最大 20 字元,不可與已成交訂單重複)。
@@ -72,6 +72,9 @@ pub struct AioCheckOutParams {
     pub custom_field4: Option<String>,
     /// CheckMacValue 加密類別:1 = SHA-256(預設)、0 = MD5(ECPay 已淘汰)。
     pub encrypt_type: i64,
+    /// 電子發票開立註記:`Y` 或 `N`(官方 sample 明確帶 `N`)。`None` 時不送出;
+    /// [`Self::invoice`] 有值而此欄位為 `None` 時自動帶 `Y`。
+    pub invoice_mark: Option<String>,
 
     // --- ATM 延伸參數 (ALL 或 ATM) ---
     /// ATM 付款有效繳費期限(天),最小 1 天、最大 60 天。
@@ -125,6 +128,61 @@ pub struct AioCheckOutParams {
     /// (ECPay adds fields over time). These are signed and sent as-is; a key
     /// colliding with a modeled field is a validation error.
     pub extra: BTreeMap<String, String>,
+}
+
+impl Default for AioCheckOutParams {
+    /// The official SDK's defaults: PaymentType=aio and EncryptType=1 are
+    /// always present (`create_default_dict` + schema defaults); everything
+    /// else starts absent.
+    fn default() -> Self {
+        Self {
+            merchant_trade_no: Default::default(),
+            store_id: Default::default(),
+            merchant_trade_date: Default::default(),
+            payment_type: "aio".to_owned(),
+            total_amount: Default::default(),
+            trade_desc: Default::default(),
+            item_name: Default::default(),
+            return_url: Default::default(),
+            choose_payment: Default::default(),
+            client_back_url: Default::default(),
+            item_url: Default::default(),
+            remark: Default::default(),
+            choose_sub_payment: Default::default(),
+            order_result_url: Default::default(),
+            need_extra_paid_info: Default::default(),
+            device_source: Default::default(),
+            ignore_payment: Default::default(),
+            platform_id: Default::default(),
+            custom_field1: Default::default(),
+            custom_field2: Default::default(),
+            custom_field3: Default::default(),
+            custom_field4: Default::default(),
+            encrypt_type: 1,
+            invoice_mark: Default::default(),
+            expire_date: Default::default(),
+            payment_info_url: Default::default(),
+            client_redirect_url: Default::default(),
+            store_expire_date: Default::default(),
+            desc_1: Default::default(),
+            desc_2: Default::default(),
+            desc_3: Default::default(),
+            desc_4: Default::default(),
+            binding_card: Default::default(),
+            merchant_member_id: Default::default(),
+            language: Default::default(),
+            redeem: Default::default(),
+            union_pay: Default::default(),
+            credit_installment: Default::default(),
+            period_amount: Default::default(),
+            period_type: Default::default(),
+            frequency: Default::default(),
+            exec_times: Default::default(),
+            period_return_url: Default::default(),
+            invoice: Default::default(),
+            extra: Default::default(),
+        }
+    }
 }
 
 /// 電子發票延伸參數 (`INVOICE_EXTEND_PARAMETERS`)。欄位規則與官方 SDK 的
@@ -261,7 +319,7 @@ fn required_str(name: &str, v: &str, max: usize) -> Result<()> {
         return Err(Error::Validation(format!("{name} content is required.")));
     }
     if py_len(v) > max {
-        return Err(Error::Validation(format!("{name} max length is {max}.")));
+        return Err(Error::Validation(format!("{name} max langth is {max}.")));
     }
     Ok(())
 }
@@ -269,7 +327,7 @@ fn required_str(name: &str, v: &str, max: usize) -> Result<()> {
 fn optional_str(name: &str, v: &Option<String>, max: usize) -> Result<()> {
     if let Some(v) = v {
         if py_len(v) > max {
-            return Err(Error::Validation(format!("{name} max length is {max}.")));
+            return Err(Error::Validation(format!("{name} max langth is {max}.")));
         }
     }
     Ok(())
@@ -407,6 +465,23 @@ impl Ecpay {
         }
 
         // --- 電子發票延伸參數 ---
+        // InvoiceMark: `Y` 開立發票 / `N` 不開立 (official samples send `N`
+        // explicitly); an invoice struct with no mark auto-fills `Y`.
+        let mark = p.invoice_mark.as_deref().unwrap_or("");
+        optional_str("InvoiceMark", &p.invoice_mark, 1)?;
+        match (&p.invoice, mark) {
+            (Some(_), "N") => {
+                return Err(Error::Validation(
+                    "InvoiceMark=N conflicts with the invoice fields; drop one of them.".into(),
+                ))
+            }
+            (None, "Y") => {
+                return Err(Error::Validation(
+                    "InvoiceMark=Y requires the invoice fields (InvoiceExtend).".into(),
+                ))
+            }
+            _ => {}
+        }
         let mut m: HashMap<String, String> = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
@@ -441,8 +516,6 @@ impl Ecpay {
 
         if atm_group {
             insert_optional_int(&mut m, "ExpireDate", &p.expire_date);
-            insert_optional_str(&mut m, "PaymentInfoURL", &p.payment_info_url);
-            insert_optional_str(&mut m, "ClientRedirectURL", &p.client_redirect_url);
         }
         if cvs_barcode_group {
             insert_optional_int(&mut m, "StoreExpireDate", &p.store_expire_date);
@@ -450,6 +523,12 @@ impl Ecpay {
             insert_optional_str(&mut m, "Desc_2", &p.desc_2);
             insert_optional_str(&mut m, "Desc_3", &p.desc_3);
             insert_optional_str(&mut m, "Desc_4", &p.desc_4);
+        }
+        // PaymentInfoURL/ClientRedirectURL are shared by the ATM and the
+        // CVS/BARCODE groups.
+        if atm_group || cvs_barcode_group {
+            insert_optional_str(&mut m, "PaymentInfoURL", &p.payment_info_url);
+            insert_optional_str(&mut m, "ClientRedirectURL", &p.client_redirect_url);
         }
         if credit_group {
             insert_optional_int(&mut m, "BindingCard", &p.binding_card);
@@ -461,13 +540,20 @@ impl Ecpay {
             }
         }
 
+        if p.invoice_mark.is_some() && !mark.is_empty() {
+            m.insert("InvoiceMark".to_owned(), mark.to_owned());
+        }
+
         if let Some(inv) = &p.invoice {
             validate_invoice(inv)?;
-            m.insert(
-                "InvoiceMark".to_owned(),
-                crate::payment::INVOICE_MARK.to_owned(),
-            );
-            m.insert("RelateNumber".to_owned(), query_escape(&inv.relate_number));
+            if mark != "Y" {
+                // invoice present with no explicit mark: auto-fill Y.
+                m.insert(
+                    "InvoiceMark".to_owned(),
+                    crate::payment::INVOICE_MARK.to_owned(),
+                );
+            }
+            m.insert("RelateNumber".to_owned(), inv.relate_number.clone());
             insert_optional_str(&mut m, "CustomerID", &inv.customer_id);
             insert_optional_str(&mut m, "CustomerIdentifier", &inv.customer_identifier);
             // The six free-text invoice fields are urlencoded before signing

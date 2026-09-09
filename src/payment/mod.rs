@@ -344,7 +344,8 @@ fn required_str(name: &str, v: &str, max: usize) -> Result<()> {
         return Err(Error::Validation(format!("{name} content is required.")));
     }
     if v.chars().count() > max {
-        return Err(Error::Validation(format!("{name} max length is {max}.")));
+        // "langth" preserves the official SDK's exception message verbatim.
+        return Err(Error::Validation(format!("{name} max langth is {max}.")));
     }
     Ok(())
 }
@@ -352,7 +353,8 @@ fn required_str(name: &str, v: &str, max: usize) -> Result<()> {
 fn optional_str(name: &str, v: &Option<String>, max: usize) -> Result<()> {
     if let Some(v) = v {
         if v.chars().count() > max {
-            return Err(Error::Validation(format!("{name} max length is {max}.")));
+            // "langth" preserves the official SDK's exception message verbatim.
+            return Err(Error::Validation(format!("{name} max langth is {max}.")));
         }
     }
     Ok(())
