@@ -237,7 +237,8 @@ proptest! {
     /// check_mac_value rejects unknown EncryptTypes instead of signing with
     /// the wrong algorithm (the Python SDK silently emits an empty MAC).
     #[test]
-    fn unsupported_encrypt_types_are_rejected(params in params_strategy(), t in 2i64..100) {
+    fn unsupported_encrypt_types_are_rejected(params in params_strategy(), t in -100i64..100) {
+        prop_assume!(t != 0 && t != 1);
         let got = check_mac_value(&params, KEY, IV, t);
         prop_assert!(matches!(got, Err(ecpay::Error::UnsupportedEncryptType(_))));
     }

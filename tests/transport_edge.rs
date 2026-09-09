@@ -43,32 +43,39 @@ async fn oversized_response_bodies_are_rejected() {
         .await
         .expect_err("a 2 MiB response must be rejected, never silently truncated");
     assert!(
-        matches!(
-            err,
-            ecpay::Error::CheckMacValueMismatch | ecpay::Error::Json(_)
-        ),
-        "got {err:?}"
+        matches!(&err, ecpay::Error::Message(m) if m.contains("1 MiB safety limit")),
+        "the cap must reject the body up front, got {err:?}"
     );
 }
 
 /// A 302 on a signed API POST must NOT be followed: ECPay's endpoints never
 /// redirect, and following one would replay the signed payload to an
-/// attacker-chosen host.
+/// attacker-chosen host. The mock emits a REAL `Location` header (reqwest
+/// only redirects on one, so a Location-less 302 would pass under the
+/// default policy too and prove nothing).
 #[tokio::test]
 async fn redirects_are_not_followed() {
     let hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hit2 = hit.clone();
-    let srv = spawn_http_server(move |path, _body| {
+    let srv = common::spawn_http_server_raw(move |path, _body| {
         if path.starts_with("/target") {
             hit2.store(true, std::sync::atomic::Ordering::SeqCst);
-            (200, "text/plain".to_owned(), b"leaked".to_vec())
+            (
+                200,
+                vec![("Content-Type".to_owned(), "text/plain".to_owned())],
+                b"leaked".to_vec(),
+            )
         } else {
-            (302, "text/plain".to_owned(), Vec::new())
+            (
+                302,
+                vec![
+                    ("Content-Type".to_owned(), "text/plain".to_owned()),
+                    ("Location".to_owned(), "/target".to_owned()),
+                ],
+                Vec::new(),
+            )
         }
     });
-    // The mock sends "Location: /target"? spawn_http_server writes fixed
-    // headers, so a bare 302 without Location still exercises the policy:
-    // reqwest's Policy::none returns the 302 as the final response.
     let client = Ecpay {
         payment_api_url: srv,
         ..sdk()
@@ -88,6 +95,33 @@ async fn redirects_are_not_followed() {
     assert!(
         !hit.load(std::sync::atomic::Ordering::SeqCst),
         "the redirect target must never be requested"
+    );
+}
+
+/// The 1 MiB cap must ERROR on the Big5 CSV flows too — a settlement report
+/// cut mid-row and returned as Ok would be silent data corruption.
+#[tokio::test]
+async fn oversized_balance_reports_error() {
+    let srv = spawn_http_server(move |_path, _body| {
+        (200, "text/plain".to_owned(), vec![b'a'; (1 << 20) + 16])
+    });
+    let client = Ecpay {
+        vendor_api_url: srv,
+        ..sdk()
+    };
+    let err = client
+        .download_merchant_balance(&ecpay::payment::DownloadMerchantBalanceParams {
+            date_type: "1".into(),
+            begin_date: "2026-09-01".into(),
+            end_date: "2026-09-02".into(),
+            media_formated: "Y".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("an over-cap Big5 report must be an error, never a truncated Ok");
+    assert!(
+        err.to_string().contains("1 MiB safety limit"),
+        "got {err:?}"
     );
 }
 
@@ -113,6 +147,30 @@ async fn empty_bodies_error() {
         // still reject. Anything erroring is acceptable; nothing may pass.
         let _ = err;
     }
+}
+
+/// A body of exactly 1 MiB (the cap) must still be accepted — only the
+/// overflow is rejected.
+#[tokio::test]
+async fn exactly_one_mib_body_is_accepted() {
+    let payload = vec![b'a'; 1 << 20];
+    let srv =
+        spawn_http_server(move |_path, _body| (200, "text/plain".to_owned(), payload.clone()));
+    let client = Ecpay {
+        vendor_api_url: srv,
+        ..sdk()
+    };
+    let got = client
+        .download_merchant_balance(&ecpay::payment::DownloadMerchantBalanceParams {
+            date_type: "1".into(),
+            begin_date: "2026-09-01".into(),
+            end_date: "2026-09-02".into(),
+            media_formated: "Y".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("a 1 MiB body sits exactly at the cap and must be returned");
+    assert_eq!(got.len(), 1 << 20);
 }
 
 /// `aio_check_out` is a pure computation: the same params must yield a

@@ -163,20 +163,41 @@ fn hex_val(c: u8) -> Option<u8> {
     }
 }
 
-/// Go `io.LimitReader(resp.Body, 1<<20)`: at most 1 MiB of the body.
+/// Read at most 1 MiB of the body. A body that EXCEEDS the cap is an error,
+/// never a silent truncation: a settlement report cut mid-row is data
+/// corruption, and a truncated CheckMacValue would only fail later (or,
+/// on the Big5/parse_qsl endpoints, not at all).
+///
+/// Two guards, because hyper delivers large chunks and the overage can sit
+/// INSIDE one chunk (slicing it off would hide it): the declared
+/// Content-Length is checked up front, and the bytes hyper actually
+/// delivers are counted — the counter is authoritative when Content-Length
+/// is absent or lying (chunked encoding).
 async fn read_body_limited(resp: &mut reqwest::Response) -> Result<Vec<u8>> {
     const LIMIT: usize = 1 << 20;
-    let mut buf = Vec::new();
-    while buf.len() < LIMIT {
-        match resp.chunk().await? {
-            Some(chunk) => {
-                let take = (LIMIT - buf.len()).min(chunk.len());
-                buf.extend_from_slice(&chunk[..take]);
-            }
-            None => break,
+    if let Some(len) = resp.content_length() {
+        if len > LIMIT as u64 {
+            return Err(Error::Message(format!(
+                "ecpay: response body exceeds the 1 MiB safety limit ({len} bytes)"
+            )));
         }
     }
-    Ok(buf)
+    let mut delivered = 0usize;
+    let mut buf = Vec::new();
+    loop {
+        match resp.chunk().await? {
+            Some(chunk) => {
+                delivered += chunk.len();
+                if delivered > LIMIT {
+                    return Err(Error::Message(
+                        "ecpay: response body exceeds the 1 MiB safety limit".into(),
+                    ));
+                }
+                buf.extend_from_slice(&chunk);
+            }
+            None => return Ok(buf),
+        }
+    }
 }
 
 async fn body_string(resp: &mut reqwest::Response) -> Result<String> {

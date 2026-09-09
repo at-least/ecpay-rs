@@ -198,10 +198,11 @@ form,也是注入點)。
   密文遭竄改必變明文或解密失敗。
 - **差分測試**:156 組 seeded-random 參數由「真的」官方 Python SDK 簽署,
   本函式庫逐一比對(150 組無 `~` 逐位元組相同;6 組帶 `~` 釘住 `%7e` 偏差)。
-- **傳輸層邊界**(`tests/transport_edge.rs`):回應體超過 1 MiB 必拒收
-  (截斷的 MAC/JSON 永不默默接受)、**302 一律不跟隨**(帶簽名的 POST
-  被轉送是攻擊面;ECPay 端點從不轉導)、空回應必報錯、`aio_check_out`
-  為純函式(同參數位元組級確定,利於重試與稽核)。
+- **傳輸層邊界**(`tests/transport_edge.rs`):回應體超過 1 MiB 必**回報錯誤**
+  (不截斷不吞下 — Big5 對帳檔被切半行回 Ok 是靜默資料損毀;剛好 1 MiB
+  則正常收下)、**302 帶真實 `Location` 時一律不跟隨**(帶簽名的 POST 被轉送
+  是攻擊面;ECPay 端點從不轉導)、空回應必報錯、`aio_check_out` 為純函式
+  (同參數位元組級確定,利於重試與稽核)。
 - HTTP client 硬化:redirect 停用、connect timeout 10s、整體 timeout 30s。
 
 ## Staging 煙霧測試
