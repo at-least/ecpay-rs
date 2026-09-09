@@ -198,6 +198,72 @@ scenarios["html_form"] = {
     ),
 }
 
+# --- randomized differential corpus (seeded => reproducible) ---
+# 150 random parameter maps signed by the REAL SDK; the Rust side must match
+# every digest byte-for-byte (tilde-free inputs), and the 6 tilde-bearing
+# cases pin the documented %7e divergence via dot_net_escaped.
+import random  # noqa: E402
+
+rng = random.Random(3002607)
+
+# No two keys may collide under lowercasing: the SDK's stable sort breaks
+# such ties by dict insertion order (unreproducible from a map API), while
+# ecpay-rs tie-breaks on the original key (deterministic). Real ECPay keys
+# are unique after lowercasing, so the corpus models that; the tie behavior
+# is covered by a dedicated unit test.
+alphabet = [
+    "MerchantID", "MerchantTradeNo", "MerchantTradeDate", "PaymentType", "TotalAmount",
+    "TradeDesc", "ItemName", "ReturnURL", "ChoosePayment", "EncryptType", "CustomField1",
+    "CustomField2", "StoreID", "ChooseSubPayment", "RtnCode", "RtnMsg", "TradeNo",
+    "PaymentDate", "a", "z", "_x", "Desc_1", "ItemURL", "lang",
+]
+value_parts = [
+    "abc", "XYZ", "0123", "測試", "中文與English", "a b", "plus+", "eq=sign", "amp&ersand",
+    "pct%25", "quote'q", "star*s", "paren(1)", "dash-d", "dot.d", "under_d",
+    "emoji😀", "逗號,寫", "slash/ok", "colon:time", "at@site", "hash#tag", "q?", "semi;", "brack[]",
+]
+
+diff_cases = {}
+for i in range(150):
+    n = rng.randint(1, 10)
+    # EncryptType is excluded: the SDK crashes on a non-numeric EncryptType
+    # (int() ValueError) — real traffic always carries 0/1, and the Rust side
+    # deliberately falls back to 1 on garbage (a documented robustness
+    # difference, covered by the unit tests instead).
+    keys = rng.sample([k for k in alphabet if k != "EncryptType"], n)
+    params = {}
+    for k in keys:
+        v = "".join(rng.choice(value_parts) for _ in range(rng.randint(1, 3)))
+        params[k] = v
+    params.setdefault("MerchantID", "3002607")
+    params["EncryptType"] = rng.choice(["0", "1"])
+    sdk2 = SDK(**MERCHANT)
+    diff_cases[f"rand_{i:03d}"] = {
+        "params": {k: str(v) for k, v in sorted(params.items())},
+        "expected": sdk2.generate_check_value(params),
+    }
+# Tilde-bearing divergence cases (Rust side must produce dot_net_escaped, not expected).
+def dot_net_escape(s):
+    safe = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.!*()")
+    out = []
+    for b in s.encode("utf-8"):
+        c = chr(b)
+        out.append(c if c in safe else ("+" if c == " " else "%%%02x" % b))
+    return "".join(out)
+
+
+for i in range(6):
+    params = {"MerchantID": "3002607", "MerchantTradeNo": f"tilde{i}", "TradeDesc": f"a~b~{i}", "ItemName": "x~y", "TotalAmount": str(100 + i), "EncryptType": "1"}
+    ordered = sorted(params.items(), key=lambda kv: kv[0].lower())
+    pre = "HashKey=%s&" % MERCHANT["HashKey"] + "".join(f"{k}={v}&" for k, v in ordered) + "HashIV=%s" % MERCHANT["HashIV"]
+    diff_cases[f"tilde_{i:03d}"] = {
+        "params": {k: str(v) for k, v in sorted(params.items())},
+        "expected": SDK(**MERCHANT).generate_check_value(params),
+        "dot_net_escaped": hashlib.sha256(dot_net_escape(pre).lower().encode("utf-8")).hexdigest().upper(),
+    }
+
+scenarios["differential"] = diff_cases
+
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "python_sdk_vectors.json")
 with open(OUT, "w", encoding="utf-8") as f:
     json.dump(scenarios, f, ensure_ascii=False, indent=1, sort_keys=True)

@@ -380,12 +380,17 @@ pub(crate) fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// The package-level HTTP client, 30s timeout (ECPay's stage endpoints have
-/// been observed to hang).
+/// The package-level HTTP client. Hardened for payment traffic: no redirect
+/// following (a 30x on a signed API POST is either misconfiguration or an
+/// attempt to replay the payload elsewhere — ECPay's API endpoints answer
+/// directly, never redirect), a 10s connect timeout, and a 30s overall
+/// timeout (ECPay's stage endpoints have been observed to hang).
 pub(crate) fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .expect("ecpay http client")

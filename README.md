@@ -187,6 +187,23 @@ form,也是注入點)。
   指南正好相反。本函式庫 AIO 常數依官方 Python SDK,B2C 發票欄位為自由
   字串不做強制 — 上線前請以你的場景向綠界確認。
 
+## 測試強度(金流等級)
+
+除了 18 情境的 Python-SDK 一致性 fixtures 與官方向量,另含:
+
+- **Property-based 測試**(`tests/properties.rs`,proptest,每條 512 個隨機案例):
+  簽名→驗證對任意參數組合成立、MAC 任何一個位元組被改動必驗證失敗、
+  CMV 與獨立 SHA-256 參考實作逐位元組一致、`url_encode` 對任意 Unicode
+  (含 emoji/控制字元)符合 .NET 契約、AES 三種金鑰長度對任意明文往返、
+  密文遭竄改必變明文或解密失敗。
+- **差分測試**:156 組 seeded-random 參數由「真的」官方 Python SDK 簽署,
+  本函式庫逐一比對(150 組無 `~` 逐位元組相同;6 組帶 `~` 釘住 `%7e` 偏差)。
+- **傳輸層邊界**(`tests/transport_edge.rs`):回應體超過 1 MiB 必拒收
+  (截斷的 MAC/JSON 永不默默接受)、**302 一律不跟隨**(帶簽名的 POST
+  被轉送是攻擊面;ECPay 端點從不轉導)、空回應必報錯、`aio_check_out`
+  為純函式(同參數位元組級確定,利於重試與稽核)。
+- HTTP client 硬化:redirect 停用、connect timeout 10s、整體 timeout 30s。
+
 ## Staging 煙霧測試
 
 `tests/stage_smoke.rs` 會打**真實的 ECPay 測試環境**(`payment-stage.ecpay.com.tw`,

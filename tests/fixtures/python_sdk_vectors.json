@@ -1553,6 +1553,1874 @@
    ]
   }
  },
+ "differential": {
+  "rand_000": {
+   "expected": "757AE43163BD2343A17C6E2C4AB41CFFB6A31C0F133278F0D93C123389FC9A6D",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "lang": "at@siteamp&ersand"
+   }
+  },
+  "rand_001": {
+   "expected": "AA6E493B4767902A17B27E0AAE229C58B38BFB5F4BC531249D7465C4652758E0",
+   "params": {
+    "ChooseSubPayment": "colon:timequote'qunder_d",
+    "EncryptType": "1",
+    "ItemName": "amp&ersand",
+    "MerchantID": "3002607",
+    "PaymentDate": "paren(1)dash-d",
+    "StoreID": "plus+XYZsemi;"
+   }
+  },
+  "rand_002": {
+   "expected": "64366EAC02A2438CB66E7D98A6E3D6DC7554D77BDCE18B0F464896026D200888",
+   "params": {
+    "CustomField1": "abcquote'q",
+    "Desc_1": "0123plus+colon:time",
+    "EncryptType": "1",
+    "ItemName": "abcparen(1)逗號,寫",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "at@site",
+    "PaymentType": "中文與Englishdash-d",
+    "lang": "dash-d"
+   }
+  },
+  "rand_003": {
+   "expected": "39CE09F76FC8A870418B5DC79DB09944",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "PaymentType": "hash#tagemoji😀"
+   }
+  },
+  "rand_004": {
+   "expected": "E0D34AEE2364DF48F82A92F4F4EFCE890C13841EC477E15C9BF1D07A580C8CBE",
+   "params": {
+    "ChoosePayment": "abc",
+    "EncryptType": "1",
+    "ItemName": "under_d",
+    "MerchantID": "brack[]amp&ersandpct%25",
+    "ReturnURL": "amp&ersand",
+    "TradeDesc": "colon:time",
+    "_x": "brack[]",
+    "lang": "star*sa ba b",
+    "z": "amp&ersand"
+   }
+  },
+  "rand_005": {
+   "expected": "BBFDB3DD04335D13F78DC6354CD89ED7",
+   "params": {
+    "ChoosePayment": "pct%25",
+    "ChooseSubPayment": "brack[]dot.ddash-d",
+    "CustomField1": "a bat@site",
+    "CustomField2": "pct%25at@siteparen(1)",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "PaymentType": "colon:timepct%250123",
+    "TotalAmount": "q?",
+    "TradeDesc": "emoji😀pct%25"
+   }
+  },
+  "rand_006": {
+   "expected": "29A68654D9E41B581CDF0ED9CCB1340610FFFBA562B6DE12DCCC80341BABBA76",
+   "params": {
+    "ChoosePayment": "逗號,寫brack[]pct%25",
+    "CustomField1": "emoji😀dash-damp&ersand",
+    "Desc_1": "at@sitebrack[]",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "dot.d",
+    "PaymentDate": "under_da b",
+    "TradeNo": "a b測試"
+   }
+  },
+  "rand_007": {
+   "expected": "4E0A8AE5FABCAD0270085EFC7FF368DC",
+   "params": {
+    "Desc_1": "plus+",
+    "EncryptType": "0",
+    "ItemURL": "XYZstar*s",
+    "MerchantID": "3002607",
+    "PaymentDate": "under_dhash#tag",
+    "ReturnURL": "q?"
+   }
+  },
+  "rand_008": {
+   "expected": "9B3A7DE1B27CB3ED814EC558A26377AD0821C3EA606B8D78D7B65AA77B62CE44",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "RtnCode": "brack[]a b",
+    "StoreID": "0123",
+    "TotalAmount": "abc"
+   }
+  },
+  "rand_009": {
+   "expected": "42880A33E28A3EB116084F6EE6C5A7799ED0F4B509D08BB79834D24B2CD1C428",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "under_d中文與Englishplus+",
+    "MerchantID": "eq=sign",
+    "MerchantTradeDate": "quote'q",
+    "ReturnURL": "at@siteq?quote'q",
+    "StoreID": "a b",
+    "TradeNo": "pct%25brack[]",
+    "z": "slash/okparen(1)paren(1)"
+   }
+  },
+  "rand_010": {
+   "expected": "A34E9C6E5C850F0D6D105DE606ED85AC",
+   "params": {
+    "CustomField2": "emoji😀",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "semi;semi;測試",
+    "z": "XYZabc"
+   }
+  },
+  "rand_011": {
+   "expected": "2BC1A4C89E026C9B4200ABF1C0AA1DE0EE468CFEAD248B2D27BC5440A9947BE4",
+   "params": {
+    "ChoosePayment": "a b逗號,寫",
+    "EncryptType": "1",
+    "MerchantID": "逗號,寫slash/ok"
+   }
+  },
+  "rand_012": {
+   "expected": "57B5E00C257EB518448ECA9F5FFD4A3258D4EA53F07781BD9CBF2722E0231FD5",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "PaymentDate": "emoji😀star*sdot.d",
+    "TotalAmount": "XYZpct%25",
+    "TradeNo": "dot.dq?quote'q",
+    "_x": "plus+dot.d",
+    "lang": "semi;逗號,寫slash/ok"
+   }
+  },
+  "rand_013": {
+   "expected": "8CD2E6EDE291EAA09D2CAF28AE9B91EBEF51891C8020B631CFD84D3B0431DA36",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "paren(1)",
+    "RtnCode": "XYZa b",
+    "TradeNo": "emoji😀"
+   }
+  },
+  "rand_014": {
+   "expected": "8D17C91CAD663AF93C5D89406309E79B5FB78862F69BAA83093788A06F38F92B",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "0123測試逗號,寫",
+    "MerchantTradeDate": "semi;colon:timeparen(1)",
+    "MerchantTradeNo": "eq=signa bslash/ok",
+    "RtnCode": "dash-dstar*s",
+    "StoreID": "eq=signcolon:time",
+    "TotalAmount": "dot.d",
+    "TradeDesc": "under_d"
+   }
+  },
+  "rand_015": {
+   "expected": "7286C8311B27D3744D903A1C4D28067F",
+   "params": {
+    "ChoosePayment": "q?",
+    "CustomField1": "a bunder_dXYZ",
+    "Desc_1": "0123",
+    "EncryptType": "0",
+    "ItemURL": "測試XYZpct%25",
+    "MerchantID": "q?semi;",
+    "MerchantTradeNo": "colon:time",
+    "PaymentDate": "0123amp&ersandhash#tag",
+    "RtnMsg": "逗號,寫at@sitequote'q",
+    "a": "dot.d逗號,寫"
+   }
+  },
+  "rand_016": {
+   "expected": "93FD576BB909C18CA2529009FCDAD7C2",
+   "params": {
+    "ChoosePayment": "amp&ersand",
+    "ChooseSubPayment": "中文與English",
+    "CustomField2": "dash-d",
+    "Desc_1": "brack[]",
+    "EncryptType": "0",
+    "MerchantID": "paren(1)",
+    "MerchantTradeNo": "brack[]slash/okpct%25",
+    "PaymentDate": "star*s",
+    "RtnCode": "中文與English",
+    "_x": "brack[]slash/okquote'q"
+   }
+  },
+  "rand_017": {
+   "expected": "90F4A7671AE23ED023F4568956532431",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "hash#tag"
+   }
+  },
+  "rand_018": {
+   "expected": "2F528CC6B02578E9B62ACB1023174D6B",
+   "params": {
+    "EncryptType": "0",
+    "ItemName": "0123",
+    "MerchantID": "dot.d",
+    "StoreID": "semi;",
+    "_x": "at@siteq?",
+    "a": "dot.d"
+   }
+  },
+  "rand_019": {
+   "expected": "6AF133F9AB1252287679F60B15A59247A29CD304D1ADBF66B1E5EE0C770F36AC",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "測試semi;",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "pct%25pct%25hash#tag",
+    "ReturnURL": "測試dot.ddash-d",
+    "TradeNo": "at@sitequote'q"
+   }
+  },
+  "rand_020": {
+   "expected": "1569DBFBBFE28A37A9FADE412E3A25FFF7579B618B1FA2A9FBF852E4A712EF26",
+   "params": {
+    "CustomField2": "plus+中文與English",
+    "EncryptType": "1",
+    "ItemURL": "pct%25測試",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "under_dstar*sbrack[]",
+    "ReturnURL": "測試a b",
+    "TradeDesc": "hash#tag"
+   }
+  },
+  "rand_021": {
+   "expected": "DA97C07441119C5494295532739C3235",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "PaymentType": "quote'q",
+    "StoreID": "0123pct%25",
+    "a": "star*s"
+   }
+  },
+  "rand_022": {
+   "expected": "4B617C3F89DA077344E7E97D5C92CC37",
+   "params": {
+    "CustomField1": "quote'qhash#tag",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "TradeDesc": "pct%25",
+    "a": "XYZemoji😀0123"
+   }
+  },
+  "rand_023": {
+   "expected": "560A78B5C9B5798B30D0866907962B6E25D5EF5816F9A7EDBA1CBA93393117CE",
+   "params": {
+    "ChoosePayment": "at@site0123",
+    "Desc_1": "abc",
+    "EncryptType": "1",
+    "ItemName": "eq=sign",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "emoji😀dot.damp&ersand",
+    "PaymentDate": "0123",
+    "RtnMsg": "star*s",
+    "_x": "pct%25pct%25",
+    "a": "under_dstar*s",
+    "lang": "emoji😀中文與English"
+   }
+  },
+  "rand_024": {
+   "expected": "962111FD58EEE7CFE4866509420154C6",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "a": "emoji😀",
+    "z": "abcXYZamp&ersand"
+   }
+  },
+  "rand_025": {
+   "expected": "B67219E765ED4654D6E1E405D1A6C7138B27A0C890D1076A42AE10F46B2EA4E4",
+   "params": {
+    "CustomField2": "emoji😀",
+    "Desc_1": "0123中文與English逗號,寫",
+    "EncryptType": "1",
+    "MerchantID": "eq=signeq=signdash-d",
+    "ReturnURL": "colon:timehash#tag",
+    "RtnMsg": "under_dunder_d",
+    "StoreID": "plus+",
+    "TotalAmount": "colon:time0123",
+    "TradeDesc": "amp&ersand"
+   }
+  },
+  "rand_026": {
+   "expected": "934304FA4149D579C9144C29E6DE2241",
+   "params": {
+    "CustomField1": "abcemoji😀abc",
+    "CustomField2": "colon:timeq?",
+    "Desc_1": "amp&ersand測試",
+    "EncryptType": "0",
+    "MerchantID": "paren(1)XYZparen(1)",
+    "MerchantTradeNo": "測試star*s",
+    "TradeDesc": "測試under_dquote'q"
+   }
+  },
+  "rand_027": {
+   "expected": "59A018D5DA55EC378833F096FE0E78B63D19B7BCDFA4D6611E2694DDC20CC798",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "XYZ0123"
+   }
+  },
+  "rand_028": {
+   "expected": "6B7F4998788C7B33760C3DC3773D28CC42721D688D0FCE15947DB60A8089DF71",
+   "params": {
+    "CustomField1": "pct%25quote'q",
+    "CustomField2": "測試pct%25",
+    "Desc_1": "semi;",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "RtnCode": "star*s",
+    "StoreID": "pct%25",
+    "TotalAmount": "semi;XYZcolon:time",
+    "TradeDesc": "eq=sign",
+    "a": "eq=sign0123",
+    "z": "eq=signparen(1)"
+   }
+  },
+  "rand_029": {
+   "expected": "00FDD310A592B3C26F6CFADE33D16DEA",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "PaymentType": "hash#tagquote'q逗號,寫"
+   }
+  },
+  "rand_030": {
+   "expected": "7E8824A616C300E277A23D4465627EB8",
+   "params": {
+    "ChoosePayment": "中文與English",
+    "Desc_1": "colon:timedot.d",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "PaymentDate": "slash/ok",
+    "PaymentType": "quote'q",
+    "StoreID": "q?",
+    "_x": "q?colon:time0123"
+   }
+  },
+  "rand_031": {
+   "expected": "285132153EA13D9AB7A14F27CE8AC495951761A5640492245DB41B3BA3D2BB10",
+   "params": {
+    "CustomField1": "eq=sign",
+    "EncryptType": "1",
+    "ItemURL": "pct%25",
+    "MerchantID": "3002607",
+    "PaymentDate": "中文與English",
+    "PaymentType": "q?",
+    "ReturnURL": "slash/okemoji😀slash/ok",
+    "RtnCode": "q?q?q?",
+    "TotalAmount": "dot.d",
+    "TradeNo": "hash#tagpct%25",
+    "_x": "dash-dbrack[]"
+   }
+  },
+  "rand_032": {
+   "expected": "6DFB90AE92F5F8C5EE59CA3BF4DCEB2F",
+   "params": {
+    "ChooseSubPayment": "plus+hash#tag",
+    "Desc_1": "測試0123逗號,寫",
+    "EncryptType": "0",
+    "ItemURL": "pct%25",
+    "MerchantID": "3002607",
+    "PaymentDate": "semi;",
+    "ReturnURL": "plus+",
+    "RtnCode": "slash/okemoji😀colon:time",
+    "_x": "under_dhash#tagq?"
+   }
+  },
+  "rand_033": {
+   "expected": "531AED8C6E764BD1D171A408B7C6A4E3",
+   "params": {
+    "Desc_1": "pct%25逗號,寫",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "a bparen(1)",
+    "StoreID": "star*s測試q?"
+   }
+  },
+  "rand_034": {
+   "expected": "E7B874106848791B74912C55AE324D3A",
+   "params": {
+    "ChooseSubPayment": "emoji😀amp&ersandstar*s",
+    "CustomField1": "逗號,寫",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "PaymentDate": "eq=signcolon:time",
+    "RtnCode": "semi;",
+    "TradeDesc": "semi;逗號,寫",
+    "a": "dash-d中文與EnglishXYZ"
+   }
+  },
+  "rand_035": {
+   "expected": "CDD67DB642318F8CE165419F8C664277EB92B65DC3EBC9EB5A4F4DE9756529CE",
+   "params": {
+    "CustomField1": "amp&ersanddash-d",
+    "EncryptType": "1",
+    "ItemName": "pct%25",
+    "ItemURL": "semi;at@site",
+    "MerchantID": "semi;brack[]hash#tag",
+    "MerchantTradeDate": "slash/okq?",
+    "PaymentDate": "q?",
+    "PaymentType": "brack[]a b",
+    "RtnMsg": "abc"
+   }
+  },
+  "rand_036": {
+   "expected": "27B4575DB0E2988B4B65A949E4729022",
+   "params": {
+    "ChoosePayment": "abc測試amp&ersand",
+    "ChooseSubPayment": "0123emoji😀",
+    "CustomField1": "eq=signplus+",
+    "Desc_1": "star*spct%25",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "StoreID": "amp&ersandquote'qemoji😀",
+    "TotalAmount": "abc",
+    "TradeNo": "中文與EnglishXYZeq=sign",
+    "_x": "逗號,寫"
+   }
+  },
+  "rand_037": {
+   "expected": "C3E88A3308BAA78E0AD027DE58211C421D00DB7770B9348D5C450FA819D8AA6E",
+   "params": {
+    "CustomField2": "colon:timeplus+",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "emoji😀",
+    "_x": "0123under_dcolon:time"
+   }
+  },
+  "rand_038": {
+   "expected": "EDF775ECA6A4AE03A1084B35724DC498",
+   "params": {
+    "EncryptType": "0",
+    "ItemURL": "abcunder_d",
+    "MerchantID": "quote'q",
+    "PaymentDate": "paren(1)",
+    "RtnCode": "abcparen(1)q?",
+    "_x": "paren(1)",
+    "a": "star*s逗號,寫",
+    "z": "star*s"
+   }
+  },
+  "rand_039": {
+   "expected": "69CE801D64D16AC162CE31E388928B47696E36D6588B2900EA474C8620E97E97",
+   "params": {
+    "ChooseSubPayment": "hash#tagstar*s",
+    "CustomField2": "brack[]at@sitequote'q",
+    "EncryptType": "1",
+    "ItemName": "at@siteat@site",
+    "ItemURL": "quote'q",
+    "MerchantID": "3002607",
+    "RtnCode": "hash#tagamp&ersandparen(1)",
+    "RtnMsg": "brack[]dot.d",
+    "TotalAmount": "eq=signquote'qpct%25",
+    "TradeDesc": "abcparen(1)",
+    "TradeNo": "quote'qsemi;"
+   }
+  },
+  "rand_040": {
+   "expected": "50D9C591496AE27DF2E28C09532530738874B975E834317B2CA78D7EA38D5005",
+   "params": {
+    "ChooseSubPayment": "逗號,寫slash/ok",
+    "EncryptType": "1",
+    "MerchantID": "pct%25colon:time",
+    "MerchantTradeDate": "pct%25hash#tag",
+    "MerchantTradeNo": "dot.d",
+    "StoreID": "0123中文與Englishslash/ok",
+    "lang": "paren(1)",
+    "z": "colon:time中文與Englishslash/ok"
+   }
+  },
+  "rand_041": {
+   "expected": "CC372874B2C06E3D54586BD8297F9BB88037788799D883C76C81E32CC7B8EFE0",
+   "params": {
+    "ChoosePayment": "quote'qemoji😀q?",
+    "Desc_1": "中文與Englishslash/okabc",
+    "EncryptType": "1",
+    "ItemURL": "emoji😀dash-dquote'q",
+    "MerchantID": "a bparen(1)star*s",
+    "MerchantTradeDate": "0123",
+    "PaymentType": "plus+at@sitesemi;",
+    "TotalAmount": "dash-d",
+    "a": "star*sslash/oka b",
+    "lang": "abcparen(1)"
+   }
+  },
+  "rand_042": {
+   "expected": "49FD1FB4159611F7F58F23E42268FDE4",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "TradeDesc": "paren(1)paren(1)quote'q"
+   }
+  },
+  "rand_043": {
+   "expected": "88245CCFDC1EDB5FE83E917E0BA9825D",
+   "params": {
+    "ChoosePayment": "a bplus+",
+    "CustomField2": "hash#tagunder_deq=sign",
+    "EncryptType": "0",
+    "ItemName": "emoji😀XYZdot.d",
+    "MerchantID": "3002607",
+    "PaymentDate": "emoji😀逗號,寫中文與English",
+    "TotalAmount": "quote'qat@sitestar*s",
+    "z": "semi;"
+   }
+  },
+  "rand_044": {
+   "expected": "497672BEDEE176AF07AB5C93F318C7B4",
+   "params": {
+    "ChooseSubPayment": "quote'qamp&ersandq?",
+    "EncryptType": "0",
+    "MerchantID": "3002607"
+   }
+  },
+  "rand_045": {
+   "expected": "AF6795859FCBDEC65EEB02120D83BDA9FCB8B3D3BB02823BBDA2DA8C654E3391",
+   "params": {
+    "EncryptType": "1",
+    "ItemURL": "under_d",
+    "MerchantID": "3002607",
+    "RtnCode": "hash#tag",
+    "z": "under_demoji😀a b"
+   }
+  },
+  "rand_046": {
+   "expected": "3E5F99A1AFF3425338DAB63F758A8A0B64876371B80D5A1DC0450FEE73F0BFD6",
+   "params": {
+    "CustomField1": "XYZ",
+    "CustomField2": "star*sparen(1)dash-d",
+    "Desc_1": "eq=signcolon:time",
+    "EncryptType": "1",
+    "ItemName": "amp&ersand",
+    "MerchantID": "under_d",
+    "MerchantTradeDate": "emoji😀XYZ",
+    "PaymentType": "dash-d",
+    "RtnCode": "0123colon:timehash#tag",
+    "TradeNo": "amp&ersand",
+    "z": "abc逗號,寫"
+   }
+  },
+  "rand_047": {
+   "expected": "CB1AEBC9C75AF17BA3B71CB6ABC2D2CD",
+   "params": {
+    "CustomField2": "under_dXYZq?",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "RtnCode": "q?q?",
+    "TotalAmount": "pct%25dot.damp&ersand",
+    "_x": "0123plus+semi;",
+    "lang": "amp&ersand0123XYZ",
+    "z": "逗號,寫semi;paren(1)"
+   }
+  },
+  "rand_048": {
+   "expected": "7BDA296A2B062097DA945C9B9F2FA07DD16A95C76A98B8C6BB2FE808A5D11270",
+   "params": {
+    "CustomField1": "colon:timeamp&ersandat@site",
+    "Desc_1": "0123colon:time",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "dot.dquote'q",
+    "PaymentDate": "abc",
+    "TradeDesc": "dot.dquote'q",
+    "a": "dot.d逗號,寫dot.d",
+    "z": "hash#tagq?under_d"
+   }
+  },
+  "rand_049": {
+   "expected": "C5EA0550BDA6D5DC1CF471662192B8EAAF2202760AFC8CD6B1270CD19DBADF9B",
+   "params": {
+    "EncryptType": "1",
+    "ItemURL": "amp&ersandamp&ersand",
+    "MerchantID": "3002607",
+    "TradeDesc": "hash#tagpct%25逗號,寫"
+   }
+  },
+  "rand_050": {
+   "expected": "9B98069C52EDDAAB232A58B860834CF01D6AB7B8FD4C4E4C5B41E2B1A50D5744",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "under_dsemi;q?",
+    "ItemURL": "dash-ddash-d",
+    "MerchantID": "3002607",
+    "PaymentType": "a b",
+    "StoreID": "中文與Englishemoji😀",
+    "lang": "slash/ok"
+   }
+  },
+  "rand_051": {
+   "expected": "DA51CB5D1942CB41175FE11E8B4FEAFF",
+   "params": {
+    "CustomField1": "0123semi;中文與English",
+    "EncryptType": "0",
+    "ItemName": "eq=sign逗號,寫slash/ok",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "XYZ",
+    "StoreID": "star*scolon:time",
+    "TradeNo": "brack[]slash/ok",
+    "a": "slash/okplus+逗號,寫"
+   }
+  },
+  "rand_052": {
+   "expected": "C618A148FF03E60CD6FC5E3D09F6E3619D6F934FAE6E4AFD481CAC28EF49F416",
+   "params": {
+    "ChoosePayment": "semi;",
+    "CustomField1": "XYZabc",
+    "CustomField2": "paren(1)eq=signdot.d",
+    "Desc_1": "under_d逗號,寫",
+    "EncryptType": "1",
+    "ItemName": "brack[]中文與Englishbrack[]",
+    "ItemURL": "0123",
+    "MerchantID": "q?",
+    "TotalAmount": "hash#tagcolon:time",
+    "TradeDesc": "pct%25dash-d"
+   }
+  },
+  "rand_053": {
+   "expected": "1083230DC6AB562EA8F2A2339CE875D4",
+   "params": {
+    "EncryptType": "0",
+    "ItemName": "eq=sign逗號,寫中文與English",
+    "MerchantID": "XYZ"
+   }
+  },
+  "rand_054": {
+   "expected": "E166867EF993DF162255D81A9489E653",
+   "params": {
+    "ChoosePayment": "star*s",
+    "Desc_1": "brack[]brack[]star*s",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "TradeDesc": "amp&ersand",
+    "a": "emoji😀a b",
+    "lang": "amp&ersandstar*s"
+   }
+  },
+  "rand_055": {
+   "expected": "9FAE31850CC5E4699F82F0FCA059AE5475A5260F7DA4305CC8403736F31823AA",
+   "params": {
+    "ChoosePayment": "slash/okq?colon:time",
+    "ChooseSubPayment": "a beq=sign",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "amp&ersanda b",
+    "ReturnURL": "q?under_dpct%25"
+   }
+  },
+  "rand_056": {
+   "expected": "8429D7A9A2D66126B6FE6838F35F4533",
+   "params": {
+    "CustomField2": "pct%25",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "quote'qXYZ"
+   }
+  },
+  "rand_057": {
+   "expected": "4351D465E433F0641DD6A8D547040B6744117B1B23D134D7F3122EC980E2D7F9",
+   "params": {
+    "CustomField1": "under_d",
+    "EncryptType": "1",
+    "MerchantID": "3002607"
+   }
+  },
+  "rand_058": {
+   "expected": "2B76664025E0923B480901AAD7A096AA",
+   "params": {
+    "EncryptType": "0",
+    "ItemName": "eq=sign",
+    "ItemURL": "quote'qamp&ersand",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "測試逗號,寫",
+    "PaymentDate": "dash-dXYZ",
+    "ReturnURL": "eq=sign",
+    "TotalAmount": "at@site",
+    "_x": "pct%250123brack[]"
+   }
+  },
+  "rand_059": {
+   "expected": "04FCFACBAE21503C7DB3E141C4643A359FC30E20E128A1A69D5AD88FA3C53EFA",
+   "params": {
+    "CustomField1": "plus+XYZ",
+    "EncryptType": "1",
+    "ItemURL": "at@sitequote'q",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "semi;plus+abc"
+   }
+  },
+  "rand_060": {
+   "expected": "A73B34D2516546D7EABE31E5EA26B179",
+   "params": {
+    "EncryptType": "0",
+    "ItemURL": "emoji😀0123amp&ersand",
+    "MerchantID": "3002607",
+    "PaymentType": "slash/okamp&ersand",
+    "RtnMsg": "pct%25pct%25a b",
+    "z": "eq=signemoji😀under_d"
+   }
+  },
+  "rand_061": {
+   "expected": "3A31358EF7594E765947FD246844513C",
+   "params": {
+    "CustomField1": "q?a b",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "under_d",
+    "PaymentDate": "plus+under_dhash#tag",
+    "ReturnURL": "測試under_d",
+    "TotalAmount": "a bunder_d0123",
+    "TradeNo": "測試star*s",
+    "lang": "paren(1)",
+    "z": "quote'qdash-dplus+"
+   }
+  },
+  "rand_062": {
+   "expected": "704303AC3A49CFF1CAAFB3A359DABF0A",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "slash/okpct%25中文與English",
+    "RtnMsg": "0123q?",
+    "TradeNo": "逗號,寫q?",
+    "a": "slash/ok",
+    "lang": "brack[]"
+   }
+  },
+  "rand_063": {
+   "expected": "F1B2AB3E88EFC85BEA42E5ECA2FEFD72",
+   "params": {
+    "ChoosePayment": "under_d",
+    "CustomField1": "q?dot.d",
+    "Desc_1": "plus+測試",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "測試emoji😀semi;",
+    "PaymentDate": "中文與English",
+    "_x": "brack[]"
+   }
+  },
+  "rand_064": {
+   "expected": "1591C0721803689C057F1388B93BBF6C",
+   "params": {
+    "EncryptType": "0",
+    "ItemURL": "測試測試",
+    "MerchantID": "3002607",
+    "PaymentDate": "0123eq=sign",
+    "_x": "dot.dsemi;semi;"
+   }
+  },
+  "rand_065": {
+   "expected": "A5F36A367B1DA41C5BE8A867CFE46747",
+   "params": {
+    "ChooseSubPayment": "slash/ok",
+    "CustomField1": "semi;中文與Englishdash-d",
+    "EncryptType": "0",
+    "ItemName": "under_d",
+    "MerchantID": "abca b",
+    "PaymentDate": "plus+",
+    "RtnCode": "brack[]",
+    "TradeNo": "a b",
+    "z": "hash#tagq?"
+   }
+  },
+  "rand_066": {
+   "expected": "CD137713F4878B0A9462D7D61DAEE1DF27142DDD78B3B2760B7B906700F8FC7F",
+   "params": {
+    "CustomField2": "XYZemoji😀colon:time",
+    "EncryptType": "1",
+    "ItemName": "a bdot.d逗號,寫",
+    "MerchantID": "eq=signplus+",
+    "PaymentDate": "colon:time",
+    "ReturnURL": "abcsemi;dot.d",
+    "RtnMsg": "plus+slash/ok",
+    "StoreID": "q?中文與English",
+    "TradeDesc": "dot.d",
+    "TradeNo": "paren(1)測試semi;"
+   }
+  },
+  "rand_067": {
+   "expected": "8F30D5168C3E7BC608BAB9DF0D5D97E9C89E62485D19913A6037186A7951FFB7",
+   "params": {
+    "CustomField2": "amp&ersand",
+    "EncryptType": "1",
+    "ItemName": "quote'qbrack[]plus+",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "brack[]semi;q?",
+    "MerchantTradeNo": "star*s",
+    "PaymentType": "q?",
+    "TotalAmount": "測試a bslash/ok",
+    "z": "pct%25semi;"
+   }
+  },
+  "rand_068": {
+   "expected": "B034F90743D2587259CD8C5B11A972C0",
+   "params": {
+    "ChooseSubPayment": "逗號,寫",
+    "CustomField2": "amp&ersandamp&ersandcolon:time",
+    "EncryptType": "0",
+    "ItemName": "at@site逗號,寫",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "abcpct%25",
+    "PaymentDate": "star*sXYZ",
+    "ReturnURL": "逗號,寫eq=signabc",
+    "TradeDesc": "eq=signdot.d",
+    "_x": "q?",
+    "a": "colon:timeat@sitedash-d",
+    "z": "semi;plus+pct%25"
+   }
+  },
+  "rand_069": {
+   "expected": "302008B49CA6AF591D31470EC28672C3B9261334A6E26E851459D95173380D8F",
+   "params": {
+    "ChooseSubPayment": "colon:timeq?",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "RtnCode": "brack[]"
+   }
+  },
+  "rand_070": {
+   "expected": "7402DCB3BE6D0ABBFE57D7AD074A904A",
+   "params": {
+    "CustomField1": "0123",
+    "Desc_1": "semi;dot.dstar*s",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "RtnCode": "paren(1)逗號,寫",
+    "TradeNo": "at@siteemoji😀"
+   }
+  },
+  "rand_071": {
+   "expected": "3126E391A31CB77D90DAFA86B81D5445",
+   "params": {
+    "CustomField2": "slash/okabcslash/ok",
+    "EncryptType": "0",
+    "ItemName": "under_dhash#tagparen(1)",
+    "MerchantID": "3002607"
+   }
+  },
+  "rand_072": {
+   "expected": "A9C3F9F4FAF3204B0FB06805087731E811A81F442C724CFD554AA8864F0B9BE9",
+   "params": {
+    "CustomField2": "brack[]eq=signparen(1)",
+    "EncryptType": "1",
+    "MerchantID": "XYZ",
+    "PaymentDate": "中文與Englishdash-da b",
+    "RtnCode": "at@site",
+    "RtnMsg": "paren(1)",
+    "StoreID": "hash#tag",
+    "TradeDesc": "at@sitedash-dXYZ",
+    "TradeNo": "star*sparen(1)",
+    "a": "中文與Englishbrack[]",
+    "lang": "abc"
+   }
+  },
+  "rand_073": {
+   "expected": "38710180554EE653CEC5EED2E4484453",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "a": "dash-d"
+   }
+  },
+  "rand_074": {
+   "expected": "D07EAD98242E6DDE400A20C04732242A",
+   "params": {
+    "ChooseSubPayment": "paren(1)eq=signdash-d",
+    "CustomField2": "XYZ",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "under_d",
+    "PaymentType": "dash-d",
+    "TradeNo": "colon:time",
+    "a": "0123",
+    "z": "emoji😀"
+   }
+  },
+  "rand_075": {
+   "expected": "D39A319592B8248DF990EAB5CE694CE2",
+   "params": {
+    "ChooseSubPayment": "amp&ersandpct%25",
+    "CustomField2": "under_d逗號,寫dash-d",
+    "EncryptType": "0",
+    "MerchantID": "0123hash#tag",
+    "MerchantTradeNo": "semi;emoji😀",
+    "PaymentDate": "slash/ok",
+    "StoreID": "q?",
+    "lang": "at@site",
+    "z": "quote'qat@site測試"
+   }
+  },
+  "rand_076": {
+   "expected": "21DA8A1A44EF54DF418E12E34D777F95583E367306256DCA66314557CC6E1530",
+   "params": {
+    "CustomField2": "star*s",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "ReturnURL": "eq=signabc",
+    "RtnMsg": "中文與Englishhash#tag",
+    "TotalAmount": "dash-demoji😀amp&ersand"
+   }
+  },
+  "rand_077": {
+   "expected": "ED3B8B999076F60697CBE7FDFFC8A9D51EB50F1F1353BD472E6DE01A508295AB",
+   "params": {
+    "CustomField1": "中文與Englisheq=sign",
+    "Desc_1": "a bat@siteXYZ",
+    "EncryptType": "1",
+    "ItemName": "amp&ersand",
+    "MerchantID": "dash-dbrack[]dash-d",
+    "PaymentType": "star*sbrack[]brack[]",
+    "StoreID": "dot.demoji😀",
+    "TradeDesc": "測試colon:time"
+   }
+  },
+  "rand_078": {
+   "expected": "C85FABDA55AC5CDDD29CF4DA0C7A7103A1F65A1AC8DAE56805C06326D0280B95",
+   "params": {
+    "ChooseSubPayment": "paren(1)XYZplus+",
+    "CustomField1": "abcslash/ok",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "ReturnURL": "amp&ersandunder_d測試",
+    "TradeDesc": "dash-d測試逗號,寫",
+    "_x": "slash/okdash-d",
+    "z": "測試中文與Englishemoji😀"
+   }
+  },
+  "rand_079": {
+   "expected": "8C045E7EA272DC78257D945722ACDDE2",
+   "params": {
+    "ChooseSubPayment": "pct%25amp&ersand",
+    "CustomField2": "q?semi;plus+",
+    "EncryptType": "0",
+    "MerchantID": "3002607"
+   }
+  },
+  "rand_080": {
+   "expected": "69A48AFE99E5A1515415446479547B5A",
+   "params": {
+    "Desc_1": "0123plus+測試",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "q?plus+star*s",
+    "TotalAmount": "中文與English",
+    "_x": "slash/okq?"
+   }
+  },
+  "rand_081": {
+   "expected": "205785353EACE645D55CEC1825DCD4CF2907D3DE50449D0A0AAB0E6099253B54",
+   "params": {
+    "ChoosePayment": "under_d",
+    "Desc_1": "under_ddash-ddot.d",
+    "EncryptType": "1",
+    "ItemName": "XYZXYZ",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "abcslash/ok",
+    "ReturnURL": "中文與English",
+    "TotalAmount": "q?pct%25",
+    "lang": "amp&ersand測試dot.d"
+   }
+  },
+  "rand_082": {
+   "expected": "DB1AA992B8B8734E61B2EA9AA1D91F3461CCC8291D63B5332399C4B9C93E5595",
+   "params": {
+    "Desc_1": "dot.d",
+    "EncryptType": "1",
+    "ItemName": "測試中文與English",
+    "MerchantID": "3002607",
+    "PaymentDate": "逗號,寫",
+    "TradeDesc": "eq=signcolon:timebrack[]",
+    "lang": "pct%25semi;中文與English"
+   }
+  },
+  "rand_083": {
+   "expected": "35FA52BA8986DED2110A93D4E7AED53A",
+   "params": {
+    "CustomField1": "eq=sign中文與Englishhash#tag",
+    "CustomField2": "under_d",
+    "EncryptType": "0",
+    "ItemName": "quote'qstar*sslash/ok",
+    "ItemURL": "逗號,寫abc",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "dash-ddot.d",
+    "MerchantTradeNo": "XYZ",
+    "ReturnURL": "amp&ersandunder_d",
+    "RtnCode": "quote'qslash/oka b",
+    "TotalAmount": "逗號,寫",
+    "a": "colon:timeemoji😀paren(1)"
+   }
+  },
+  "rand_084": {
+   "expected": "983AAB238A9881947F6D0F89F19023C1BF371E08146FCDECCDA1E34208E0B49D",
+   "params": {
+    "ChoosePayment": "pct%25quote'q",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "StoreID": "brack[]under_dq?",
+    "a": "0123",
+    "lang": "pct%25hash#taga b"
+   }
+  },
+  "rand_085": {
+   "expected": "B7A40848EEE47232E30FCC020818135E",
+   "params": {
+    "ChoosePayment": "under_dquote'qat@site",
+    "CustomField1": "q?中文與English",
+    "CustomField2": "逗號,寫",
+    "EncryptType": "0",
+    "ItemName": "under_d",
+    "ItemURL": "eq=sign中文與Englishsemi;",
+    "MerchantID": "emoji😀",
+    "MerchantTradeNo": "a bbrack[]semi;",
+    "RtnMsg": "amp&ersandpct%250123"
+   }
+  },
+  "rand_086": {
+   "expected": "AC06EFAF3C25B511C3C39B3135203881E2BFCF3AD959177658EA8FCFCD9C66E4",
+   "params": {
+    "ChooseSubPayment": "paren(1)a bdot.d",
+    "Desc_1": "逗號,寫",
+    "EncryptType": "1",
+    "ItemName": "colon:time測試q?",
+    "MerchantID": "3002607",
+    "PaymentDate": "colon:timepct%25",
+    "ReturnURL": "中文與English",
+    "StoreID": "逗號,寫at@siteat@site",
+    "TradeDesc": "hash#tagemoji😀dash-d",
+    "TradeNo": "paren(1)",
+    "a": "a bunder_dstar*s",
+    "z": "0123"
+   }
+  },
+  "rand_087": {
+   "expected": "7C4F31C3ADFF48740B45385E7FDD64E8E7DFC8E88785AAC3D363C96D987CE696",
+   "params": {
+    "ChoosePayment": "brack[]測試amp&ersand",
+    "CustomField2": "中文與Englishpct%25semi;",
+    "EncryptType": "1",
+    "ItemName": "brack[]pct%25",
+    "ItemURL": "semi;",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "plus+",
+    "RtnMsg": "brack[]brack[]",
+    "TradeDesc": "brack[]逗號,寫",
+    "lang": "pct%25a b",
+    "z": "hash#tag"
+   }
+  },
+  "rand_088": {
+   "expected": "4F94BA1BC5C033A212F2D1788BA6D7EC41E2EC52035EA036D4F13D286EFBF03F",
+   "params": {
+    "ChooseSubPayment": "dash-d測試",
+    "CustomField1": "dash-ddash-d",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "ReturnURL": "emoji😀中文與Englisheq=sign",
+    "lang": "dot.d"
+   }
+  },
+  "rand_089": {
+   "expected": "96E54F31C5E41D3FE180BB7074F02DE4BB2772D97820CD46DFD2E891131B3F10",
+   "params": {
+    "CustomField1": "中文與English",
+    "Desc_1": "emoji😀at@site",
+    "EncryptType": "1",
+    "ItemURL": "q?XYZeq=sign",
+    "MerchantID": "3002607",
+    "PaymentDate": "q?",
+    "ReturnURL": "dash-dslash/okamp&ersand",
+    "RtnMsg": "colon:timeunder_dcolon:time",
+    "TradeNo": "q?"
+   }
+  },
+  "rand_090": {
+   "expected": "2DA400E61315FC59899FABF7000745B6862272E2C0F4D36D2DE0F48ECFCC0109",
+   "params": {
+    "CustomField1": "under_dslash/okplus+",
+    "Desc_1": "逗號,寫",
+    "EncryptType": "1",
+    "ItemName": "plus+q?amp&ersand",
+    "MerchantID": "3002607",
+    "PaymentType": "0123brack[]",
+    "RtnCode": "dash-d",
+    "StoreID": "逗號,寫",
+    "TotalAmount": "中文與Englishemoji😀",
+    "TradeNo": "emoji😀",
+    "_x": "XYZ逗號,寫",
+    "lang": "dot.d"
+   }
+  },
+  "rand_091": {
+   "expected": "F8F31F0C7F59F1CB835585BFDF84F101",
+   "params": {
+    "CustomField2": "plus+",
+    "EncryptType": "0",
+    "MerchantID": "3002607"
+   }
+  },
+  "rand_092": {
+   "expected": "E072CED8C505249881BB22305B6411C8",
+   "params": {
+    "CustomField1": "中文與English",
+    "Desc_1": "中文與English",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "hash#taga b",
+    "MerchantTradeNo": "slash/okeq=sign"
+   }
+  },
+  "rand_093": {
+   "expected": "F8709699A0BE48F6A40964993FC95AFC14AE840819E09871546F0920A3363E4D",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "PaymentDate": "paren(1)"
+   }
+  },
+  "rand_094": {
+   "expected": "1B7BD7D8526A613BD5444E071B3AA15B45A9EC14B53472E1CBA2D37740F0DB5F",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "StoreID": "semi;pct%25"
+   }
+  },
+  "rand_095": {
+   "expected": "878DCAB347FEF6B4462BE3503CC9C35DCCA7DAB8E20196939CB585ACCB38D51A",
+   "params": {
+    "Desc_1": "dot.d0123quote'q",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "PaymentType": "slash/ok",
+    "ReturnURL": "XYZ0123XYZ"
+   }
+  },
+  "rand_096": {
+   "expected": "2D81BFBF61715D56843E9474FB1FAE4C",
+   "params": {
+    "CustomField2": "XYZamp&ersandparen(1)",
+    "Desc_1": "測試",
+    "EncryptType": "0",
+    "ItemName": "dot.dXYZ",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "abcpct%25"
+   }
+  },
+  "rand_097": {
+   "expected": "C20815EC31DEB16DB709ED755D2B1DE9",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "q?0123",
+    "ReturnURL": "0123hash#tagcolon:time",
+    "RtnMsg": "0123at@site",
+    "TradeDesc": "amp&ersand",
+    "z": "測試"
+   }
+  },
+  "rand_098": {
+   "expected": "CD411DD7A72426EC7DE63CCCCE2D9FA48D84C527FEB50699C65FF5044E8226C9",
+   "params": {
+    "ChoosePayment": "semi;dash-d",
+    "ChooseSubPayment": "slash/okabc逗號,寫",
+    "CustomField2": "quote'q",
+    "Desc_1": "測試colon:time中文與English",
+    "EncryptType": "1",
+    "MerchantID": "中文與Englishquote'q中文與English",
+    "ReturnURL": "paren(1)",
+    "_x": "中文與Englishquote'qhash#tag",
+    "a": "quote'qat@site",
+    "z": "semi;abcparen(1)"
+   }
+  },
+  "rand_099": {
+   "expected": "F45F509403353ECD39A8EA992C91ADA3DC27FE3876D6DD6523913CC0B72D58AC",
+   "params": {
+    "ChoosePayment": "amp&ersandsemi;",
+    "ChooseSubPayment": "semi;",
+    "EncryptType": "1",
+    "MerchantID": "at@sitedash-dplus+",
+    "MerchantTradeNo": "dot.d測試",
+    "RtnCode": "under_d測試",
+    "RtnMsg": "under_d",
+    "StoreID": "colon:timecolon:time",
+    "TradeDesc": "under_dslash/okpct%25",
+    "z": "測試dot.d"
+   }
+  },
+  "rand_100": {
+   "expected": "6A66C9F1DEA9BEC15347316C352FBC8B1B987D490DD2E062A599DA2E01921E97",
+   "params": {
+    "ChoosePayment": "at@sitepct%25",
+    "EncryptType": "1",
+    "MerchantID": "3002607"
+   }
+  },
+  "rand_101": {
+   "expected": "0FFC426DA238039A87AAB78F0048F5F64E9B52EE3E911FEE90C98212A258B95C",
+   "params": {
+    "ChooseSubPayment": "paren(1)",
+    "Desc_1": "plus+",
+    "EncryptType": "1",
+    "ItemURL": "paren(1)",
+    "MerchantID": "3002607",
+    "PaymentDate": "q?a b",
+    "PaymentType": "eq=sign",
+    "z": "dash-damp&ersand"
+   }
+  },
+  "rand_102": {
+   "expected": "4E70C9A4E84B2E2C4CD9538D7525E294",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "emoji😀q?",
+    "ReturnURL": "colon:time"
+   }
+  },
+  "rand_103": {
+   "expected": "DF86E9AEC1EFD094ED9A2A0AC2040CD4",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "eq=sign測試abc",
+    "TradeNo": "plus+q?",
+    "_x": "測試"
+   }
+  },
+  "rand_104": {
+   "expected": "FFE7A98CE002E24B9F847E8213709357",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "中文與Englishquote'q",
+    "PaymentType": "pct%25star*samp&ersand",
+    "RtnCode": "hash#tag",
+    "RtnMsg": "under_deq=signa b",
+    "StoreID": "中文與English",
+    "TradeNo": "amp&ersandeq=sign"
+   }
+  },
+  "rand_105": {
+   "expected": "978F5A4A36162D5EE2FEE3FBA5B305B0",
+   "params": {
+    "ChooseSubPayment": "slash/okparen(1)brack[]",
+    "EncryptType": "0",
+    "ItemName": "paren(1)中文與English",
+    "ItemURL": "pct%250123",
+    "MerchantID": "0123semi;",
+    "ReturnURL": "amp&ersandXYZabc",
+    "TradeNo": "emoji😀colon:time",
+    "_x": "paren(1)abc"
+   }
+  },
+  "rand_106": {
+   "expected": "7F0C55D4E2BA63B4C661E4B40C6CA16A",
+   "params": {
+    "ChooseSubPayment": "逗號,寫a b",
+    "EncryptType": "0",
+    "MerchantID": "3002607"
+   }
+  },
+  "rand_107": {
+   "expected": "194DC32A45218EFA56B7C51620028705",
+   "params": {
+    "EncryptType": "0",
+    "ItemName": "abcq?q?",
+    "MerchantID": "3002607",
+    "RtnMsg": "逗號,寫brack[]under_d",
+    "_x": "slash/okemoji😀eq=sign",
+    "lang": "plus+"
+   }
+  },
+  "rand_108": {
+   "expected": "50999DB37D8BF1DC4E62433D6C2B5F4AB2DE034AA478EDEE0DED8CCCD05C35F6",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "lang": "eq=signabcq?"
+   }
+  },
+  "rand_109": {
+   "expected": "1C41399F4139408B91DB1EC67C2D511D",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "_x": "XYZ"
+   }
+  },
+  "rand_110": {
+   "expected": "11943E5C106829A7DC592B3E620CC54E",
+   "params": {
+    "CustomField2": "abchash#tag",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "semi;hash#tag",
+    "a": "star*sa b0123"
+   }
+  },
+  "rand_111": {
+   "expected": "04BDBC0D37F3FC281E9D7D8F3BEC8D6CC59DACE0D691CD08E3923EC2936DB1B0",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "pct%25plus+",
+    "MerchantID": "3002607",
+    "a": "測試"
+   }
+  },
+  "rand_112": {
+   "expected": "94992245344D856E1321AA8048899E1BB5CE8E64538F020E2F562B2BA487B782",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "PaymentDate": "star*s",
+    "PaymentType": "abc",
+    "RtnCode": "eq=sign"
+   }
+  },
+  "rand_113": {
+   "expected": "368C3FC20845CE27DBE95D61DEF653FD",
+   "params": {
+    "CustomField1": "plus+dash-d",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "eq=sign",
+    "RtnCode": "at@sitecolon:time",
+    "StoreID": "hash#tagslash/ok",
+    "TradeDesc": "0123q?",
+    "TradeNo": "at@site逗號,寫emoji😀",
+    "a": "a b",
+    "lang": "at@site",
+    "z": "XYZq?"
+   }
+  },
+  "rand_114": {
+   "expected": "FE84919E6267D962CD110A1C54DFF009",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "逗號,寫under_d"
+   }
+  },
+  "rand_115": {
+   "expected": "0E2792DFA6D33DAE99ECD1960B8AC1ACD1174AD2730781B4354778B73B941A93",
+   "params": {
+    "CustomField1": "colon:timeamp&ersandplus+",
+    "EncryptType": "1",
+    "ItemURL": "逗號,寫逗號,寫quote'q",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "paren(1)",
+    "MerchantTradeNo": "中文與Englishabcquote'q",
+    "PaymentDate": "pct%25中文與Englishat@site",
+    "a": "a b",
+    "lang": "pct%25hash#tag"
+   }
+  },
+  "rand_116": {
+   "expected": "ED8AA70200CB525EB3854FD4D6648D3C",
+   "params": {
+    "EncryptType": "0",
+    "ItemURL": "emoji😀emoji😀amp&ersand",
+    "MerchantID": "3002607",
+    "ReturnURL": "eq=sign",
+    "RtnMsg": "amp&ersandemoji😀",
+    "TotalAmount": "abc",
+    "a": "測試0123",
+    "lang": "dash-dquote'qsemi;"
+   }
+  },
+  "rand_117": {
+   "expected": "51768D71EDEF11075307DB1F75BC8CC6",
+   "params": {
+    "Desc_1": "hash#tagemoji😀",
+    "EncryptType": "0",
+    "ItemName": "quote'q測試colon:time",
+    "ItemURL": "a babcbrack[]",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "under_d",
+    "PaymentType": "paren(1)",
+    "RtnCode": "slash/ok逗號,寫",
+    "RtnMsg": "slash/ok逗號,寫emoji😀",
+    "TotalAmount": "colon:timebrack[]",
+    "TradeDesc": "dash-demoji😀逗號,寫",
+    "_x": "0123dot.d"
+   }
+  },
+  "rand_118": {
+   "expected": "8FA67301D8F23D3E7730DD0487E22D55A8502E4D35CB51880B56309F84299A75",
+   "params": {
+    "ChooseSubPayment": "colon:timequote'q",
+    "EncryptType": "1",
+    "ItemName": "dot.d0123",
+    "MerchantID": "3002607",
+    "lang": "amp&ersandq?semi;",
+    "z": "colon:timeeq=sign"
+   }
+  },
+  "rand_119": {
+   "expected": "6CC65058530A3535B89C9EBC53EA64B92B441C0524BEB615DD8F5797DA6B41CD",
+   "params": {
+    "CustomField2": "XYZsemi;",
+    "EncryptType": "1",
+    "ItemName": "star*sparen(1)",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "abcplus+",
+    "RtnMsg": "quote'q",
+    "TradeNo": "under_dsemi;"
+   }
+  },
+  "rand_120": {
+   "expected": "27FD946578CF4FA357D03E5E60AB859E",
+   "params": {
+    "ChoosePayment": "pct%25under_d",
+    "CustomField1": "brack[]at@siteplus+",
+    "CustomField2": "star*s逗號,寫pct%25",
+    "Desc_1": "q?",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "abcabccolon:time",
+    "PaymentDate": "hash#tagquote'q",
+    "TradeDesc": "中文與English測試star*s",
+    "TradeNo": "plus+",
+    "lang": "star*sq?slash/ok"
+   }
+  },
+  "rand_121": {
+   "expected": "3FC795F047BF369339FEA9E3D4266B04630877B04C7C10D35FF59BF712582EE0",
+   "params": {
+    "EncryptType": "1",
+    "ItemURL": "dot.d",
+    "MerchantID": "3002607",
+    "RtnCode": "at@siteparen(1)"
+   }
+  },
+  "rand_122": {
+   "expected": "8EACBB7950F5497D11D577E243A8E1A8",
+   "params": {
+    "ChooseSubPayment": "abcparen(1)dot.d",
+    "Desc_1": "colon:time中文與English",
+    "EncryptType": "0",
+    "ItemName": "中文與Englishcolon:timeXYZ",
+    "MerchantID": "3002607",
+    "PaymentType": "逗號,寫dash-ddot.d",
+    "ReturnURL": "emoji😀",
+    "RtnCode": "amp&ersand",
+    "RtnMsg": "plus+emoji😀q?",
+    "TotalAmount": "eq=signhash#tagabc",
+    "a": "amp&ersand逗號,寫emoji😀",
+    "z": "0123quote'qeq=sign"
+   }
+  },
+  "rand_123": {
+   "expected": "48373600A0ACBDA26D8C6ABDB1A973FBADA0A0EE2C4A4555DF55C3BA26CCE535",
+   "params": {
+    "CustomField2": "q?",
+    "EncryptType": "1",
+    "ItemURL": "star*s",
+    "MerchantID": "中文與English",
+    "MerchantTradeDate": "emoji😀測試",
+    "TotalAmount": "逗號,寫",
+    "TradeNo": "semi;",
+    "a": "under_dsemi;star*s"
+   }
+  },
+  "rand_124": {
+   "expected": "73CB90363289C666291D5F13B4DE1755",
+   "params": {
+    "ChoosePayment": "star*s",
+    "ChooseSubPayment": "under_demoji😀",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "quote'q逗號,寫",
+    "ReturnURL": "semi;pct%25dot.d",
+    "StoreID": "中文與English",
+    "TotalAmount": "abc",
+    "TradeNo": "colon:timepct%25",
+    "a": "q?hash#tagsemi;",
+    "lang": "逗號,寫plus+at@site"
+   }
+  },
+  "rand_125": {
+   "expected": "A853BA9D5A7F96F900D9F9D5939D0C69B3C18648B5E9B19A19D9DCD70869BEC4",
+   "params": {
+    "CustomField1": "dash-d",
+    "EncryptType": "1",
+    "MerchantID": "3002607"
+   }
+  },
+  "rand_126": {
+   "expected": "6D6C4B8F8268029497B3F63A58E28EC379F224E1DEF1B339FC91034C1E2E0E68",
+   "params": {
+    "CustomField1": "pct%25",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "paren(1)eq=sign",
+    "PaymentDate": "quote'qpct%25amp&ersand",
+    "TradeDesc": "abc",
+    "TradeNo": "hash#tageq=sign",
+    "_x": "dot.d"
+   }
+  },
+  "rand_127": {
+   "expected": "3E9EB5F9203F34CA10DA63EB0EB74A86",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "RtnMsg": "a bquote'q"
+   }
+  },
+  "rand_128": {
+   "expected": "91966073935D6CFC31A583C93AA60565",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "PaymentDate": "0123hash#taghash#tag",
+    "ReturnURL": "XYZ",
+    "TotalAmount": "a bsemi;"
+   }
+  },
+  "rand_129": {
+   "expected": "CED094A6FE4131E5711392E207D0BF6B",
+   "params": {
+    "CustomField2": "逗號,寫at@siteat@site",
+    "EncryptType": "0",
+    "ItemURL": "amp&ersand",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "plus+",
+    "StoreID": "abccolon:time",
+    "TotalAmount": "under_dcolon:timeabc",
+    "TradeDesc": "dot.ddot.damp&ersand",
+    "z": "pct%25colon:time"
+   }
+  },
+  "rand_130": {
+   "expected": "D16E97D0ABDB89B725AE7C8900E200B3",
+   "params": {
+    "ChoosePayment": "a bat@site",
+    "CustomField2": "paren(1)dot.d",
+    "EncryptType": "0",
+    "ItemURL": "0123",
+    "MerchantID": "3002607",
+    "PaymentType": "dot.d",
+    "RtnCode": "abc",
+    "RtnMsg": "at@site測試brack[]",
+    "a": "emoji😀逗號,寫中文與English",
+    "lang": "dot.dunder_d",
+    "z": "quote'q0123"
+   }
+  },
+  "rand_131": {
+   "expected": "9394A8F0D0CFD2029F674E8A3C129FC2",
+   "params": {
+    "EncryptType": "0",
+    "ItemURL": "star*s",
+    "MerchantID": "3002607",
+    "ReturnURL": "hash#tag逗號,寫",
+    "_x": "逗號,寫slash/ok"
+   }
+  },
+  "rand_132": {
+   "expected": "5FD182B36C8D9B42A040D37DA702051D",
+   "params": {
+    "ChooseSubPayment": "under_d",
+    "EncryptType": "0",
+    "ItemURL": "under_dXYZabc",
+    "MerchantID": "3002607",
+    "RtnCode": "paren(1)逗號,寫"
+   }
+  },
+  "rand_133": {
+   "expected": "DFEB2748E9E60A97FA4863957DAE74CF1EB5A7305F3F11E2584E409DC5013C1D",
+   "params": {
+    "ChooseSubPayment": "dot.dsemi;XYZ",
+    "CustomField2": "brack[]",
+    "EncryptType": "1",
+    "ItemURL": "dot.d",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "eq=signplus+pct%25",
+    "ReturnURL": "quote'q",
+    "RtnMsg": "eq=signunder_d",
+    "TotalAmount": "slash/ok",
+    "_x": "amp&ersandsemi;",
+    "z": "測試"
+   }
+  },
+  "rand_134": {
+   "expected": "4D0C35054FE759DEB1422B655266814A",
+   "params": {
+    "ChooseSubPayment": "paren(1)0123",
+    "EncryptType": "0",
+    "ItemName": "colon:time0123",
+    "ItemURL": "abc",
+    "MerchantID": "3002607",
+    "TotalAmount": "0123",
+    "a": "0123colon:time"
+   }
+  },
+  "rand_135": {
+   "expected": "3F2806356EA140C0316E4D2995785384",
+   "params": {
+    "Desc_1": "at@site",
+    "EncryptType": "0",
+    "ItemName": "star*sunder_dXYZ",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "slash/ok",
+    "RtnMsg": "slash/okXYZ",
+    "TotalAmount": "hash#tag",
+    "_x": "under_dparen(1)",
+    "a": "semi;",
+    "z": "dash-d0123colon:time"
+   }
+  },
+  "rand_136": {
+   "expected": "1EC3230A4E9D2A37B382AE6123BE58D4",
+   "params": {
+    "CustomField1": "q?",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "RtnMsg": "colon:timepct%25dot.d",
+    "TradeDesc": "hash#tagamp&ersandemoji😀"
+   }
+  },
+  "rand_137": {
+   "expected": "9F0E0A0B5588C96F7DAF4387D6AA56AE7543B118001DBE519D585C2AEE90D670",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "XYZemoji😀semi;",
+    "PaymentType": "brack[]0123",
+    "RtnMsg": "semi;"
+   }
+  },
+  "rand_138": {
+   "expected": "737B688BED6D28422D8ED8EBBD97AE43",
+   "params": {
+    "Desc_1": "star*s",
+    "EncryptType": "0",
+    "ItemName": "eq=sign",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "emoji😀dot.dXYZ",
+    "RtnCode": "中文與Englishdot.d",
+    "TotalAmount": "slash/okXYZpct%25",
+    "TradeDesc": "slash/ok",
+    "TradeNo": "dash-d",
+    "lang": "中文與Englishbrack[]emoji😀"
+   }
+  },
+  "rand_139": {
+   "expected": "46DC27CA481D34C1BAB11377F878896E",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "RtnCode": "quote'qdot.dunder_d",
+    "RtnMsg": "XYZ",
+    "TradeNo": "plus+eq=sign測試",
+    "a": "a bunder_d",
+    "z": "dash-dcolon:timehash#tag"
+   }
+  },
+  "rand_140": {
+   "expected": "E95DB192B367C921904945E739A1A133",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "TradeDesc": "paren(1)0123XYZ",
+    "_x": "abcamp&ersandslash/ok",
+    "lang": "colon:time"
+   }
+  },
+  "rand_141": {
+   "expected": "1D68937DD303C8524C776A30CDFDCFF1FACFA75F1CDC3B9DDF60016D12338E03",
+   "params": {
+    "CustomField2": "abcamp&ersanddot.d",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "a bslash/okquote'q",
+    "RtnCode": "slash/okunder_dhash#tag",
+    "RtnMsg": "dot.d",
+    "TradeDesc": "plus+",
+    "z": "hash#tagdot.dplus+"
+   }
+  },
+  "rand_142": {
+   "expected": "B45E882E4EA4F8931896306543E021E1DF5AF9F961B91DE685274268616CA7BB",
+   "params": {
+    "ChoosePayment": "plus+",
+    "CustomField2": "0123eq=signXYZ",
+    "EncryptType": "1",
+    "ItemName": "quote'qsemi;amp&ersand",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "at@site",
+    "_x": "中文與Englishunder_dplus+",
+    "z": "dot.dsemi;"
+   }
+  },
+  "rand_143": {
+   "expected": "DE645FC52115264D68246E0763E6E262",
+   "params": {
+    "Desc_1": "hash#tagpct%25colon:time",
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "中文與English",
+    "MerchantTradeNo": "quote'q",
+    "ReturnURL": "at@site中文與English逗號,寫",
+    "RtnCode": "semi;測試quote'q",
+    "StoreID": "q?dot.d",
+    "TotalAmount": "pct%25brack[]中文與English",
+    "_x": "中文與English中文與English",
+    "lang": "paren(1)"
+   }
+  },
+  "rand_144": {
+   "expected": "67E6EAF36B39E5D813C4AA041724ED1A7632D32CD076546D1769E68214B92B53",
+   "params": {
+    "CustomField1": "XYZq?",
+    "EncryptType": "1",
+    "MerchantID": "3002607"
+   }
+  },
+  "rand_145": {
+   "expected": "EE58A4B69CC9AFE4514CBF79D876FD27784C0951F86E1C9F972E7069CFDBD2EB",
+   "params": {
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "paren(1)plus+",
+    "TotalAmount": "under_d",
+    "a": "star*s"
+   }
+  },
+  "rand_146": {
+   "expected": "3D945442825DB134084974F27B29CBC50416C01BE7766047DBD29E12DCF9C6BB",
+   "params": {
+    "CustomField2": "emoji😀",
+    "EncryptType": "1",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "dash-d逗號,寫abc",
+    "RtnCode": "semi;",
+    "TradeNo": "brack[]at@siteq?",
+    "_x": "slash/ok",
+    "a": "brack[]amp&ersand"
+   }
+  },
+  "rand_147": {
+   "expected": "D45A91A093E26A97600828723EA0A27E",
+   "params": {
+    "EncryptType": "0",
+    "MerchantID": "3002607",
+    "TradeDesc": "emoji😀brack[]"
+   }
+  },
+  "rand_148": {
+   "expected": "D1BA5EC0E303741643650ED71D0D095581106EB10E2861F0C8FB44F02150210B",
+   "params": {
+    "ChoosePayment": "star*s",
+    "CustomField1": "pct%25dot.demoji😀",
+    "CustomField2": "0123plus+",
+    "Desc_1": "pct%25",
+    "EncryptType": "1",
+    "ItemName": "pct%25plus+eq=sign",
+    "ItemURL": "a bXYZ",
+    "MerchantID": "3002607",
+    "PaymentDate": "abcXYZXYZ",
+    "RtnMsg": "colon:time0123at@site",
+    "TotalAmount": "semi;"
+   }
+  },
+  "rand_149": {
+   "expected": "6B65873774D79D9C0499D79F72429157AB74AFB971A10E11CE0E0C0495866F63",
+   "params": {
+    "EncryptType": "1",
+    "ItemURL": "dash-deq=sign",
+    "MerchantID": "3002607",
+    "MerchantTradeDate": "brack[]",
+    "PaymentDate": "dash-deq=sign",
+    "ReturnURL": "測試"
+   }
+  },
+  "tilde_000": {
+   "dot_net_escaped": "F000065EE8B17426CA6D1856CF3AB96B683845B53B54B250E5266D2B9B19B8AD",
+   "expected": "053CE722924AAC6A0392A12253E9D6064BFF10CBFD1823C761C62E6BD0BC29AD",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "x~y",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "tilde0",
+    "TotalAmount": "100",
+    "TradeDesc": "a~b~0"
+   }
+  },
+  "tilde_001": {
+   "dot_net_escaped": "0B9448820DB8B6A194EBD59BB79F30AF123DA57BA22FB5046D2B5106BB100204",
+   "expected": "B159B301C688F670FCAF66D57DC920F68651C3B1A1F2C7FBBDCF3644F5C4BA03",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "x~y",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "tilde1",
+    "TotalAmount": "101",
+    "TradeDesc": "a~b~1"
+   }
+  },
+  "tilde_002": {
+   "dot_net_escaped": "24669E1ED0CB234890ABF6D1149E03C74B7715233B4655E450613920230ABD91",
+   "expected": "2891C9486E0EF927A83056DD1A1E29BB8B19FD3B312E4CC1F420785089F400D4",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "x~y",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "tilde2",
+    "TotalAmount": "102",
+    "TradeDesc": "a~b~2"
+   }
+  },
+  "tilde_003": {
+   "dot_net_escaped": "01C05BE31485F43228334A5E55D4F2FE80D7BE3A1DC31B487418E4A22F5887E0",
+   "expected": "B8289CF6C3DC4AB549EBA2FAC5395BCD72C6332E845A1C39BEEE2C979DF97F2E",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "x~y",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "tilde3",
+    "TotalAmount": "103",
+    "TradeDesc": "a~b~3"
+   }
+  },
+  "tilde_004": {
+   "dot_net_escaped": "A1F028F92CC8F2C942ABA7380FB899CAE01637A9BAEDCA37CDA3B9A99ABE2249",
+   "expected": "AA1B1229AEC6E73A5BA7C549FE6592CFA81692AC91D5644BD0A2715162DC9E58",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "x~y",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "tilde4",
+    "TotalAmount": "104",
+    "TradeDesc": "a~b~4"
+   }
+  },
+  "tilde_005": {
+   "dot_net_escaped": "5834A8111BDCEB215635CCB51BC3402080C974E6779F9A22A5386F525A14D14D",
+   "expected": "5BEB375B6819CA67A386BEA125F84971CB26B41E5CF70F06CFC5C0E1EAF9CCF8",
+   "params": {
+    "EncryptType": "1",
+    "ItemName": "x~y",
+    "MerchantID": "3002607",
+    "MerchantTradeNo": "tilde5",
+    "TotalAmount": "105",
+    "TradeDesc": "a~b~5"
+   }
+  }
+ },
  "errors": {
   "donation_with_print": {
    "error": "Print have to fill \"0\", when Donation is \"1\"."

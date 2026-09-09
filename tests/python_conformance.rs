@@ -37,6 +37,11 @@ struct Fixture {
     errors: HashMap<String, ErrCase>,
     check_value: HashMap<String, CheckValueCase>,
     html_form: HtmlFormCase,
+    /// 156 seeded-random parameter maps signed by the real SDK (150
+    /// tilde-free that must match byte-for-byte, 6 tilde-bearing that pin
+    /// the %7e divergence).
+    #[serde(default)]
+    differential: HashMap<String, CheckValueCase>,
 }
 
 #[derive(serde::Deserialize)]
@@ -390,6 +395,49 @@ fn html_form_matches_the_official_sdk() {
     let script = "<script type=\"text/javascript\">document.getElementById(\"data_set\").submit();</script></form>";
     assert!(got.html_form().starts_with(head));
     assert!(got.html_form().ends_with(script));
+}
+
+/// Large-scale differential test: every seeded-random parameter map must
+/// produce the SAME digest as the real Python SDK, and the tilde-bearing
+/// cases must produce the .NET-escaped digest instead (the documented
+/// divergence).
+#[test]
+fn differential_corpus_matches_the_official_sdk() {
+    let f = fixture();
+    let client = sdk();
+    assert!(
+        f.differential.len() >= 150,
+        "the vendored corpus should carry 150+ cases, got {}",
+        f.differential.len()
+    );
+    let map = |params: &BTreeMap<String, String>| {
+        params.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    };
+    let mut plain = 0;
+    let mut tilde = 0;
+    for (name, case) in &f.differential {
+        let got = client.generate_check_value(&map(&case.params)).unwrap();
+        if name.starts_with("tilde") {
+            tilde += 1;
+            assert_ne!(
+                got, case.expected,
+                "{name}: tilde case unexpectedly matched the SDK"
+            );
+            assert_eq!(
+                got,
+                case.dot_net_escaped.as_deref().unwrap(),
+                "{name}: tilde case must match the .NET-escaped contract"
+            );
+        } else {
+            plain += 1;
+            assert_eq!(
+                got, case.expected,
+                "{name}: digest diverges from the real SDK"
+            );
+        }
+    }
+    assert_eq!(plain, 150);
+    assert_eq!(tilde, 6);
 }
 
 // --- The typed API's loud rejections (new behavior, documented) ---

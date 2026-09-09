@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ee479006b30154a144e6d818ac0aa05043e6923d3a83a934e7fae7de6092818d # shrinks to bytes = [128]
+cc 27b6114e900f764b96e778923072f0f18241d6779eb3572a18f6c74ed1804de7 # shrinks to payload = [], key_choice = 1
+cc a76adbed7b882df646d2e64b44159421fc6354e522578e8c369a27b7beb6ec23 # shrinks to params = {"MerchantID": "3002607", "CheckMacValue": ""}
