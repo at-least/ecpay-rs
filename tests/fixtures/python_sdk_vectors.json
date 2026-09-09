@@ -928,6 +928,82 @@
     ]
    ]
   },
+  "credit_language": {
+   "ok": [
+    [
+     "CheckMacValue",
+     "CF7F4F1DFF067E482A24A8A58CF7478B50C13B913A32513BD45DF4D598016A76"
+    ],
+    [
+     "ChoosePayment",
+     "Credit"
+    ],
+    [
+     "ClientBackURL",
+     "https://www.ecpay.com.tw/client_back_url.php"
+    ],
+    [
+     "EncryptType",
+     "1"
+    ],
+    [
+     "InvoiceMark",
+     "N"
+    ],
+    [
+     "ItemName",
+     "商品1#商品2"
+    ],
+    [
+     "ItemURL",
+     "https://www.ecpay.com.tw/item_url.php"
+    ],
+    [
+     "Language",
+     "eng"
+    ],
+    [
+     "MerchantID",
+     "3002607"
+    ],
+    [
+     "MerchantTradeDate",
+     "2024/01/01 12:00:00"
+    ],
+    [
+     "MerchantTradeNo",
+     "NO20240101120000"
+    ],
+    [
+     "NeedExtraPaidInfo",
+     "Y"
+    ],
+    [
+     "OrderResultURL",
+     "https://www.ecpay.com.tw/order_result_url.php"
+    ],
+    [
+     "PaymentType",
+     "aio"
+    ],
+    [
+     "Remark",
+     "交易備註"
+    ],
+    [
+     "ReturnURL",
+     "https://www.ecpay.com.tw/return_url.php"
+    ],
+    [
+     "TotalAmount",
+     "2000"
+    ],
+    [
+     "TradeDesc",
+     "訂單測試"
+    ]
+   ]
+  },
   "credit_period": {
    "ok": [
     [

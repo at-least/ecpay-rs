@@ -119,7 +119,11 @@ pub const VENDOR_API_URL_PRODUCTION: &str = "https://vendor.ecpay.com.tw/Payment
 /// The configured client (Go `type Ecpay struct`; the official Python SDK's
 /// `ECPayPaymentSdk(MerchantID, HashKey, HashIV)` constructor). The zero
 /// value is valid: empty API URLs fall back to the production endpoints.
-#[derive(Debug, Clone, Default)]
+///
+/// `Debug` is hand-written and redacts the signing secrets (`hash_key`,
+/// `hash_iv`, `invoice_hash_key`, `invoice_hash_iv`) so a stray
+/// `{:?}` on the client never logs them.
+#[derive(Clone, Default)]
 pub struct Ecpay {
     pub platform_id: String,
     pub merchant_id: String,
@@ -137,6 +141,26 @@ pub struct Ecpay {
     pub credit_api_url: String,
     /// Base URL for the vendor (特店後台) endpoints; empty = production.
     pub vendor_api_url: String,
+}
+
+impl std::fmt::Debug for Ecpay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("Ecpay");
+        s.field("platform_id", &self.platform_id)
+            .field("merchant_id", &self.merchant_id)
+            .field("hash_key", &"***")
+            .field("hash_iv", &"***")
+            .field("payment_api_url", &self.payment_api_url)
+            .field("invoice_api_url", &self.invoice_api_url)
+            .field("invoice_hash_key", &"***")
+            .field("invoice_hash_iv", &"***")
+            .field("relate_number", &self.relate_number)
+            .field("return_url", &self.return_url)
+            .field("payment_info_url", &self.payment_info_url)
+            .field("credit_api_url", &self.credit_api_url)
+            .field("vendor_api_url", &self.vendor_api_url);
+        s.finish()
+    }
 }
 
 impl Ecpay {
@@ -198,5 +222,33 @@ impl Ecpay {
         // compare.
         let want = hash_mac(&rest, &self.hash_key, &self.hash_iv);
         crypto::constant_time_eq(got.to_uppercase().as_bytes(), want.as_bytes())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_redacts_the_signing_secrets() {
+        let client = Ecpay {
+            merchant_id: "3002607".into(),
+            hash_key: "pwFHCqoQZGmho4w6".into(),
+            hash_iv: "EkRm7iFT261dpevs".into(),
+            invoice_hash_key: b"ejCk326UnaZWKisg".to_vec(),
+            invoice_hash_iv: b"q9jcZX8Ib9LM8wYk".to_vec(),
+            ..Default::default()
+        };
+        let dumped = format!("{client:?}");
+        for secret in [
+            "pwFHCqoQZGmho4w6",
+            "EkRm7iFT261dpevs",
+            "ejCk326UnaZWKisg",
+            "q9jcZX8Ib9LM8wYk",
+        ] {
+            assert!(!dumped.contains(secret), "Debug leaked {secret}: {dumped}");
+        }
+        assert!(dumped.contains("hash_key: \"***\""), "{dumped}");
+        assert!(dumped.contains("merchant_id: \"3002607\""), "{dumped}");
     }
 }

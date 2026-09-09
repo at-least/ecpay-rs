@@ -106,18 +106,17 @@ pub(crate) fn parse_query(query: &str) -> Result<HashMap<String, String>> {
 
 /// Python `urllib.parse.parse_qsl(text, keep_blank_values=True)` fed through
 /// `dict(...)` — the response decoder the official SDK uses: blank values
-/// kept, malformed escapes left literal (parse_qsl is lenient), and duplicate
-/// keys resolved last-value-wins (dict insertion overwrites).
+/// kept (a control name without `=` yields `("k", "")`, verified against
+/// CPython), `a=b=c` splits on the first `=`, malformed escapes left literal
+/// (parse_qsl is lenient), and duplicate keys resolved last-value-wins
+/// (dict insertion overwrites).
 pub(crate) fn parse_qsl(text: &str) -> std::collections::BTreeMap<String, String> {
     let mut out = std::collections::BTreeMap::new();
     for part in text.split('&') {
         if part.is_empty() {
             continue;
         }
-        let (k, v) = match part.split_once('=') {
-            Some((k, v)) => (k, v),
-            None => continue, // keep_blank_values keeps "k=", not bare "k"
-        };
+        let (k, v) = part.split_once('=').unwrap_or((part, ""));
         out.insert(unquote_plus(k), unquote_plus(v));
     }
     out

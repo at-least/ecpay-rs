@@ -6,12 +6,12 @@ with `requests` stubbed via `sys.modules` — the `create_order`,
 `generate_check_value`, and `gen_html_post_form` outputs are the upstream
 library's own, not reimplementations.
 
-To regenerate after an upstream SDK change:
+The generator is checked in as `gen_vectors.py`. To regenerate after an
+upstream SDK change:
 
 ```bash
-git clone --depth 1 https://github.com/ECPay/ECPayAIO_Python /tmp/ECPayAIO_Python
-python3 gen_vectors.py   # checked into the repo history; prints /tmp/ecpay_vectors.json
-cp /tmp/ecpay_vectors.json tests/fixtures/python_sdk_vectors.json
+git clone --depth 1 https://github.com/ECPay/ECPayAIO_Python   tests/fixtures/ECPayAIO_Python   # or point ECPAY_PYTHON_SDK at a checkout
+python3 tests/fixtures/gen_vectors.py   # rewrites python_sdk_vectors.json in place
 ```
 
 The fixture pins:

@@ -539,6 +539,9 @@ impl Ecpay {
                 }
             }
         }
+        if credit_only {
+            insert_optional_str(&mut m, "Language", &p.language);
+        }
 
         if p.invoice_mark.is_some() && !mark.is_empty() {
             m.insert("InvoiceMark".to_owned(), mark.to_owned());

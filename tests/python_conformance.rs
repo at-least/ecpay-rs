@@ -84,6 +84,10 @@ fn scenario(name: &str) -> AioCheckOutParams {
             credit_installment: Some("3,6,12".into()),
             ..base(ChoosePayment::Credit)
         },
+        "credit_language" => AioCheckOutParams {
+            language: Some("eng".into()),
+            ..base(ChoosePayment::Credit)
+        },
         "credit_period" => AioCheckOutParams {
             period_amount: Some(1000),
             period_type: Some(ecpay::payment::period_type::MONTH.into()),
@@ -249,7 +253,7 @@ fn create_order_matches_the_official_sdk() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 17, "every ok scenario ran");
+    assert_eq!(checked, 18, "every ok scenario ran");
 }
 
 fn get_mac(pairs: &[(String, String)]) -> String {

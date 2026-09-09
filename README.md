@@ -180,7 +180,7 @@ cargo clippy --all-targets
 ```
 
 `tests/fixtures/python_sdk_vectors.json` 由「真的」官方 Python SDK 執行產生
-(`requests` 以 stub 取代;產生腳本見 git 歷史),重新產生方式見
+(`requests` 以 stub 取代;產生腳本 `gen_vectors.py` 同目錄),重新產生方式見
 [tests/fixtures/README.md](tests/fixtures/README.md)。
 
 ## License
