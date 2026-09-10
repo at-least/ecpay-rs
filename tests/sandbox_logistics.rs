@@ -8,8 +8,8 @@
 //! B2C CVS order.
 
 use ecpay::logistics::{
-    AllInOneCreateTestDataInput, AllInOneQueryInput, DomesticQueryInput, GetStoreListInput,
-    LogisticsCreateInput,
+    AllInOneCreateTestDataInput, AllInOneQueryInput, CrossBorderCreateTestDataInput,
+    DomesticQueryInput, GetStoreListInput, LogisticsCreateInput,
 };
 use ecpay::Ecpay;
 
@@ -60,7 +60,10 @@ async fn domestic_create_then_query_roundtrip() {
         .expect("Express/Create round-trips the MD5 MAC and parses");
     println!("create = {out:?}");
     assert_eq!(out["_status_prefix"], "1", "status segment must be 1");
-    assert_eq!(out["RtnCode"], "300", "訂單處理中 = accepted (stage OTP 流程)");
+    assert_eq!(
+        out["RtnCode"], "300",
+        "訂單處理中 = accepted (stage OTP 流程)"
+    );
     let logistics_id = &out["AllPayLogisticsID"];
     assert!(!logistics_id.is_empty(), "a logistics order id is minted");
 
@@ -78,7 +81,9 @@ async fn domestic_create_then_query_roundtrip() {
 #[tokio::test]
 async fn get_store_list_answers_json() {
     let out = sdk()
-        .logistics_get_store_list(&GetStoreListInput { cvs_type: "FAMI".into() })
+        .logistics_get_store_list(&GetStoreListInput {
+            cvs_type: "FAMI".into(),
+        })
         .await
         .expect("GetStoreList returns JSON");
     println!(
@@ -116,6 +121,31 @@ async fn allinone_v2_endpoints_answer_with_the_aes_envelope() {
             assert!(v.get("RtnCode").is_some(), "decoded business error: {v}");
         }
         Err(e) => panic!("non-2xx envelope must still decode, got {e:?}"),
+    }
+}
+
+#[tokio::test]
+async fn crossborder_create_test_data_answers_with_the_aes_envelope() {
+    // Server-truth (2026-09): the envelope is accepted and answered in-band,
+    // but public account 2000132 gets `TransCode=128 System exception` —
+    // 跨境物流 appears not to be enabled for it. What this pins is that our
+    // wire format speaks CrossBorder (a decrypt failure would answer
+    // TransCode=110 instead, as captured for a wrong key).
+    match sdk()
+        .crossborder_create_test_data(&CrossBorderCreateTestDataInput {
+            merchant_id: MERCHANT_ID.into(),
+            country: "SG".into(),
+            logistics_type: "CB".into(),
+            logistics_sub_type: "UNIMARTCBCVS".into(),
+        })
+        .await
+    {
+        Ok(out) => println!("crossborder create_test_data = {out:?}"),
+        Err(ecpay::Error::Transport { code, msg }) => {
+            println!("crossborder create_test_data transport answer = {code} {msg:?}");
+            assert_eq!(code, 128, "captured server-truth for this account");
+        }
+        Err(e) => panic!("unexpected error: {e:?}"),
     }
 }
 
