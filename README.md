@@ -238,6 +238,42 @@ cargo test --test stage_smoke -- --ignored --nocapture
 CheckMacValue Error 頁(負向對照)、QueryCreditCardPeriodInfo / DoAction /
 QueryTrade(V2) / vendor 對帳端點皆可達。
 
+#### Staging 探測:尚未實作的官方 SDK 服務
+
+`tests/stage_probes.rs`(同樣 `#[ignore]`)用本函式庫的公開加密原語
+(`encrypt_data` / `check_mac_value`)直接探測官方 PHP SDK 有、本函式庫還
+沒有的三個服務,實測結果(2026-09,staging server 實跑):
+
+- **ECPG 站內付 2.0**:`GetTokenbyTrade` 以 `{Timestamp}`-only 的 RqHeader
+  信封直接取得真實 Token(RtnCode=1);查詢走 `ecpayment-stage/1.0.0/`
+  雙 domain(未建單回 RtnCode=10000185);錯誤路徑:壞 AES key 回
+  `TransCode=110`。
+- **國內物流**:`Express/Create`(form + CheckMacValue **MD5**)實際建單
+  成功(AllPayLogisticsID 取得,RtnCode=300 處理中)。回應格式為
+  `1|<urlencoded query>`,**CMV 只簽 `1|` 之後的 query 部分**(MD5、
+  排序鍵)— 已逐位元組驗證。
+- **B2B 電子發票**:RqHeader 需帶 `RqID` + `Revision=1.0.0`,公開測試帳號
+  2000132 即可開立成功(RtnCode=1,取得發票號);回應信封的 header 是
+  `RpHeader`、版號欄位是 `Reversion`(綠界原始拼字,如實記錄)。
+
+三個服務的協議層已被 staging 證實可由本函式庫現有加密原語承載,可作為
+日後 typed 實作的設計基準。
+
+### Staging probes for unimplemented PHP-SDK services
+
+`tests/stage_probes.rs` (also `#[ignore]`d) probes the three services the
+official PHP SDK covers that this crate does not implement yet — ECPG 站內付 2.0
+(AES-JSON envelope with a `{Timestamp}`-only RqHeader; live-issued a real
+Token), domestic logistics (form POST + MD5 CheckMacValue; response is
+`1|<urlencoded query>` and the CMV signs only the query part — verified
+byte-exact live), and B2B e-invoice (RqHeader carries `RqID` + `Revision`
+1.0.0; issued successfully with the public stage account; note ECPay's own
+`RpHeader`/`Reversion` response spellings). Run:
+
+```bash
+cargo test --test stage_probes -- --ignored --test-threads=1 --nocapture
+```
+
 ### 全流程 E2E(離線、零人工)
 
 `tests/full_flow.rs` 在一般 `cargo test` 內跑完整協議流程,不需要瀏覽器、
