@@ -142,9 +142,12 @@ async fn ecpg_get_token_by_trade_accepts_our_aes_envelope() {
     assert_eq!(status, 200, "stage must answer HTTP 200");
     // Protocol acceptance is the assertion; a TransCode≠1 means our envelope
     // does NOT speak ECPG and the probe (and later implementation) must change.
-    let data = unwrap_aes_response(&body, ECPG_KEY, ECPG_IV)
-        .expect("TransCode==1 and Data decrypts");
-    println!("  Data keys = {:?}", data.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+    let data =
+        unwrap_aes_response(&body, ECPG_KEY, ECPG_IV).expect("TransCode==1 and Data decrypts");
+    println!(
+        "  Data keys = {:?}",
+        data.as_object().map(|o| o.keys().collect::<Vec<_>>())
+    );
     println!("  Data = {data}");
     assert!(
         data["Token"].as_str().is_some_and(|t| !t.is_empty()),
@@ -170,8 +173,8 @@ async fn ecpg_query_trade_on_ecpayment_domain_answers() {
     .await;
     println!("QueryTrade status={status} body={body}");
     assert_eq!(status, 200, "stage must answer HTTP 200");
-    let data = unwrap_aes_response(&body, ECPG_KEY, ECPG_IV)
-        .expect("TransCode==1 and Data decrypts");
+    let data =
+        unwrap_aes_response(&body, ECPG_KEY, ECPG_IV).expect("TransCode==1 and Data decrypts");
     println!("  Data = {data}");
     println!(
         "  RtnCode={} RtnMsg={:?} (order-not-found is the EXPECTED business answer)",
@@ -232,8 +235,7 @@ async fn logistics_domestic_create_with_md5_cmv_answers() {
         "https://www.ecpay.com.tw/example/server-reply".into(),
     );
     m.insert("ReceiverStoreID".to_owned(), "006598".into()); // store from the official example
-    let mac =
-        ecpay::crypto::check_mac_value(&m, LOGISTICS_KEY, LOGISTICS_IV, 0).expect("MD5 CMV");
+    let mac = ecpay::crypto::check_mac_value(&m, LOGISTICS_KEY, LOGISTICS_IV, 0).expect("MD5 CMV");
     m.insert("CheckMacValue".to_owned(), mac);
 
     let endpoint = "https://logistics-stage.ecpay.com.tw/Express/Create";
@@ -252,7 +254,10 @@ async fn logistics_domestic_create_with_md5_cmv_answers() {
         .expect("response carries a CheckMacValue");
     let ours = ecpay::crypto::check_mac_value(&fields, LOGISTICS_KEY, LOGISTICS_IV, 0)
         .expect("MD5 CMV over response fields");
-    assert_eq!(ours, *sent, "response CMV signs the query AFTER the `1|` prefix");
+    assert_eq!(
+        ours, *sent,
+        "response CMV signs the query AFTER the `1|` prefix"
+    );
     println!("  response CheckMacValue verified byte-exact (MD5 over the query part)");
     println!("  parsed = {fields:?}");
 }
@@ -302,8 +307,7 @@ async fn b2b_invoice_issue_reaches_the_service() {
     println!("B2B Issue status={status} body={body}");
     assert_eq!(status, 200, "stage must answer HTTP 200");
     // The public stage account 2000132 IS B2B-enabled: issuance must succeed.
-    let data = unwrap_aes_response(&body, B2B_KEY, B2B_IV)
-        .expect("TransCode==1 and Data decrypts");
+    let data = unwrap_aes_response(&body, B2B_KEY, B2B_IV).expect("TransCode==1 and Data decrypts");
     println!("  Data = {data}");
     assert_eq!(
         data["RtnCode"].as_i64(),
@@ -312,7 +316,9 @@ async fn b2b_invoice_issue_reaches_the_service() {
         data["RtnMsg"]
     );
     assert!(
-        data["InvoiceNumber"].as_str().is_some_and(|s| !s.is_empty()),
+        data["InvoiceNumber"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()),
         "an invoice number was issued"
     );
 }

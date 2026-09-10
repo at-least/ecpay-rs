@@ -297,7 +297,6 @@ impl AioCheckOut {
     }
 }
 
-
 /// Python `len()` on a `str` counts Unicode scalar values.
 fn py_len(s: &str) -> usize {
     s.chars().count()

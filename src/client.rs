@@ -300,22 +300,22 @@ impl Ecpay {
         parse_query(&body)
     }
 
-/// Parses an AES-JSON response envelope. `None` when the body isn't an
-/// envelope at all (e.g. an HTML error page).
-fn parse_envelope(body: &str) -> Option<Response> {
-    crate::crypto::unmarshal(body).ok()
-}
-
-/// Gates on TransCode and decrypts `Data` into the typed output.
-fn decode_aes_response<O: DeserializeOwned>(res: Response, key: &[u8], iv: &[u8]) -> Result<O> {
-    if res.trans_code != 1 {
-        return Err(Error::Transport {
-            code: res.trans_code,
-            msg: res.trans_msg,
-        });
+    /// Parses an AES-JSON response envelope. `None` when the body isn't an
+    /// envelope at all (e.g. an HTML error page).
+    fn parse_envelope(body: &str) -> Option<Response> {
+        crate::crypto::unmarshal(body).ok()
     }
-    decrypt_data(&res.data, key, iv)
-}
+
+    /// Gates on TransCode and decrypts `Data` into the typed output.
+    fn decode_aes_response<O: DeserializeOwned>(res: Response, key: &[u8], iv: &[u8]) -> Result<O> {
+        if res.trans_code != 1 {
+            return Err(Error::Transport {
+                code: res.trans_code,
+                msg: res.trans_msg,
+            });
+        }
+        decrypt_data(&res.data, key, iv)
+    }
 
     /// The AES-JSON envelope core for every NON-B2C service (ECPG 站內付,
     /// logistics v2, CrossBorder, B2B invoice): builds
@@ -359,7 +359,9 @@ fn decode_aes_response<O: DeserializeOwned>(res: Response, key: &[u8], iv: &[u8]
             }
         }
         let res = Self::parse_envelope(&body).ok_or_else(|| {
-            Error::Message(format!("ecpay: response is not an AES-JSON envelope: {body}"))
+            Error::Message(format!(
+                "ecpay: response is not an AES-JSON envelope: {body}"
+            ))
         })?;
         Self::decode_aes_response(res, key, iv)
     }

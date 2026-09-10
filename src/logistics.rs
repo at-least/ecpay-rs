@@ -137,10 +137,8 @@ impl Ecpay {
             .remove("CheckMacValue")
             .filter(|v| !v.is_empty())
             .ok_or(Error::CheckMacValueMismatch)?;
-        let as_map: HashMap<String, String> = fields
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        let as_map: HashMap<String, String> =
+            fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         let (key, iv) = self.logistics_keys();
         let key = std::str::from_utf8(key).map_err(|_| Error::AesKeySize(key.len()))?;
         let iv = std::str::from_utf8(iv).map_err(|_| Error::AesKeySize(iv.len()))?;
@@ -171,15 +169,8 @@ impl Ecpay {
             "Revision": "1.0.0",
         });
         let (key, iv) = self.logistics_keys();
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            key,
-            iv,
-        )
-        .await
+        self.post_aes_json(&endpoint, rq_header, &self.merchant_id, input, key, iv)
+            .await
     }
 }
 
@@ -249,10 +240,16 @@ pub struct LogisticsCreateInput {
     #[serde(skip_serializing_if = "Option::is_none", rename = "Specification")]
     pub specification: Option<String>,
     /// 預定取件時段 1:9~12 2:12~17 3:17~19 4:19~21 5:不限(HOME 必填)
-    #[serde(skip_serializing_if = "Option::is_none", rename = "ScheduledPickupTime")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "ScheduledPickupTime"
+    )]
     pub scheduled_pickup_time: Option<String>,
     /// 預定送達時段(同上,TCAT 不支援 3)(HOME 必填)
-    #[serde(skip_serializing_if = "Option::is_none", rename = "ScheduledDeliveryTime")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "ScheduledDeliveryTime"
+    )]
     pub scheduled_delivery_time: Option<String>,
     /// 物流狀態回報網址(ServerReplyURL,必填;僅支援 80/443 port)
     #[serde(rename = "ServerReplyURL")]
@@ -440,10 +437,7 @@ impl Ecpay {
 
     /// 門市清單查詢 (`Helper/GetStoreList`)。回應為 JSON(不帶
     /// CheckMacValue),故回傳 [`serde_json::Value`]。
-    pub async fn logistics_get_store_list(
-        &self,
-        input: &GetStoreListInput,
-    ) -> Result<Value> {
+    pub async fn logistics_get_store_list(&self, input: &GetStoreListInput) -> Result<Value> {
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("CvsType".to_owned(), input.cvs_type.clone());
@@ -552,10 +546,7 @@ impl Ecpay {
         if let Some(spec) = &input.specification {
             m.insert("Specification".to_owned(), spec.clone());
         }
-        m.insert(
-            "ServerReplyURL".to_owned(),
-            input.server_reply_url.clone(),
-        );
+        m.insert("ServerReplyURL".to_owned(), input.server_reply_url.clone());
         let endpoint = format!("{}Express/ReturnHome", self.logistics_base_url());
         self.post_logistics_form(endpoint, m).await
     }
@@ -630,10 +621,7 @@ impl Ecpay {
     /// 物流訂單建立的瀏覽器版 (`Express/Create` + `ClientReplyURL`):
     /// 消費者導向綠界頁面完成超商取件付款/選店流程。需要
     /// [`LogisticsCreateInput::client_reply_url`]。
-    pub fn logistics_create_form(
-        &self,
-        input: &LogisticsCreateInput,
-    ) -> Result<LogisticsForm> {
+    pub fn logistics_create_form(&self, input: &LogisticsCreateInput) -> Result<LogisticsForm> {
         let mut m = self.domestic_base_params(input)?;
         self.sign_logistics(&mut m)?;
         Ok(LogisticsForm {
@@ -648,7 +636,10 @@ impl Ecpay {
     pub fn logistics_map_form(&self, input: &MapInput) -> Result<LogisticsForm> {
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
-        m.insert("MerchantTradeNo".to_owned(), input.merchant_trade_no.clone());
+        m.insert(
+            "MerchantTradeNo".to_owned(),
+            input.merchant_trade_no.clone(),
+        );
         m.insert("LogisticsType".to_owned(), input.logistics_type.clone());
         m.insert(
             "LogisticsSubType".to_owned(),
@@ -688,7 +679,10 @@ impl Ecpay {
     ) -> Result<LogisticsForm> {
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
-        m.insert("AllPayLogisticsID".to_owned(), all_pay_logistics_id.to_owned());
+        m.insert(
+            "AllPayLogisticsID".to_owned(),
+            all_pay_logistics_id.to_owned(),
+        );
         self.sign_logistics(&mut m)?;
         Ok(LogisticsForm {
             action: format!("{}helper/printTradeDocument", self.logistics_base_url()),
@@ -707,7 +701,10 @@ impl Ecpay {
     ) -> Result<LogisticsForm> {
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
-        m.insert("AllPayLogisticsID".to_owned(), all_pay_logistics_id.to_owned());
+        m.insert(
+            "AllPayLogisticsID".to_owned(),
+            all_pay_logistics_id.to_owned(),
+        );
         m.insert("CVSPaymentNo".to_owned(), cvs_payment_no.to_owned());
         if let Some(v) = cvs_validation_no {
             m.insert("CVSValidationNo".to_owned(), v.to_owned());
@@ -734,10 +731,7 @@ impl Ecpay {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let (key, iv) = self.logistics_keys();
-        let (Ok(key), Ok(iv)) = (
-            std::str::from_utf8(key),
-            std::str::from_utf8(iv),
-        ) else {
+        let (Ok(key), Ok(iv)) = (std::str::from_utf8(key), std::str::from_utf8(iv)) else {
             return false;
         };
         let Ok(want) = check_mac_value(&rest, key, iv, 0) else {
@@ -848,9 +842,15 @@ pub struct UpdateTempTradeInput {
     pub distance: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "Specification")]
     pub specification: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "ScheduledPickupTime")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "ScheduledPickupTime"
+    )]
     pub scheduled_pickup_time: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "ScheduledDeliveryTime")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "ScheduledDeliveryTime"
+    )]
     pub scheduled_delivery_time: Option<String>,
 }
 
@@ -1005,10 +1005,7 @@ impl Ecpay {
     }
 
     /// 更新暫存物流訂單 (`Express/v2/UpdateTempTrade`)。
-    pub async fn allinone_update_temp_trade(
-        &self,
-        input: &UpdateTempTradeInput,
-    ) -> Result<Value> {
+    pub async fn allinone_update_temp_trade(&self, input: &UpdateTempTradeInput) -> Result<Value> {
         self.post_logistics_aes("Express/v2/UpdateTempTrade", input)
             .await
     }
@@ -1032,10 +1029,7 @@ impl Ecpay {
     }
 
     /// C2C 取消物流訂單 (`Express/v2/CancelC2COrder`)。
-    pub async fn allinone_cancel_c2c_order(
-        &self,
-        input: &AllInOneCancelC2cInput,
-    ) -> Result<Value> {
+    pub async fn allinone_cancel_c2c_order(&self, input: &AllInOneCancelC2cInput) -> Result<Value> {
         self.post_logistics_aes("Express/v2/CancelC2COrder", input)
             .await
     }
@@ -1065,7 +1059,8 @@ impl Ecpay {
 
     /// 宅配逆物流退貨 (`Express/v2/ReturnHome`)。
     pub async fn allinone_return_home(&self, input: &AllInOneReturnHomeInput) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/ReturnHome", input).await
+        self.post_logistics_aes("Express/v2/ReturnHome", input)
+            .await
     }
 
     /// 列印紙本出貨單 (`Express/v2/PrintTradeDocument`)。回應 Data 為
@@ -1234,7 +1229,10 @@ impl Ecpay {
     pub fn crossborder_map_form(&self, input: &CrossBorderMapInput) -> Result<LogisticsForm> {
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
-        m.insert("MerchantTradeNo".to_owned(), input.merchant_trade_no.clone());
+        m.insert(
+            "MerchantTradeNo".to_owned(),
+            input.merchant_trade_no.clone(),
+        );
         m.insert("LogisticsType".to_owned(), input.logistics_type.clone());
         m.insert(
             "LogisticsSubType".to_owned(),

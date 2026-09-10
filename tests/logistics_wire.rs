@@ -84,13 +84,19 @@ async fn domestic_create_signs_md5_and_parses_the_pipe_response() {
     assert_eq!(out["AllPayLogisticsID"], "3657295");
     assert_eq!(out["RtnCode"], "300");
     assert_eq!(out["RtnMsg"], "訂單處理中");
-    assert!(!out.contains_key("CheckMacValue"), "verified MAC is stripped");
+    assert!(
+        !out.contains_key("CheckMacValue"),
+        "verified MAC is stripped"
+    );
 }
 
 #[tokio::test]
 async fn domestic_query_v2_parses_a_bare_signed_query_without_prefix() {
     let server = spawn_http_server(|path, body| {
-        assert!(path.ends_with("/Helper/QueryLogisticsTradeInfo/V2"), "{path}");
+        assert!(
+            path.ends_with("/Helper/QueryLogisticsTradeInfo/V2"),
+            "{path}"
+        );
         let sent = parse_form(String::from_utf8_lossy(body).as_ref());
         assert_eq!(sent["AllPayLogisticsID"], "3657295");
         assert!(sent.contains_key("TimeStamp"), "TimeStamp rides along");
@@ -128,29 +134,46 @@ async fn tampered_response_mac_is_rejected() {
         .logistics_create(&sample_create())
         .await
         .expect_err("tampered MAC must fail");
-    assert!(matches!(err, ecpay::Error::CheckMacValueMismatch), "{err:?}");
+    assert!(
+        matches!(err, ecpay::Error::CheckMacValueMismatch),
+        "{err:?}"
+    );
 }
 
 #[tokio::test]
 async fn response_without_mac_is_rejected_not_swallowed() {
     let server = spawn_http_server(|_path, _body| {
-        (200, "text/html".into(), b"<html>Server Error</html>".to_vec())
+        (
+            200,
+            "text/html".into(),
+            b"<html>Server Error</html>".to_vec(),
+        )
     });
     let err = logistics_sdk(server)
         .logistics_create(&sample_create())
         .await
         .expect_err("HTML error page must fail");
-    assert!(matches!(err, ecpay::Error::CheckMacValueMismatch), "{err:?}");
+    assert!(
+        matches!(err, ecpay::Error::CheckMacValueMismatch),
+        "{err:?}"
+    );
 }
 
 #[tokio::test]
 async fn allinone_v2_envelope_carries_timestamp_and_revision_only() {
     let server = spawn_http_server(|path, body| {
-        assert!(path.ends_with("/Express/v2/QueryLogisticsTradeInfo"), "{path}");
+        assert!(
+            path.ends_with("/Express/v2/QueryLogisticsTradeInfo"),
+            "{path}"
+        );
         let env: serde_json::Value = serde_json::from_slice(body).unwrap();
         let mut keys: Vec<_> = env.as_object().unwrap().keys().cloned().collect();
         keys.sort();
-        assert_eq!(keys, ["Data", "MerchantID", "RqHeader"], "no PlatformID on the v2 envelope");
+        assert_eq!(
+            keys,
+            ["Data", "MerchantID", "RqHeader"],
+            "no PlatformID on the v2 envelope"
+        );
         let rq = &env["RqHeader"];
         let mut rq_keys: Vec<_> = rq.as_object().unwrap().keys().cloned().collect();
         rq_keys.sort();
@@ -217,7 +240,10 @@ async fn domestic_forms_carry_the_md5_mac() {
         })
         .unwrap();
     assert!(create_form.action().ends_with("/Express/Create"));
-    assert!(create_form.pairs().iter().any(|(k, _)| k == "CheckMacValue"));
+    assert!(create_form
+        .pairs()
+        .iter()
+        .any(|(k, _)| k == "CheckMacValue"));
 
     let map_form = sdk
         .logistics_map_form(&MapInput {
@@ -235,17 +261,20 @@ async fn domestic_forms_carry_the_md5_mac() {
         .unwrap();
     assert!(test_data_form.action().ends_with("/Express/CreateTestData"));
 
-    let print_form = sdk
-        .logistics_print_trade_document_form("1717876")
-        .unwrap();
+    let print_form = sdk.logistics_print_trade_document_form("1717876").unwrap();
     assert!(print_form.action().ends_with("/helper/printTradeDocument"));
 
     let c2c_form = sdk
         .logistics_print_c2c_form(PrintC2c::UniMart, "1717812", "C9680734", Some("4551"))
         .unwrap();
-    assert!(c2c_form.action().ends_with("/Express/PrintUniMartC2COrderInfo"));
+    assert!(c2c_form
+        .action()
+        .ends_with("/Express/PrintUniMartC2COrderInfo"));
     let html = c2c_form.html_form();
-    assert!(html.contains("action=") && html.contains("submit()"), "{html}");
+    assert!(
+        html.contains("action=") && html.contains("submit()"),
+        "{html}"
+    );
 }
 
 #[tokio::test]
@@ -262,7 +291,9 @@ async fn get_store_list_posts_md5_and_parses_json() {
         )
     });
     let out = logistics_sdk(server)
-        .logistics_get_store_list(&GetStoreListInput { cvs_type: "FAMI".into() })
+        .logistics_get_store_list(&GetStoreListInput {
+            cvs_type: "FAMI".into(),
+        })
         .await
         .expect("store list");
     assert_eq!(out["Stores"][0]["StoreID"], "006598");
@@ -454,9 +485,9 @@ fn urldecode(s: &str) -> String {
         match b[i] {
             b'+' => out.push(b' '),
             b'%' if i + 2 < b.len() => {
-                let hex = (b[i + 1] as char).to_digit(16).and_then(|h| {
-                    (b[i + 2] as char).to_digit(16).map(|l| h * 16 + l)
-                });
+                let hex = (b[i + 1] as char)
+                    .to_digit(16)
+                    .and_then(|h| (b[i + 2] as char).to_digit(16).map(|l| h * 16 + l));
                 match hex {
                     Some(v) => {
                         out.push(v as u8);
