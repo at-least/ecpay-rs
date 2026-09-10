@@ -190,7 +190,10 @@ form,也是注入點)。
 ## 規格對照(官方 AI-skill 驗證)
 
 本函式庫已對照 ECPay 官方維護的 [ECPay-API-Skill](https://github.com/ECPay/ECPay-API-Skill)
-(`test-vectors/` 與 developers.ecpay.com.tw 即時規格)完成審查:
+(`test-vectors/` 與 developers.ecpay.com.tw 即時規格)完成審查。該 repo 以
+git submodule 掛在 `.claude/skills/ecpay`,讓 Claude Code 在本 repo 內直接讀到
+官方規格、範例與向量(`tests/official_skill_vectors.rs` 內嵌了向量副本,測試
+本身不依賴 submodule):
 
 - `check_mac_value` 通過官方全部 CheckMacValue 向量(SHA-256、MD5、`'`、
   `~` 特殊字元)— 官方向量明文 `~` 須編碼為 `%7e`,證實「差異 1」是
@@ -251,10 +254,15 @@ ReturnURL → merchant 端用 `verify_check_mac_value` 驗證並回 `1|OK` →
 ## 開發
 
 ```bash
+git clone --recurse-submodules https://github.com/at-least/ecpay-rs.git
+# 已 clone 的話:git submodule update --init
 cargo test              # 130+ 測試:官方向量、Python SDK 一致性、mock transport
 cargo test --test python_conformance   # 對官方 SDK 的逐欄位比對
 cargo clippy --all-targets
 ```
+
+submodule 只有 `.claude/skills/ecpay`(官方 ECPay-API-Skill,供 Claude Code
+讀規格用),不初始化也能 build 與跑測試;發佈到 crates.io 的 crate 已排除該目錄。
 
 ⚠️ 上面的 `cargo test` **不是全離線**:`tests/sandbox.rs` 會打真實的 ECPay
 stage 測試環境(公開測試特店 2000132),需要對外網路,CI 上以此做端對端驗證。
