@@ -33,8 +33,13 @@ pub struct RqHeader {
     #[serde(rename = "Timestamp", default)]
     pub timestamp: i64,
     /// 串接版號 string(10)
-    #[serde(rename = "Revision", default)]
+    #[serde(rename = "Revision", default, skip_serializing_if = "String::is_empty")]
     pub revision: String,
+    /// B2B invoice only: 特店請求編號 (GUID format). Omitted from the wire
+    /// when empty so the B2C invoice envelope stays byte-identical to the
+    /// Go reference port.
+    #[serde(rename = "RqID", default, skip_serializing_if = "String::is_empty")]
+    pub rq_id: String,
 }
 
 /// Go `Response` — PlatformID/MerchantID are `any` on the wire (ECPay 回傳型態
@@ -63,6 +68,26 @@ pub struct Response {
 pub struct RqHeaderResponse {
     #[serde(rename = "Timestamp", default)]
     pub timestamp: i64,
+}
+
+/// Shared HTML attribute escaper for every auto-submitting form this crate
+/// builds (AIO checkout, logistics map/print/create forms). Escapes
+/// `& < > " '` so a `"` in any value cannot break out of the attribute (the
+/// official SDK does not escape, which breaks the form and is an injection
+/// vector).
+pub(crate) fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Go `url.Values.Encode()`: keys sorted alphabetically, each key and value
@@ -275,6 +300,70 @@ impl Ecpay {
         parse_query(&body)
     }
 
+/// Parses an AES-JSON response envelope. `None` when the body isn't an
+/// envelope at all (e.g. an HTML error page).
+fn parse_envelope(body: &str) -> Option<Response> {
+    crate::crypto::unmarshal(body).ok()
+}
+
+/// Gates on TransCode and decrypts `Data` into the typed output.
+fn decode_aes_response<O: DeserializeOwned>(res: Response, key: &[u8], iv: &[u8]) -> Result<O> {
+    if res.trans_code != 1 {
+        return Err(Error::Transport {
+            code: res.trans_code,
+            msg: res.trans_msg,
+        });
+    }
+    decrypt_data(&res.data, key, iv)
+}
+
+    /// The AES-JSON envelope core for every NON-B2C service (ECPG 站內付,
+    /// logistics v2, CrossBorder, B2B invoice): builds
+    /// `{MerchantID, RqHeader, Data}` — deliberately without PlatformID, the
+    /// shape the official PHP examples wire for these services — encrypts
+    /// `input` into `Data`, POSTs, gates on TransCode, decrypts into `O`.
+    /// The B2C invoice envelope (`call_invoice_api`) keeps its own Go-port
+    /// path because it always sends PlatformID and pins `Revision: "3.0.0"`.
+    pub(crate) async fn post_aes_json<I: Serialize, O: DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        rq_header: serde_json::Value,
+        merchant_id: &str,
+        input: &I,
+        key: &[u8],
+        iv: &[u8],
+    ) -> Result<O> {
+        let data = encrypt_data(input, key, iv)?;
+        let envelope = serde_json::json!({
+            "MerchantID": merchant_id,
+            "RqHeader": rq_header,
+            "Data": data,
+        });
+        let mut resp = http_client()
+            .post(endpoint)
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body(envelope.to_string())
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        let body = body_string(&mut resp).await?;
+        if !(200..300).contains(&status) {
+            // Server-truth (logistics v2, captured live 2026-09): some
+            // business errors answer HTTP 500 with a VALID envelope whose
+            // Data decrypts to the RtnCode/RtnMsg. Prefer that over a bare
+            // HTTP error — fall back to InvoiceStatus only when the body
+            // isn't a usable envelope.
+            match Self::parse_envelope(&body) {
+                Some(res) => return Self::decode_aes_response(res, key, iv),
+                None => return Err(Error::InvoiceStatus { status, body }),
+            }
+        }
+        let res = Self::parse_envelope(&body).ok_or_else(|| {
+            Error::Message(format!("ecpay: response is not an AES-JSON envelope: {body}"))
+        })?;
+        Self::decode_aes_response(res, key, iv)
+    }
+
     /// Go `CallInvoiceAPI`: encrypt the input into the AES-JSON envelope, POST
     /// it, gate on TransCode, and decrypt Data into the typed output.
     pub async fn call_invoice_api<I: Serialize, O: DeserializeOwned>(
@@ -292,6 +381,7 @@ impl Ecpay {
             rq_header: RqHeader {
                 revision: "3.0.0".to_owned(),
                 timestamp: crate::crypto::unix_now(),
+                rq_id: String::new(),
             },
         };
         let j = serde_json::to_string(&req)?;

@@ -73,8 +73,11 @@ use std::collections::HashMap;
 
 pub mod client;
 pub mod crypto;
+pub mod ecpg;
 pub mod error;
 pub mod invoice;
+pub mod invoice_b2b;
+pub mod logistics;
 pub mod payment;
 
 pub use client::{Request, Response, RqHeader, RqHeaderResponse};
@@ -82,6 +85,15 @@ pub use crypto::{
     check_mac_value, decrypt, decrypt_data, encrypt, encrypt_data, hash_mac, unmarshal, url_encode,
 };
 pub use error::{ApiError, Error, Result};
+pub use logistics::{
+    AllInOneCancelC2cInput, AllInOneCreateTestDataInput, AllInOnePrintTradeDocumentInput,
+    AllInOneQueryInput, AllInOneRedirectInput, AllInOneReturnCvsInput, AllInOneReturnHomeInput,
+    AllInOneUpdateShipmentInfoInput, AllInOneUpdateStoreInfoInput, CancelC2cInput,
+    CreateByTempTradeInput, CrossBorderCreateInput, CrossBorderCreateTestDataInput,
+    CrossBorderMapInput, CrossBorderRefInput, DomesticQueryInput, GetStoreListInput,
+    LogisticsCreateInput, LogisticsForm, MapInput, PrintC2c, ReturnCvsInput, ReturnHomeInput,
+    UpdateShipmentInfoInput, UpdateStoreInfoInput, UpdateTempTradeInput,
+};
 pub use invoice::{
     AllowanceByCollegiateInput, AllowanceByCollegiateOutput, AllowanceInfoItem, AllowanceInput,
     AllowanceInvalidByCollegiateInput, AllowanceInvalidByCollegiateOutput, AllowanceInvalidInput,
@@ -112,6 +124,29 @@ pub const PAYMENT_API_URL_STAGE: &str = "https://payment-stage.ecpay.com.tw/Cash
 
 pub const INVOICE_API_URL_PRODUCTION: &str = "https://einvoice.ecpay.com.tw/B2CInvoice/";
 pub const INVOICE_API_URL_STAGE: &str = "https://einvoice-stage.ecpay.com.tw/B2CInvoice/";
+
+/// B2B invoice base. Same domain as B2C, different path; the RqHeader also
+/// carries `RqID` + `Revision: "1.0.0"` (B2C uses `Revision: "3.0.0"`, no
+/// RqID). HashKey/HashIV are the invoice ones (official PHP B2B examples
+/// reuse `ejCk326UnaZWKisg`/`q9jcZX8Ib9LM8wYk` for 2000132).
+pub const B2B_INVOICE_API_URL_PRODUCTION: &str = "https://einvoice.ecpay.com.tw/B2BInvoice/";
+pub const B2B_INVOICE_API_URL_STAGE: &str = "https://einvoice-stage.ecpay.com.tw/B2BInvoice/";
+
+/// Domestic + AllInOne-v2 + CrossBorder logistics base. All three families
+/// live on one host under different paths (`Express/`, `Express/v2/`,
+/// `CrossBorder/`, `Helper/`). CheckMacValue here is **MD5** (EncryptType=0).
+pub const LOGISTICS_API_URL_PRODUCTION: &str = "https://logistics.ecpay.com.tw/";
+pub const LOGISTICS_API_URL_STAGE: &str = "https://logistics-stage.ecpay.com.tw/";
+
+/// 站內付 2.0 (ECPG): token/order creation lives here (`Merchant/*`).
+/// The AES envelope's RqHeader carries ONLY `Timestamp` (no Revision).
+pub const ECPG_API_URL_PRODUCTION: &str = "https://ecpg.ecpay.com.tw/Merchant/";
+pub const ECPG_API_URL_STAGE: &str = "https://ecpg-stage.ecpay.com.tw/Merchant/";
+
+/// 站內付 2.0 queries/actions live on a SECOND domain (`1.0.0/*`) — mixing
+/// the two is the classic 404 trap. HashKey/HashIV are the payment ones.
+pub const ECPAYMENT_API_URL_PRODUCTION: &str = "https://ecpayment.ecpay.com.tw/1.0.0/";
+pub const ECPAYMENT_API_URL_STAGE: &str = "https://ecpayment-stage.ecpay.com.tw/1.0.0/";
 
 /// The CreditDetail endpoints (credit_do_action, search_single_transaction,
 /// download_disbursement_balance) live under their own path. Production base,
@@ -147,6 +182,30 @@ pub struct Ecpay {
     pub credit_api_url: String,
     /// Base URL for the vendor (特店後台) endpoints; empty = production.
     pub vendor_api_url: String,
+    /// Logistics base (`Express/`, `Express/v2/`, `CrossBorder/`, `Helper/`
+    /// are appended); empty = production.
+    pub logistics_api_url: String,
+    /// Logistics HashKey/HashIV. Domestic 物流特店 usually gets its OWN keys
+    /// (stage B2C: 2000132/`5294y06JbISpM5x9`; C2C: 2000933/`XBERn1YOvpM9nfZc`),
+    /// so unlike the invoice pair these fall back to `hash_key`/`hash_iv`
+    /// when left empty.
+    pub logistics_hash_key: Vec<u8>,
+    pub logistics_hash_iv: Vec<u8>,
+    /// 站內付 2.0 token/order-creation base (`Merchant/*` appended); empty =
+    /// production. Uses the PAYMENT HashKey/HashIV.
+    pub ecpg_api_url: String,
+    /// 站內付 2.0 query/action base (`1.0.0/*` paths appended, e.g.
+    /// `1.0.0/Cashier/QueryTrade` is `{base}Cashier/QueryTrade`); empty =
+    /// production.
+    pub ecpayment_api_url: String,
+    /// B2B invoice base (`Issue`, `Allowance`, … appended); empty =
+    /// production. Uses the INVOICE HashKey/HashIV.
+    pub b2b_invoice_api_url: String,
+    /// B2B envelope `RqHeader.RqID` — a GUID-format request ID you generate.
+    /// ECPay does not dedupe on it (proven on stage: one fixed RqID issued
+    /// two distinct invoices), but production integrations should still make
+    /// it unique per request for their own auditing.
+    pub b2b_rq_id: String,
 }
 
 impl std::fmt::Debug for Ecpay {
@@ -164,7 +223,14 @@ impl std::fmt::Debug for Ecpay {
             .field("return_url", &self.return_url)
             .field("payment_info_url", &self.payment_info_url)
             .field("credit_api_url", &self.credit_api_url)
-            .field("vendor_api_url", &self.vendor_api_url);
+            .field("vendor_api_url", &self.vendor_api_url)
+            .field("logistics_api_url", &self.logistics_api_url)
+            .field("logistics_hash_key", &"***")
+            .field("logistics_hash_iv", &"***")
+            .field("ecpg_api_url", &self.ecpg_api_url)
+            .field("ecpayment_api_url", &self.ecpayment_api_url)
+            .field("b2b_invoice_api_url", &self.b2b_invoice_api_url)
+            .field("b2b_rq_id", &self.b2b_rq_id);
         s.finish()
     }
 }
@@ -204,6 +270,57 @@ impl Ecpay {
             VENDOR_API_URL_PRODUCTION
         } else {
             &self.vendor_api_url
+        }
+    }
+
+    /// The logistics base, defaulting to production when unset.
+    pub(crate) fn logistics_base_url(&self) -> &str {
+        if self.logistics_api_url.is_empty() {
+            LOGISTICS_API_URL_PRODUCTION
+        } else {
+            &self.logistics_api_url
+        }
+    }
+
+    /// Logistics signing keys, falling back to the payment HashKey/HashIV.
+    pub(crate) fn logistics_keys(&self) -> (&[u8], &[u8]) {
+        let key = if self.logistics_hash_key.is_empty() {
+            self.hash_key.as_bytes()
+        } else {
+            &self.logistics_hash_key
+        };
+        let iv = if self.logistics_hash_iv.is_empty() {
+            self.hash_iv.as_bytes()
+        } else {
+            &self.logistics_hash_iv
+        };
+        (key, iv)
+    }
+
+    /// 站內付 2.0 token base (`Merchant/*`), defaulting to production.
+    pub(crate) fn ecpg_base_url(&self) -> &str {
+        if self.ecpg_api_url.is_empty() {
+            ECPG_API_URL_PRODUCTION
+        } else {
+            &self.ecpg_api_url
+        }
+    }
+
+    /// 站內付 2.0 query base (`1.0.0/*`), defaulting to production.
+    pub(crate) fn ecpayment_base_url(&self) -> &str {
+        if self.ecpayment_api_url.is_empty() {
+            ECPAYMENT_API_URL_PRODUCTION
+        } else {
+            &self.ecpayment_api_url
+        }
+    }
+
+    /// B2B invoice base, defaulting to production when unset.
+    pub(crate) fn b2b_base_url(&self) -> &str {
+        if self.b2b_invoice_api_url.is_empty() {
+            B2B_INVOICE_API_URL_PRODUCTION
+        } else {
+            &self.b2b_invoice_api_url
         }
     }
 

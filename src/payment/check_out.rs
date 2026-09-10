@@ -13,6 +13,7 @@
 //! without lowercasing (the SDK's `.lower()` corrupts ASCII letter case in
 //! customer data; ECPay url-decodes the value either way).
 
+use crate::client::html_escape;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::crypto::query_escape;
@@ -296,20 +297,6 @@ impl AioCheckOut {
     }
 }
 
-fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
-    out
-}
 
 /// Python `len()` on a `str` counts Unicode scalar values.
 fn py_len(s: &str) -> usize {
