@@ -361,11 +361,16 @@ impl Ecpay {
                 None => return Err(Error::InvoiceStatus { status, body }),
             }
         }
-        let res = Self::parse_envelope(&body).ok_or_else(|| {
-            Error::Message(format!(
-                "ecpay: response is not an AES-JSON envelope: {body}"
-            ))
-        })?;
+        // Same gate on the happy path: a 2xx JSON body without a TransCode
+        // field is not an envelope (serde would default one into existence)
+        // and deserves the explicit error, not Transport{code:0}.
+        let res = Self::parse_envelope(&body)
+            .filter(|res| res.trans_code != 0)
+            .ok_or_else(|| {
+                Error::Message(format!(
+                    "ecpay: response is not an AES-JSON envelope: {body}"
+                ))
+            })?;
         Self::decode_aes_response(res, key, iv)
     }
 
