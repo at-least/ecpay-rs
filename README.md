@@ -219,6 +219,19 @@ cargo test --test stage_smoke -- --ignored --nocapture
 CheckMacValue Error 頁(負向對照)、QueryCreditCardPeriodInfo / DoAction /
 QueryTrade(V2) / vendor 對帳端點皆可達。
 
+### 全流程 E2E(離線、零人工)
+
+`tests/full_flow.rs` 在一般 `cargo test` 內跑完整協議流程,不需要瀏覽器、
+帳號或任何人工步驟:本地 ECPay 行為模擬器(AioCheckOut 驗 MAC 並建單 →
+「付款完成」事件 → 模擬器以 ECPay ServerPost 形式遞送**簽名回調**到
+ReturnURL → merchant 端用 `verify_check_mac_value` 驗證並回 `1|OK` →
+`order_search` 查得 `TradeStatus=1` + `SimulatePaid=1`,含篡改 MAC 負向對照)。
+
+測試分層的誠實聲明:模擬器與本 crate 共用 MAC 實作,所以「MAC 算法與綠界
+伺服器一致」這件事由**官方向量 + stage 實測**證明(見上),模擬器只負責
+流程接線;「綠界自己對測試單執行模擬付款」是綠界後台的功能(其官方文件
+指定的手動工具),不屬於本函式庫的程式碼,因此不在自動化範圍。
+
 ## 開發
 
 ```bash
