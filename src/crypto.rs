@@ -157,6 +157,17 @@ pub fn hash_mac(params: &HashMap<String, String>, hash_key: &str, hash_iv: &str)
     check_mac_value(params, hash_key, hash_iv, 1).expect("EncryptType=1 cannot fail")
 }
 
+/// Reads the `EncryptType` field out of a params map, defaulting to 1
+/// (SHA-256) like the official SDK when it's missing or unparsable. Shared
+/// by [`crate::Ecpay::generate_check_value`] (signing an outbound request)
+/// and the payment-response verification path (checking an inbound one).
+pub(crate) fn parse_encrypt_type(params: &HashMap<String, String>) -> i64 {
+    params
+        .get("EncryptType")
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(1)
+}
+
 /// The Python SDK's `generate_check_value`: drop any existing CheckMacValue,
 /// force MerchantID to the client's, sort by lowercased key, wrap in
 /// HashKey/HashIV, .NET-URLEncode, lowercase, then SHA-256 (EncryptType 1) or

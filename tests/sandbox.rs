@@ -56,6 +56,27 @@ fn unique_relate_number() -> String {
     format!("TS{}{seq}", nanos % 100_000_000_000_000)
 }
 
+/// Shared cleanup for the allowance roundtrip tests: invalidates the
+/// underlying invoice after the allowance/collegiate-allowance path is
+/// exercised, so the sandbox account doesn't accumulate live invoices.
+async fn cleanup_invalid(
+    client: &Ecpay,
+    merchant_id: String,
+    invoice_no: String,
+    invoice_date10: String,
+) {
+    let voided = client
+        .invalid(&InvalidInput {
+            merchant_id,
+            invoice_no,
+            invoice_date: invoice_date10,
+            reason: "sandbox cleanup".into(),
+        })
+        .await
+        .expect("stage invalid 應成功");
+    assert_eq!(voided.rtn_code, 1, "invalid rtn_msg={}", voided.rtn_msg);
+}
+
 fn sample_issue_input(relate_number: String, merchant_id: String) -> IssueInput {
     IssueInput {
         merchant_id,
@@ -264,16 +285,7 @@ async fn allowance_lifecycle_roundtrip() {
         got_invalid.rtn_msg
     );
 
-    let voided = client
-        .invalid(&InvalidInput {
-            merchant_id,
-            invoice_no: issued.invoice_no,
-            invoice_date: invoice_date10,
-            reason: "sandbox cleanup".into(),
-        })
-        .await
-        .expect("stage invalid 應成功");
-    assert_eq!(voided.rtn_code, 1, "invalid rtn_msg={}", voided.rtn_msg);
+    cleanup_invalid(&client, merchant_id, issued.invoice_no, invoice_date10).await;
 }
 
 /// `AllowanceByCollegiate`(線上折讓/合意折讓)+`AllowanceInvalidByCollegiate`
@@ -337,16 +349,7 @@ async fn allowance_by_collegiate_roundtrip() {
         cancelled.rtn_msg
     );
 
-    let voided = client
-        .invalid(&InvalidInput {
-            merchant_id,
-            invoice_no: issued.invoice_no,
-            invoice_date: invoice_date10,
-            reason: "sandbox cleanup".into(),
-        })
-        .await
-        .expect("stage invalid 應成功");
-    assert_eq!(voided.rtn_code, 1, "invalid rtn_msg={}", voided.rtn_msg);
+    cleanup_invalid(&client, merchant_id, issued.invoice_no, invoice_date10).await;
 }
 
 fn sample_delay_issue_input(

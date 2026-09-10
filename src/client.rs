@@ -339,10 +339,7 @@ impl Ecpay {
     /// MerchantID entry is forced to the client's configured merchant, exactly
     /// like the official SDK's `generate_check_value`.
     pub fn generate_check_value(&self, params: &HashMap<String, String>) -> Result<String> {
-        let encrypt_type = params
-            .get("EncryptType")
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(1);
+        let encrypt_type = crate::crypto::parse_encrypt_type(params);
         let mut with_id = params.clone();
         with_id.insert("MerchantID".to_owned(), self.merchant_id.clone());
         check_mac_value(&with_id, &self.hash_key, &self.hash_iv, encrypt_type)

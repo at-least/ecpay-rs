@@ -410,25 +410,23 @@ impl Ecpay {
         // to echo the real MerchantID back.
         let as_map: HashMap<String, String> =
             query.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let encrypt_type = as_map
-            .get("EncryptType")
-            .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(1);
+        let encrypt_type = crate::crypto::parse_encrypt_type(&as_map);
         let want =
             crate::crypto::check_mac_value(&as_map, &self.hash_key, &self.hash_iv, encrypt_type)?;
-        if !crate::crypto::constant_time_eq(got.as_bytes(), want.as_bytes()) {
+        // Upper-case defensively before the constant-time compare, like
+        // [`crate::Ecpay::verify_check_mac_value`] — ECPay sends uppercase,
+        // but a received value's case isn't a signal worth failing on.
+        if !crate::crypto::constant_time_eq(got.to_uppercase().as_bytes(), want.as_bytes()) {
             return Err(Error::CheckMacValueMismatch);
         }
         query.remove("CheckMacValue");
         Ok(query)
     }
 
-    /// `OrderSearch.order_search`(查詢訂單):signs the request, POSTs to
-    /// `QueryTradeInfo/V5`, verifies the response CheckMacValue (raising
-    /// [`Error::CheckMacValueMismatch`] on mismatch), and returns the
-    /// response fields without CheckMacValue (blank values kept, like
-    /// `parse_qsl(keep_blank_values=True)`).
-    pub async fn order_search(&self, p: &OrderSearchParams) -> Result<BTreeMap<String, String>> {
+    /// Shared request map for [`Self::order_search`] and
+    /// [`Self::query_payment_info`], which take the same `OrderSearchParams`
+    /// and only differ in endpoint.
+    fn order_search_request(&self, p: &OrderSearchParams) -> Result<HashMap<String, String>> {
         required_str("MerchantTradeNo", &p.merchant_trade_no, 20)?;
         optional_str("PlatformID", &p.platform_id, 10)?;
 
@@ -437,7 +435,16 @@ impl Ecpay {
         m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
         push_optional_str(&mut m, "PlatformID", &p.platform_id);
+        Ok(m)
+    }
 
+    /// `OrderSearch.order_search`(查詢訂單):signs the request, POSTs to
+    /// `QueryTradeInfo/V5`, verifies the response CheckMacValue (raising
+    /// [`Error::CheckMacValueMismatch`] on mismatch), and returns the
+    /// response fields without CheckMacValue (blank values kept, like
+    /// `parse_qsl(keep_blank_values=True)`).
+    pub async fn order_search(&self, p: &OrderSearchParams) -> Result<BTreeMap<String, String>> {
+        let m = self.order_search_request(p)?;
         let endpoint = format!("{}QueryTradeInfo/V5", self.payment_base_url());
         self.post_cmv_verified(&endpoint, m).await
     }
@@ -452,15 +459,7 @@ impl Ecpay {
         &self,
         p: &OrderSearchParams,
     ) -> Result<BTreeMap<String, String>> {
-        required_str("MerchantTradeNo", &p.merchant_trade_no, 20)?;
-        optional_str("PlatformID", &p.platform_id, 10)?;
-
-        let mut m = HashMap::new();
-        m.insert("MerchantID".to_owned(), self.merchant_id.clone());
-        m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
-        m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
-        push_optional_str(&mut m, "PlatformID", &p.platform_id);
-
+        let m = self.order_search_request(p)?;
         let endpoint = format!("{}QueryPaymentInfo", self.payment_base_url());
         self.post_cmv_verified(&endpoint, m).await
     }
