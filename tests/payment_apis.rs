@@ -188,6 +188,143 @@ async fn order_search_request_is_signed_and_routed() {
 }
 
 #[tokio::test]
+async fn query_payment_info_verifies_the_response_mac() {
+    let srv = spawn_http_server(move |_path, _body| {
+        let respond = map(&[
+            ("MerchantID", MERCHANT_ID),
+            ("MerchantTradeNo", "order_abc"),
+            ("TradeAmt", "100"),
+            ("PaymentType", "ATM_TAISHIN"),
+            ("BankCode", "812"),
+            ("vAccount", "3141592653589793"),
+            ("ExpireDate", "2024/01/05"),
+        ]);
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            respond
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .chain(std::iter::once(format!("CheckMacValue={mac}")))
+                .collect::<Vec<_>>()
+                .join("&")
+                .into_bytes(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    let got = client
+        .query_payment_info(&ecpay::payment::OrderSearchParams {
+            merchant_trade_no: "order_abc".into(),
+            time_stamp: 1_700_000_000,
+            platform_id: None,
+        })
+        .await
+        .expect("query_payment_info");
+
+    assert_eq!(got.get("BankCode").map(String::as_str), Some("812"));
+    assert_eq!(
+        got.get("vAccount").map(String::as_str),
+        Some("3141592653589793")
+    );
+    assert!(!got.contains_key("CheckMacValue"));
+}
+
+/// Regression test for a real bug found while comparing this crate against
+/// the official `ECPay/SDK_PHP` repo and probing the live stage server:
+/// ECPay's "trade not found" reply for `QueryPaymentInfo` echoes back
+/// `MerchantID=""` (confirmed live against stage, 2026-09), unlike
+/// `QueryTradeInfo/V5`'s equivalent reply which happens to echo the real
+/// MerchantID. The shared response-verification helper used to reuse
+/// `generate_check_value` — which forces `MerchantID` to the client's
+/// configured ID before hashing, correct for signing OUR outbound requests
+/// but wrong for verifying a response, since it must be hashed exactly as
+/// the server sent it. That produced a false-positive
+/// `CheckMacValueMismatch` on an honestly-signed response whenever a
+/// response field didn't echo the client's own MerchantID.
+#[tokio::test]
+async fn query_payment_info_accepts_a_response_with_blank_merchant_id() {
+    let respond = map(&[
+        ("MerchantID", ""),
+        ("MerchantTradeNo", ""),
+        ("RtnCode", "10200047"),
+        ("RtnMsg", "Cant not find the trade data."),
+    ]);
+    let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+    let srv = spawn_http_server(move |_path, _body| {
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            respond
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .chain(std::iter::once(format!("CheckMacValue={mac}")))
+                .collect::<Vec<_>>()
+                .join("&")
+                .into_bytes(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    let got = client
+        .query_payment_info(&ecpay::payment::OrderSearchParams {
+            merchant_trade_no: "order_missing".into(),
+            time_stamp: 1_700_000_000,
+            platform_id: None,
+        })
+        .await
+        .expect("a correctly-signed response must verify even with a blank MerchantID field");
+    assert_eq!(got.get("RtnCode").map(String::as_str), Some("10200047"));
+}
+
+#[tokio::test]
+async fn query_payment_info_request_is_signed_and_routed() {
+    let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let captured2 = captured.clone();
+    let srv = spawn_http_server(move |path, body| {
+        let body = String::from_utf8_lossy(body).into_owned();
+        *captured2.lock().unwrap() = Some(format!("{path}|{body}"));
+        let respond = map(&[("MerchantID", MERCHANT_ID), ("RtnCode", "10200047")]);
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            format!("MerchantID={MERCHANT_ID}&RtnCode=10200047&CheckMacValue={mac}").into_bytes(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    client
+        .query_payment_info(&ecpay::payment::OrderSearchParams {
+            merchant_trade_no: "order_abc".into(),
+            time_stamp: 1_700_000_000,
+            platform_id: None,
+        })
+        .await
+        .expect("query_payment_info");
+    let got = captured.lock().unwrap().clone().expect("captured");
+    assert!(
+        got.starts_with("/QueryPaymentInfo|"),
+        "endpoint path: {got}"
+    );
+    for key in [
+        "MerchantID",
+        "MerchantTradeNo",
+        "TimeStamp",
+        "CheckMacValue",
+    ] {
+        assert!(got.contains(key), "request must carry {key}: {got}");
+    }
+}
+
+#[tokio::test]
 async fn json_apis_parse_their_replies() {
     // QueryCreditCardPeriodInfo returns a JSON array.
     let srv = spawn_http_server(move |_path, _body| {

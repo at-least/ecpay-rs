@@ -113,6 +113,33 @@ async fn stage_order_search_round_trips_the_mac() {
 
 #[tokio::test]
 #[ignore = "hits the real stage server"]
+async fn stage_query_payment_info_round_trips_the_mac_with_blank_merchant_id() {
+    let client = stage();
+    // Live confirmation (2026-09) for a case the offline mock test only
+    // asserts by construction: QueryPaymentInfo's "trade not found" reply
+    // echoes MerchantID="" (unlike QueryTradeInfo/V5's equivalent reply,
+    // which echoes the real MerchantID). This is what exposed the
+    // generate_check_value-for-response-verification bug fixed in
+    // payment/mod.rs's post_cmv_verified — Ok(_) here is the end-to-end
+    // proof that a genuinely blank-MerchantID response still verifies.
+    let result = client
+        .query_payment_info(&OrderSearchParams {
+            merchant_trade_no: unique_trade_no("SMOKE"),
+            time_stamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+            platform_id: None,
+        })
+        .await
+        .expect("query_payment_info must succeed end-to-end (MAC verified)");
+    println!("query_payment_info => {result:?}");
+    assert_eq!(result.get("RtnCode").map(String::as_str), Some("10200047"));
+    assert_eq!(result.get("MerchantID").map(String::as_str), Some(""));
+}
+
+#[tokio::test]
+#[ignore = "hits the real stage server"]
 async fn stage_accepts_the_checkout_params() {
     let client = stage();
     let checkout = client

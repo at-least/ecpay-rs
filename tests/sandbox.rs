@@ -4,14 +4,25 @@
 //! 憑證是 ECPay 官方文件公開的 stage 測試特店（與
 //! `crates/admin/tests/admin_test.rs::test_ecpay` 同一組），僅作用於
 //! 沙盒環境，不是機密。測試會在 stage 帳號開立真實（沙盒）發票、查詢、
-//! 再作廢，不留垃圾資料(作廢重開測試除外——ECPay 5070451 規定重開後的
-//! 發票需等上傳財政部狀態更新才能作廢，見該測試內的註解)。需要對外網路。
+//! 再作廢，不留垃圾資料。兩個例外（皆已現場驗證、非設計疏漏）：
+//! - 作廢重開測試——ECPay 5070451 規定重開後的發票需等上傳財政部狀態更新
+//!   才能作廢，見該測試內的註解。
+//! - 延遲開立觸發測試（`delay_issue_then_trigger_roundtrip`）——現場測試
+//!   確認 `TriggerIssue` 回應 `RtnCode=4000003`（延後開立成功）後，
+//!   `GetIssue` 立即查詢仍回 `RtnCode=2 查無發票資料`，代表發票本體是
+//!   非同步產生的，同一測試內無法立即取得發票號碼來作廢；
+//!   `折讓/合意折讓` 測試則反向驗證過——`allowance_invalid`/
+//!   `allowance_invalid_by_collegiate` 後，原發票可以正常 `invalid()`，
+//!   故這兩個測試都補上了清理步驟。需要對外網路。
 //!
 //! 付費（AIO 信用卡授權）成功路徑需要走跳轉頁輸入卡號，無法單純以
 //! HTTP 自動化，不在本檔範圍。
 
 use ecpay::{
-    Ecpay, GetIssueInput, InvalidInput, IssueInput, IssueModel, Item, VoidModel,
+    AllowanceByCollegiateInput, AllowanceInput, AllowanceInvalidByCollegiateInput,
+    AllowanceInvalidInput, AllowanceItem, CancelDelayIssueInput, CheckLoveCodeInput,
+    DelayIssueInput, Ecpay, GetAllowanceInput, GetAllowanceInvalidInput, GetInvalidInput,
+    GetIssueInput, InvalidInput, IssueInput, IssueModel, Item, TriggerIssueInput, VoidModel,
     VoidWithReIssueInput, INVOICE_API_URL_STAGE, PAYMENT_API_URL_STAGE,
 };
 
@@ -29,13 +40,20 @@ fn stage_client() -> Ecpay {
 }
 
 /// ECPay 要求特店自訂編號唯一不可重複：用時間戳尾數保證。
+/// A process-wide counter, not just a timestamp: with 7+ `#[tokio::test]`
+/// functions in this file starting within the same instant, plain
+/// nanosecond timestamps collided in practice (confirmed live, 2026-09:
+/// ECPay rejected a duplicate RelateNumber with `RtnCode=5070353`) — clock
+/// resolution isn't fine enough to guarantee uniqueness across threads that
+/// all read it near-simultaneously, but a monotonic counter is.
 fn unique_relate_number() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_nanos()
-        .to_string();
-    format!("TS{}", &nanos[nanos.len().saturating_sub(14)..])
+        .as_nanos();
+    let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("TS{}{seq}", nanos % 100_000_000_000_000)
 }
 
 fn sample_issue_input(relate_number: String, merchant_id: String) -> IssueInput {
@@ -77,7 +95,7 @@ async fn issue_then_get_then_invalid_roundtrip() {
     let got = client
         .get_issue(&GetIssueInput {
             merchant_id: merchant_id.clone(),
-            relate_number: relate,
+            relate_number: relate.clone(),
             ..Default::default()
         })
         .await
@@ -106,15 +124,340 @@ async fn issue_then_get_then_invalid_roundtrip() {
 
     // 作廢（Invalid 需要 yyyy-MM-dd 的開立日期），讓 stage 帳號不留
     // 未作廢的測試發票。
+    let invoice_date10: String = issued.invoice_date.chars().take(10).collect();
     client
         .invalid(&InvalidInput {
-            merchant_id,
-            invoice_no: issued.invoice_no,
-            invoice_date: issued.invoice_date.chars().take(10).collect(),
+            merchant_id: merchant_id.clone(),
+            invoice_no: issued.invoice_no.clone(),
+            invoice_date: invoice_date10.clone(),
             reason: "sandbox test cleanup".to_owned(),
         })
         .await
         .expect("stage invalid 應成功");
+
+    // GetInvalid（查詢作廢發票明細）：與 GetIssue 不同，沙盒實測(2026-09)
+    // 確認 RelateNumber/InvoiceNo/InvoiceDate 三個欄位都是真的必填(不是
+    // GetIssue 那種擇一模式)——留空 RelateNumber 會被伺服器拒絕
+    // (RtnCode=2013001「自訂編號為必填」)，帶錯的值則查無資料
+    // (RtnCode=2，都在沙盒對照驗證過，此處只斷言成功路徑)。
+    let got_invalid = client
+        .get_invalid(&GetInvalidInput {
+            merchant_id,
+            relate_number: relate,
+            invoice_no: issued.invoice_no.clone(),
+            invoice_date: invoice_date10,
+        })
+        .await
+        .expect("stage get_invalid 應成功");
+    assert_eq!(
+        got_invalid.rtn_code, 1,
+        "get_invalid rtn_msg={}",
+        got_invalid.rtn_msg
+    );
+    assert_eq!(got_invalid.ii_invoice_no, issued.invoice_no);
+}
+
+/// `CheckLoveCode`（捐贈碼驗證）：無狀態查詢，不依賴任何先前開立的發票。
+#[tokio::test]
+async fn check_love_code_roundtrip() {
+    let client = stage_client();
+    let got = client
+        .check_love_code(&CheckLoveCodeInput {
+            merchant_id: client.merchant_id.clone(),
+            love_code: "168001".into(), // 官方 PHP 範例 CheckLoveCode.php 用的公開測試捐贈碼
+        })
+        .await
+        .expect("stage check_love_code 應成功");
+    assert_eq!(got.rtn_code, 1, "check_love_code rtn_msg={}", got.rtn_msg);
+    assert_eq!(got.is_exist, "Y");
+    assert!(!got.organ_name.is_empty());
+}
+
+/// 折讓(Allowance)系列的沙盒回合測試：開立發票 → 開立折讓(紙本) →
+/// 查詢折讓明細 → 作廢折讓 → 查詢作廢折讓明細。
+///
+/// `get_allowance` 是這裡驗證過兩個真實 bug 的地方(已修正，見
+/// src/invoice.rs `GetAllowanceInput`/`GetAllowanceOutput` 的文件註解)：
+/// 官方規格頁(7928.md)說 `AllowanceNo` 只在 `SearchType="0"` 時必填，
+/// 沙盒實測卻是 `AllowanceNo` 與 `InvoiceNo` 不論 `SearchType` 為何都必填；
+/// 且回應不是規格頁講的 `AllowanceInfo: Array[Object]`，而是把欄位直接
+/// 攤平在最外層(單筆查詢)。offline 的 conformance 測試沒辦法測出這種
+/// 「文件寫的和伺服器實際回應的形狀不一樣」的問題，只有這裡能測出來。
+#[tokio::test]
+async fn allowance_lifecycle_roundtrip() {
+    let client = stage_client();
+    let merchant_id = client.merchant_id.clone();
+    let relate = unique_relate_number();
+
+    let issued = client
+        .try_issue(&sample_issue_input(relate, merchant_id.clone()))
+        .await
+        .expect("stage issue 應成功");
+    let invoice_date10: String = issued.invoice_date.chars().take(10).collect();
+
+    let allowed = client
+        .allowance(&AllowanceInput {
+            merchant_id: merchant_id.clone(),
+            invoice_no: issued.invoice_no.clone(),
+            invoice_date: invoice_date10.clone(),
+            allowance_notify: "N".into(), // N:皆不通知，沙盒測試不需要真的發信
+            allowance_amount: 30,
+            reason: "sandbox allowance test".into(),
+            items: Some(vec![AllowanceItem {
+                item_seq: 1,
+                item_name: "沙盒測試商品(折讓)".into(),
+                item_count: 1.0,
+                item_word: "個".into(),
+                item_price: 30.0,
+                item_tax_type: "1".into(),
+                item_amount: 30.0,
+            }]),
+            ..Default::default()
+        })
+        .await
+        .expect("stage allowance 應成功");
+    assert_eq!(allowed.rtn_code, 1, "allowance rtn_msg={}", allowed.rtn_msg);
+    assert!(!allowed.ia_allow_no.is_empty());
+
+    let got = client
+        .get_allowance(&GetAllowanceInput {
+            merchant_id: merchant_id.clone(),
+            search_type: "0".into(),
+            allowance_no: allowed.ia_allow_no.clone(),
+            invoice_no: issued.invoice_no.clone(),
+            ..Default::default()
+        })
+        .await
+        .expect("stage get_allowance 應成功");
+    assert_eq!(got.rtn_code, 1, "get_allowance rtn_msg={}", got.rtn_msg);
+    assert_eq!(got.ia_allow_no, allowed.ia_allow_no);
+    assert_eq!(got.ia_invoice_no, issued.invoice_no);
+    assert!(got.items.is_some());
+
+    // 作廢原因(Reason)上限 20 字元。
+    let invalidated = client
+        .allowance_invalid(&AllowanceInvalidInput {
+            merchant_id: merchant_id.clone(),
+            invoice_no: issued.invoice_no.clone(),
+            allowance_no: allowed.ia_allow_no.clone(),
+            reason: "sandbox cleanup".into(),
+        })
+        .await
+        .expect("stage allowance_invalid 應成功");
+    assert_eq!(
+        invalidated.rtn_code, 1,
+        "allowance_invalid rtn_msg={}",
+        invalidated.rtn_msg
+    );
+
+    let got_invalid = client
+        .get_allowance_invalid(&GetAllowanceInvalidInput {
+            merchant_id: merchant_id.clone(),
+            invoice_no: issued.invoice_no.clone(),
+            allowance_no: allowed.ia_allow_no,
+        })
+        .await
+        .expect("stage get_allowance_invalid 應成功");
+    assert_eq!(
+        got_invalid.rtn_code, 1,
+        "get_allowance_invalid rtn_msg={}",
+        got_invalid.rtn_msg
+    );
+
+    let voided = client
+        .invalid(&InvalidInput {
+            merchant_id,
+            invoice_no: issued.invoice_no,
+            invoice_date: invoice_date10,
+            reason: "sandbox cleanup".into(),
+        })
+        .await
+        .expect("stage invalid 應成功");
+    assert_eq!(voided.rtn_code, 1, "invalid rtn_msg={}", voided.rtn_msg);
+}
+
+/// `AllowanceByCollegiate`(線上折讓/合意折讓)+`AllowanceInvalidByCollegiate`
+/// (取消線上折讓)的沙盒回合測試。後者官方 PHP SDK 沒有對應範例(容易誤用
+/// `AllowanceInvalid` 取消)，是規格頁(7913.md)才記載的獨立端點，這裡是
+/// 唯一驗證過它真的存在且能在客戶確認前取消的地方。
+#[tokio::test]
+async fn allowance_by_collegiate_roundtrip() {
+    let client = stage_client();
+    let merchant_id = client.merchant_id.clone();
+    let relate = unique_relate_number();
+
+    let issued = client
+        .try_issue(&sample_issue_input(relate, merchant_id.clone()))
+        .await
+        .expect("stage issue 應成功");
+    let invoice_date10: String = issued.invoice_date.chars().take(10).collect();
+
+    let allowed = client
+        .allowance_by_collegiate(&AllowanceByCollegiateInput {
+            merchant_id: merchant_id.clone(),
+            invoice_no: issued.invoice_no.clone(),
+            invoice_date: invoice_date10.clone(),
+            allowance_notify: "E".into(), // 規格固定值
+            customer_name: "測試消費者".into(),
+            notify_mail: "test-allowance@ecpay.com.tw".into(),
+            allowance_amount: 30,
+            reason: "sandbox collegiate allowance test".into(),
+            return_url: "https://example.com/ecpay/allowance-return".into(),
+            items: Some(vec![AllowanceItem {
+                item_seq: 1,
+                item_name: "沙盒測試商品(合意折讓)".into(),
+                item_count: 1.0,
+                item_word: "個".into(),
+                item_price: 30.0,
+                item_tax_type: "1".into(),
+                item_amount: 30.0,
+            }]),
+        })
+        .await
+        .expect("stage allowance_by_collegiate 應成功");
+    assert_eq!(
+        allowed.rtn_code, 1,
+        "allowance_by_collegiate rtn_msg={}",
+        allowed.rtn_msg
+    );
+    assert!(!allowed.ia_allow_no.is_empty());
+
+    let cancelled = client
+        .allowance_invalid_by_collegiate(&AllowanceInvalidByCollegiateInput {
+            merchant_id: merchant_id.clone(),
+            invoice_no: issued.invoice_no.clone(),
+            allowance_no: allowed.ia_allow_no,
+            reason: "sandbox cleanup".into(),
+        })
+        .await
+        .expect("stage allowance_invalid_by_collegiate 應成功");
+    assert_eq!(
+        cancelled.rtn_code, 1,
+        "allowance_invalid_by_collegiate rtn_msg={}",
+        cancelled.rtn_msg
+    );
+
+    let voided = client
+        .invalid(&InvalidInput {
+            merchant_id,
+            invoice_no: issued.invoice_no,
+            invoice_date: invoice_date10,
+            reason: "sandbox cleanup".into(),
+        })
+        .await
+        .expect("stage invalid 應成功");
+    assert_eq!(voided.rtn_code, 1, "invalid rtn_msg={}", voided.rtn_msg);
+}
+
+fn sample_delay_issue_input(
+    relate_number: String,
+    merchant_id: String,
+    tsr: String,
+) -> DelayIssueInput {
+    DelayIssueInput {
+        merchant_id,
+        relate_number,
+        customer_email: "sandbox@example.com".into(),
+        customer_phone: "0912345678".into(),
+        print: "0".into(),
+        donation: "0".into(),
+        tax_type: "1".into(),
+        sales_amount: 100,
+        inv_type: "07".into(),
+        items: Some(vec![Item {
+            item_name: "沙盒測試商品(延遲開立)".into(),
+            item_count: 1.0,
+            item_word: "個".into(),
+            item_price: 100.0,
+            item_amount: 100.0,
+            item_tax_type: "1".into(),
+            ..Default::default()
+        }]),
+        delay_flag: "1".into(), // 1:延遲開立，等候手動觸發
+        delay_day: 15,
+        tsr,
+        pay_type: "2".into(),    // 規格固定值
+        pay_act: "ECPAY".into(), // 規格固定值
+        ..Default::default()
+    }
+}
+
+/// `DelayIssue`（延遲開立）+ `TriggerIssue`（觸發開立）的沙盒回合測試。
+///
+/// `TriggerIssue` 沒有單一的成功代碼：沙盒實測確認規格頁記載的
+/// `RtnCode=4000003`(延後開立成功)/`4000004`(立即開立成功)，不是像其他
+/// 指令類 API 那樣以 `1` 為成功，故 `Ecpay::trigger_issue` 不用
+/// [`ecpay::Error::Api`] 判斷，這裡直接檢查 RtnCode 屬於這兩者之一。
+#[tokio::test]
+async fn delay_issue_then_trigger_roundtrip() {
+    let client = stage_client();
+    let merchant_id = client.merchant_id.clone();
+    let relate = unique_relate_number();
+    let tsr = format!("tsr{}", unique_relate_number());
+
+    let delayed = client
+        .delay_issue(&sample_delay_issue_input(
+            relate,
+            merchant_id.clone(),
+            tsr.clone(),
+        ))
+        .await
+        .expect("stage delay_issue 應成功");
+    assert_eq!(
+        delayed.rtn_code, 1,
+        "delay_issue rtn_msg={}",
+        delayed.rtn_msg
+    );
+    assert_eq!(delayed.order_number, tsr);
+
+    let triggered = client
+        .trigger_issue(&TriggerIssueInput {
+            merchant_id,
+            tsr: tsr.clone(),
+            pay_type: "2".into(),
+        })
+        .await
+        .expect("stage trigger_issue 應成功");
+    assert!(
+        triggered.rtn_code == 4_000_003 || triggered.rtn_code == 4_000_004,
+        "trigger_issue rtn_code={} rtn_msg={}",
+        triggered.rtn_code,
+        triggered.rtn_msg
+    );
+    assert_eq!(triggered.tsr, tsr);
+}
+
+/// `DelayIssue` + `CancelDelayIssue`（取消延遲開立）的沙盒回合測試。
+#[tokio::test]
+async fn delay_issue_then_cancel_roundtrip() {
+    let client = stage_client();
+    let merchant_id = client.merchant_id.clone();
+    let relate = unique_relate_number();
+    let tsr = format!("tsrc{}", unique_relate_number());
+
+    let delayed = client
+        .delay_issue(&sample_delay_issue_input(
+            relate,
+            merchant_id.clone(),
+            tsr.clone(),
+        ))
+        .await
+        .expect("stage delay_issue 應成功");
+    assert_eq!(
+        delayed.rtn_code, 1,
+        "delay_issue rtn_msg={}",
+        delayed.rtn_msg
+    );
+
+    let cancelled = client
+        .cancel_delay_issue(&CancelDelayIssueInput { merchant_id, tsr })
+        .await
+        .expect("stage cancel_delay_issue 應成功");
+    assert_eq!(
+        cancelled.rtn_code, 1,
+        "cancel_delay_issue rtn_msg={}",
+        cancelled.rtn_msg
+    );
 }
 
 /// `VoidWithReIssue`（作廢重開）的沙盒回合測試：Data 信封是巢狀的

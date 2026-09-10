@@ -83,11 +83,18 @@ pub use crypto::{
 };
 pub use error::{ApiError, Error, Result};
 pub use invoice::{
-    CheckBarcodeInput, CheckBarcodeOutput, GetCompanyNameByTaxIDInput, GetCompanyNameByTaxIDOutput,
-    GetGovInvoiceWordSettingInput, GetGovInvoiceWordSettingOutput, GetInvoiceWordSettingInput,
+    AllowanceByCollegiateInput, AllowanceByCollegiateOutput, AllowanceInfoItem, AllowanceInput,
+    AllowanceInvalidByCollegiateInput, AllowanceInvalidByCollegiateOutput, AllowanceInvalidInput,
+    AllowanceInvalidOutput, AllowanceItem, AllowanceOutput, CancelDelayIssueInput,
+    CancelDelayIssueOutput, CheckBarcodeInput, CheckBarcodeOutput, CheckLoveCodeInput,
+    CheckLoveCodeOutput, DelayIssueInput, DelayIssueOutput, GetAllowanceInput,
+    GetAllowanceInvalidInput, GetAllowanceInvalidOutput, GetAllowanceOutput,
+    GetCompanyNameByTaxIDInput, GetCompanyNameByTaxIDOutput, GetGovInvoiceWordSettingInput,
+    GetGovInvoiceWordSettingOutput, GetInvalidInput, GetInvalidOutput, GetInvoiceWordSettingInput,
     GetInvoiceWordSettingOutput, GetIssueInput, GetIssueOutput, GovInvoiceInfo, InvalidInput,
     InvalidOutput, InvoiceInfo, InvoiceNotifyInput, InvoiceNotifyOutput, IssueInput, IssueModel,
-    IssueOutput, Item, VoidModel, VoidWithReIssueInput, VoidWithReIssueOutput,
+    IssueOutput, Item, TriggerIssueInput, TriggerIssueOutput, VoidModel, VoidWithReIssueInput,
+    VoidWithReIssueOutput,
 };
 pub use payment::{
     AioCheckOut, AioCheckOutParams, ChoosePayment, CreditCardPeriodActionParams,

@@ -1,6 +1,8 @@
 //! The official payment SDK's surface: the wire constants (付款方式、課稅類別
-//! …), the All-in-One checkout builder ([`aio_check_out`]), and the seven
-//! server-side APIs the SDK exposes (order_search, credit_do_action, …).
+//! …), the All-in-One checkout builder ([`aio_check_out`]), the seven
+//! server-side APIs the official Python SDK exposes (order_search,
+//! credit_do_action, …), plus [`Ecpay::query_payment_info`] — not in the
+//! Python SDK, ported from `ECPay/SDK_PHP`'s `QueryPaymentInfo.php` example.
 //!
 //! [`aio_check_out`]: crate::Ecpay::aio_check_out
 
@@ -374,6 +376,53 @@ fn push_optional_str(m: &mut HashMap<String, String>, key: &str, v: &Option<Stri
 }
 
 impl Ecpay {
+    /// Signs `m` with `CheckMacValue`, POSTs it to `endpoint`, verifies the
+    /// response's own `CheckMacValue` (raising [`Error::CheckMacValueMismatch`]
+    /// on mismatch or absence), and returns the response fields with
+    /// CheckMacValue stripped (blank values kept, like
+    /// `parse_qsl(keep_blank_values=True)`). Shared by [`Self::order_search`]
+    /// and [`Self::query_payment_info`], which only differ in endpoint and
+    /// request fields.
+    async fn post_cmv_verified(
+        &self,
+        endpoint: &str,
+        mut m: HashMap<String, String>,
+    ) -> Result<BTreeMap<String, String>> {
+        let mac = self.generate_check_value(&m)?;
+        m.insert("CheckMacValue".to_owned(), mac);
+
+        let body = self.send_post_form(endpoint, &m).await?;
+        let mut query = parse_qsl(&String::from_utf8_lossy(&body));
+
+        let got = query.get("CheckMacValue").cloned().unwrap_or_default();
+        if got.is_empty() {
+            return Err(Error::CheckMacValueMismatch);
+        }
+        // Recompute over exactly the fields the server sent, unmodified —
+        // unlike generate_check_value (for signing OUR outbound requests,
+        // where forcing MerchantID to the configured client ID is correct),
+        // a response must be hashed as received. ECPay's "trade not found"
+        // reply for QueryPaymentInfo echoes MerchantID="" (confirmed live
+        // against stage, 2026-09); forcing it to self.merchant_id before
+        // recomputing produced a different hash than the server actually
+        // signed, a false-positive CheckMacValueMismatch that order_search's
+        // equivalent "not found" reply never exposed only because it happens
+        // to echo the real MerchantID back.
+        let as_map: HashMap<String, String> =
+            query.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let encrypt_type = as_map
+            .get("EncryptType")
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(1);
+        let want =
+            crate::crypto::check_mac_value(&as_map, &self.hash_key, &self.hash_iv, encrypt_type)?;
+        if !crate::crypto::constant_time_eq(got.as_bytes(), want.as_bytes()) {
+            return Err(Error::CheckMacValueMismatch);
+        }
+        query.remove("CheckMacValue");
+        Ok(query)
+    }
+
     /// `OrderSearch.order_search`(查詢訂單):signs the request, POSTs to
     /// `QueryTradeInfo/V5`, verifies the response CheckMacValue (raising
     /// [`Error::CheckMacValueMismatch`] on mismatch), and returns the
@@ -389,25 +438,31 @@ impl Ecpay {
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
         push_optional_str(&mut m, "PlatformID", &p.platform_id);
 
-        let mac = self.generate_check_value(&m)?;
-        m.insert("CheckMacValue".to_owned(), mac);
-
         let endpoint = format!("{}QueryTradeInfo/V5", self.payment_base_url());
-        let body = self.send_post_form(&endpoint, &m).await?;
-        let mut query = parse_qsl(&String::from_utf8_lossy(&body));
+        self.post_cmv_verified(&endpoint, m).await
+    }
 
-        let got = query.get("CheckMacValue").cloned().unwrap_or_default();
-        if got.is_empty() {
-            return Err(Error::CheckMacValueMismatch);
-        }
-        let as_map: HashMap<String, String> =
-            query.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let want = self.generate_check_value(&as_map)?;
-        if !crate::crypto::constant_time_eq(got.as_bytes(), want.as_bytes()) {
-            return Err(Error::CheckMacValueMismatch);
-        }
-        query.remove("CheckMacValue");
-        Ok(query)
+    /// `QueryPaymentInfo.query_payment_info`(查詢 ATM/CVS/BARCODE 取號結果,
+    /// `Cashier/QueryPaymentInfo`,developers.ecpay.com.tw/5615.md)。請求參數
+    /// 與 [`Self::order_search`] 相同,依付款方式回傳不同欄位子集(ATM:
+    /// BankCode/vAccount/ExpireDate;CVS: PaymentNo/PaymentURL/ExpireDate;
+    /// BARCODE: Barcode1~3/ExpireDate),故沿用 `BTreeMap<String, String>`
+    /// 而非強型別回傳,與 [`Self::order_search`] 一致。
+    pub async fn query_payment_info(
+        &self,
+        p: &OrderSearchParams,
+    ) -> Result<BTreeMap<String, String>> {
+        required_str("MerchantTradeNo", &p.merchant_trade_no, 20)?;
+        optional_str("PlatformID", &p.platform_id, 10)?;
+
+        let mut m = HashMap::new();
+        m.insert("MerchantID".to_owned(), self.merchant_id.clone());
+        m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
+        m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
+        push_optional_str(&mut m, "PlatformID", &p.platform_id);
+
+        let endpoint = format!("{}QueryPaymentInfo", self.payment_base_url());
+        self.post_cmv_verified(&endpoint, m).await
     }
 
     /// `OrderSearchPeriodic.order_search_period`(查詢信用卡定期定額訂單):

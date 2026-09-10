@@ -385,6 +385,21 @@ pub(crate) fn unix_now() -> i64 {
 /// attempt to replay the payload elsewhere — ECPay's API endpoints answer
 /// directly, never redirect), a 10s connect timeout, and a 30s overall
 /// timeout (ECPay's stage endpoints have been observed to hang).
+///
+/// `pool_max_idle_per_host(0)`: this client is a process-wide `OnceLock`,
+/// but every `#[tokio::test]` spins up and tears down its own Tokio
+/// runtime. A default reqwest client keeps idle keep-alive connections (and
+/// the hyper task driving them) alive across calls; if that task was
+/// spawned on one test's runtime and a later test — on a different runtime —
+/// reuses the pooled connection, the driving task is already gone and the
+/// request fails with `hyper::Error(SendRequest, ... DispatchGone,
+/// "runtime dropped the dispatch task")`. Confirmed live (2026-09) once
+/// `tests/sandbox.rs` grew past ~5 concurrently-running live tests, at
+/// which point the race went from theoretical to reliably reproducible.
+/// Disabling idle-connection reuse trades a little latency (one fresh
+/// connection per call instead of reuse) for eliminating that whole class
+/// of failure — an acceptable trade for a payment/invoice SDK's low-QPS,
+/// call-then-wait usage pattern.
 pub(crate) fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
@@ -392,6 +407,7 @@ pub(crate) fn http_client() -> &'static reqwest::Client {
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(0)
             .build()
             .expect("ecpay http client")
     })

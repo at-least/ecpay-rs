@@ -1,6 +1,9 @@
 //! The typed B2C e-invoice APIs (Go issue.go, void_with_issue.go, invalid.go,
 //! invoice_notify.go, check_barcode.go, get_company_name_by_tax_id.go,
-//! get_gov_invoice_word_setting.go, get_invoice_word_setting.go, get_issue.go).
+//! get_gov_invoice_word_setting.go, get_invoice_word_setting.go, get_issue.go),
+//! plus the delay-issue, GetInvalid, CheckLoveCode, and Allowance families
+//! ported below from `ECPay/SDK_PHP`'s example files and the official spec
+//! pages (developers.ecpay.com.tw) — not present in the reference Go port.
 //! JSON field names are ECPay's verbatim spec names — locked by the
 //! conformance tests.
 //!
@@ -9,8 +12,8 @@
 //! `/B2CInvoice/VoidWithReIssue` (confirmed live against stage: the old name
 //! hits ECPay's generic error page, HTTP 500, not a JSON response). This
 //! crate uses the correct wire name and the accurate Rust name/semantics
-//! (作廢重開, void-and-reissue — not 折讓/allowance, which is a distinct,
-//! unimplemented `/B2CInvoice/Allowance` endpoint).
+//! (作廢重開, void-and-reissue — distinct from 折讓/allowance, see
+//! [`Ecpay::allowance`] below).
 
 use serde::{Deserialize, Serialize};
 
@@ -658,5 +661,670 @@ impl Ecpay {
         let output: IssueOutput = self.call_invoice_api("Issue", input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
         Ok(output)
+    }
+}
+
+// --- DelayIssue (延遲開立發票/預約開立) — developers.ecpay.com.tw/15369.md ---
+//
+// 官方 PHP SDK 範例 example/Invoice/B2C/{DelayIssue,TriggerIssue,
+// CancelDelayIssue}.php 沒有涵蓋所有規格頁欄位，本節欄位集合以規格頁為準，
+// 逐一在沙盒對真實伺服器驗證過(見 tests/sandbox.rs)。
+
+/// 延遲開立發票的輸入參數。欄位與 [`IssueInput`] 相同，外加
+/// `DelayFlag`/`DelayDay`/`Tsr`/`PayType`/`PayAct`/`NotifyURL` 等延遲開立
+/// 專屬欄位。
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DelayIssueInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "RelateNumber")]
+    pub relate_number: String,
+    #[serde(rename = "ChannelPartner")]
+    pub channel_partner: String,
+    #[serde(rename = "CustomerID")]
+    pub customer_id: String,
+    #[serde(rename = "ProductServiceID")]
+    pub product_service_id: String,
+    #[serde(rename = "CustomerIdentifier")]
+    pub customer_identifier: String,
+    #[serde(rename = "CustomerName")]
+    pub customer_name: String,
+    #[serde(rename = "CustomerAddr")]
+    pub customer_addr: String,
+    #[serde(rename = "CustomerPhone")]
+    pub customer_phone: String,
+    #[serde(rename = "CustomerEmail")]
+    pub customer_email: String,
+    #[serde(rename = "ClearanceMark")]
+    pub clearance_mark: String,
+    #[serde(rename = "Print")]
+    pub print: String,
+    #[serde(rename = "Donation")]
+    pub donation: String,
+    #[serde(rename = "LoveCode")]
+    pub love_code: String,
+    #[serde(rename = "CarrierType")]
+    pub carrier_type: String,
+    #[serde(rename = "CarrierNum")]
+    pub carrier_num: String,
+    #[serde(rename = "CarrierNum2")]
+    pub carrier_num2: String,
+    #[serde(rename = "TaxType")]
+    pub tax_type: String,
+    #[serde(rename = "ZeroTaxRateReason")]
+    pub zero_tax_rate_reason: String,
+    #[serde(rename = "SpecialTaxType")]
+    pub special_tax_type: i64,
+    #[serde(rename = "SalesAmount")]
+    pub sales_amount: i64,
+    #[serde(rename = "TaxAmount", skip_serializing_if = "Option::is_none")]
+    pub tax_amount: Option<i64>,
+    #[serde(rename = "InvoiceRemark")]
+    pub invoice_remark: String,
+    #[serde(rename = "Items")]
+    pub items: Option<Vec<Item>>,
+    #[serde(rename = "InvType")]
+    pub inv_type: String,
+    #[serde(rename = "vat")]
+    pub vat: String,
+    /// 1:延遲開立(等候手動/排程觸發) 2:排程觸發開立
+    #[serde(rename = "DelayFlag")]
+    pub delay_flag: String,
+    /// 延遲天數：`DelayFlag=1` 時為 1~15，`DelayFlag=2` 時為 0~15。
+    #[serde(rename = "DelayDay")]
+    pub delay_day: i64,
+    /// 交易單號，須唯一不可重複；[`Ecpay::trigger_issue`]／
+    /// [`Ecpay::cancel_delay_issue`] 皆以此欄位為查詢鍵。
+    #[serde(rename = "Tsr")]
+    pub tsr: String,
+    /// 固定值 `"2"`。
+    #[serde(rename = "PayType")]
+    pub pay_type: String,
+    /// 固定值 `"ECPAY"`。
+    #[serde(rename = "PayAct")]
+    pub pay_act: String,
+    #[serde(rename = "NotifyURL")]
+    pub notify_url: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DelayIssueOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64, // 回應代碼 1 為成功，其餘為失敗
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String, // 回應訊息
+    /// 成功時回傳請求帶入的 Tsr；失敗時為空值。
+    #[serde(rename = "OrderNumber")]
+    pub order_number: String,
+}
+
+impl Ecpay {
+    pub async fn delay_issue(&self, input: &DelayIssueInput) -> Result<DelayIssueOutput> {
+        let output: DelayIssueOutput = self.call_invoice_api("DelayIssue", input).await?;
+        api_error(output.rtn_code, &output.rtn_msg)?;
+        Ok(output)
+    }
+}
+
+// --- TriggerIssue (觸發開立發票) — developers.ecpay.com.tw/15371.md ---
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TriggerIssueInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "Tsr")]
+    pub tsr: String, // 交易單號，需與 DelayIssue 的 Tsr 相同
+    /// 固定值 `"2"`。
+    #[serde(rename = "PayType")]
+    pub pay_type: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TriggerIssueOutput {
+    /// 4000003:已排入延遲開立 4000004:立即開立成功；其餘為失敗。
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64,
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+    #[serde(rename = "Tsr")]
+    pub tsr: String, // 成功時回傳 Tsr；失敗時為空值
+}
+
+impl Ecpay {
+    /// TriggerIssue 沒有單一的成功代碼(4000003/4000004 皆代表成功)，不適用
+    /// 本檔其他指令類 API 的「RtnCode 非 1 即視為錯誤」判斷，故比照查詢類
+    /// API 直接把回應原樣交給呼叫端自行檢查 RtnCode。
+    pub async fn trigger_issue(&self, input: &TriggerIssueInput) -> Result<TriggerIssueOutput> {
+        self.call_invoice_api("TriggerIssue", input).await
+    }
+}
+
+// --- CancelDelayIssue (取消延遲開立發票) — developers.ecpay.com.tw/15382.md ---
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CancelDelayIssueInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "Tsr")]
+    pub tsr: String, // 交易單號，需與 DelayIssue 的 Tsr 相同
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CancelDelayIssueOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64, // 回應代碼 1 為成功，其餘為失敗
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+}
+
+impl Ecpay {
+    pub async fn cancel_delay_issue(
+        &self,
+        input: &CancelDelayIssueInput,
+    ) -> Result<CancelDelayIssueOutput> {
+        let output: CancelDelayIssueOutput =
+            self.call_invoice_api("CancelDelayIssue", input).await?;
+        api_error(output.rtn_code, &output.rtn_msg)?;
+        Ok(output)
+    }
+}
+
+// --- GetInvalid (查詢作廢發票明細) — developers.ecpay.com.tw/7933.md ---
+//
+// 與 GetIssue 不同：規格頁與官方 PHP 範例(GetInvalid.php)都是三個欄位一起
+// 帶入(RelateNumber + InvoiceNo + InvoiceDate)，不是 GetIssue 那種互斥的
+// 兩種查詢模式，故不套用 skip_serializing_if 技巧。
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GetInvalidInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "RelateNumber")]
+    pub relate_number: String,
+    #[serde(rename = "InvoiceNo")]
+    pub invoice_no: String,
+    #[serde(rename = "InvoiceDate")]
+    pub invoice_date: String, // 格式為 yyyy-MM-dd
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GetInvalidOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64,
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+    #[serde(rename = "ChannelPartner")]
+    pub channel_partner: String,
+    #[serde(rename = "IIS_Mer_ID")]
+    pub iis_mer_id: serde_json::Value,
+    #[serde(rename = "II_Invoice_No")]
+    pub ii_invoice_no: String,
+    #[serde(rename = "II_Date")]
+    pub ii_date: String, // 作廢時間 格式為 yyyy-MM-dd HH:mm:ss
+    #[serde(rename = "II_Upload_Status")]
+    pub ii_upload_status: serde_json::Value,
+    #[serde(rename = "II_Upload_Date")]
+    pub ii_upload_date: String,
+    #[serde(rename = "Reason")]
+    pub reason: String,
+    #[serde(rename = "II_Seller_Identifier")]
+    pub ii_seller_identifier: String,
+    #[serde(rename = "II_Buyer_Identifier")]
+    pub ii_buyer_identifier: String,
+}
+
+impl Ecpay {
+    /// A query: a non-1 RtnCode is returned verbatim, not raised as an error.
+    pub async fn get_invalid(&self, input: &GetInvalidInput) -> Result<GetInvalidOutput> {
+        self.call_invoice_api("GetInvalid", input).await
+    }
+}
+
+// --- CheckLoveCode (捐贈碼驗證) — developers.ecpay.com.tw/7891.md ---
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CheckLoveCodeInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "LoveCode")]
+    pub love_code: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CheckLoveCodeOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64,
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+    /// 回應代碼 RtnCode 為 1(成功)時，請再判斷此欄位值 Y:存在 N:不存在
+    #[serde(rename = "IsExist")]
+    pub is_exist: String,
+    /// 僅在 `IsExist="Y"` 時有值。
+    #[serde(rename = "OrganName")]
+    pub organ_name: String,
+}
+
+impl Ecpay {
+    /// A query: a non-1 RtnCode is returned verbatim, not raised as an error.
+    pub async fn check_love_code(&self, input: &CheckLoveCodeInput) -> Result<CheckLoveCodeOutput> {
+        self.call_invoice_api("CheckLoveCode", input).await
+    }
+}
+
+// --- 折讓(Allowance)系列 ---
+
+/// 折讓專屬的商品明細。欄位集合與 [`Item`] 不同(無 `ItemRemark`)，故獨立
+/// 定義以與官方規格逐欄位一致。
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceItem {
+    #[serde(rename = "ItemSeq")]
+    pub item_seq: i64,
+    #[serde(rename = "ItemName")]
+    pub item_name: String,
+    #[serde(rename = "ItemCount", with = "crate::crypto::go_float")]
+    pub item_count: f64,
+    #[serde(rename = "ItemWord")]
+    pub item_word: String,
+    #[serde(rename = "ItemPrice", with = "crate::crypto::go_float")]
+    pub item_price: f64,
+    #[serde(rename = "ItemTaxType")]
+    pub item_tax_type: String,
+    #[serde(rename = "ItemAmount", with = "crate::crypto::go_float")]
+    pub item_amount: f64,
+}
+
+// --- Allowance (開立折讓，紙本開立) — developers.ecpay.com.tw/7901.md ---
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "InvoiceNo")]
+    pub invoice_no: String,
+    #[serde(rename = "InvoiceDate")]
+    pub invoice_date: String,
+    /// 折讓通知方式 S:簡訊 E:電子郵件 A:皆通知 N:皆不通知
+    #[serde(rename = "AllowanceNotify")]
+    pub allowance_notify: String,
+    #[serde(rename = "CustomerName")]
+    pub customer_name: String,
+    /// `AllowanceNotify="E"` 時為必填
+    #[serde(rename = "NotifyMail")]
+    pub notify_mail: String,
+    /// `AllowanceNotify="S"` 時為必填
+    #[serde(rename = "NotifyPhone")]
+    pub notify_phone: String,
+    #[serde(rename = "AllowanceAmount")]
+    pub allowance_amount: i64,
+    #[serde(rename = "Reason")]
+    pub reason: String,
+    #[serde(rename = "Items")]
+    pub items: Option<Vec<AllowanceItem>>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64,
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+    /// 若開立成功則回傳折讓編號；若失敗則為空值。
+    #[serde(rename = "IA_Allow_No")]
+    pub ia_allow_no: String,
+    #[serde(rename = "IA_Invoice_No")]
+    pub ia_invoice_no: String,
+    #[serde(rename = "IA_Date")]
+    pub ia_date: String, // 格式為 yyyy-MM-dd HH:mm:ss
+    #[serde(rename = "IA_Remain_Allowance_Amt")]
+    pub ia_remain_allowance_amt: serde_json::Value,
+}
+
+impl Ecpay {
+    pub async fn allowance(&self, input: &AllowanceInput) -> Result<AllowanceOutput> {
+        let output: AllowanceOutput = self.call_invoice_api("Allowance", input).await?;
+        api_error(output.rtn_code, &output.rtn_msg)?;
+        Ok(output)
+    }
+}
+
+// --- AllowanceInvalid (作廢折讓) — developers.ecpay.com.tw/7911.md ---
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceInvalidInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "InvoiceNo")]
+    pub invoice_no: String,
+    #[serde(rename = "AllowanceNo")]
+    pub allowance_no: String,
+    #[serde(rename = "Reason")]
+    pub reason: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceInvalidOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64,
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+    /// 若作廢成功則回傳發票號碼；若失敗則為空值。
+    #[serde(rename = "IA_Invoice_No")]
+    pub ia_invoice_no: String,
+}
+
+impl Ecpay {
+    pub async fn allowance_invalid(
+        &self,
+        input: &AllowanceInvalidInput,
+    ) -> Result<AllowanceInvalidOutput> {
+        let output: AllowanceInvalidOutput =
+            self.call_invoice_api("AllowanceInvalid", input).await?;
+        api_error(output.rtn_code, &output.rtn_msg)?;
+        Ok(output)
+    }
+}
+
+// --- AllowanceByCollegiate (線上開立折讓/合意折讓，需買受人於
+// ReturnURL 頁面確認才會真正生效) — developers.ecpay.com.tw/15391.md ---
+//
+// 買受人完成確認後，ECPay 會另外對 `return_url` 發出 Server-to-Server 的
+// form-urlencoded POST 通知(非 AES 信封，含 CheckMacValue)——那是收件端
+// (商店自己的伺服器)要處理的 webhook，屬於官方 PHP 範例
+// GetAllowanceByCollegiateResponse.php 說明的範疇，不是這個 SDK 對外發出
+// 的呼叫，故本檔不提供剖析該 callback 的型別(與 GetInvoicedResponse.php
+// 對應的 DelayIssue 完成通知同理)。
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceByCollegiateInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "InvoiceNo")]
+    pub invoice_no: String,
+    #[serde(rename = "InvoiceDate")]
+    pub invoice_date: String,
+    /// 固定值 `"E"`。
+    #[serde(rename = "AllowanceNotify")]
+    pub allowance_notify: String,
+    #[serde(rename = "CustomerName")]
+    pub customer_name: String,
+    #[serde(rename = "NotifyMail")]
+    pub notify_mail: String,
+    #[serde(rename = "AllowanceAmount")]
+    pub allowance_amount: i64,
+    #[serde(rename = "Reason")]
+    pub reason: String,
+    /// 買受人於折讓確認頁完成動作後，ECPay 以 Server-to-Server POST 通知的
+    /// 網址(見上方模組註解)。
+    #[serde(rename = "ReturnURL")]
+    pub return_url: String,
+    #[serde(rename = "Items")]
+    pub items: Option<Vec<AllowanceItem>>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceByCollegiateOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64,
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+    #[serde(rename = "IA_Allow_No")]
+    pub ia_allow_no: String,
+    #[serde(rename = "IA_Invoice_No")]
+    pub ia_invoice_no: String,
+    #[serde(rename = "IA_TempDate")]
+    pub ia_temp_date: String, // 建立時間 格式為 yyyy-MM-dd HH:mm:ss
+    #[serde(rename = "IA_TempExpireDate")]
+    pub ia_temp_expire_date: String, // 確認期限 格式為 yyyy-MM-dd HH:mm:ss
+    #[serde(rename = "IA_Remain_Allowance_Amt")]
+    pub ia_remain_allowance_amt: serde_json::Value,
+}
+
+impl Ecpay {
+    pub async fn allowance_by_collegiate(
+        &self,
+        input: &AllowanceByCollegiateInput,
+    ) -> Result<AllowanceByCollegiateOutput> {
+        let output: AllowanceByCollegiateOutput = self
+            .call_invoice_api("AllowanceByCollegiate", input)
+            .await?;
+        api_error(output.rtn_code, &output.rtn_msg)?;
+        Ok(output)
+    }
+}
+
+// --- AllowanceInvalidByCollegiate (取消線上折讓) —
+// developers.ecpay.com.tw/7913.md。
+//
+// 官方 PHP SDK 沒有這支端點的範例(SDK_PHP 只有 AllowanceInvalid.php)，
+// 容易誤以為線上折讓也是用 AllowanceInvalid 取消，但規格頁明確記載這是
+// 另一個獨立端點 `/B2CInvoice/AllowanceInvalidByCollegiate`。
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceInvalidByCollegiateInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "InvoiceNo")]
+    pub invoice_no: String,
+    #[serde(rename = "AllowanceNo")]
+    pub allowance_no: String,
+    #[serde(rename = "Reason")]
+    pub reason: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceInvalidByCollegiateOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64,
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+    /// 若取消成功則回傳發票號碼；若失敗則為空值。
+    #[serde(rename = "IA_Invoice_No")]
+    pub ia_invoice_no: String,
+}
+
+impl Ecpay {
+    pub async fn allowance_invalid_by_collegiate(
+        &self,
+        input: &AllowanceInvalidByCollegiateInput,
+    ) -> Result<AllowanceInvalidByCollegiateOutput> {
+        let output: AllowanceInvalidByCollegiateOutput = self
+            .call_invoice_api("AllowanceInvalidByCollegiate", input)
+            .await?;
+        api_error(output.rtn_code, &output.rtn_msg)?;
+        Ok(output)
+    }
+}
+
+// --- GetAllowance (查詢折讓明細) — developers.ecpay.com.tw/7928.md ---
+
+/// ECPay 沙盒實測(2026-09,公開測試特店 2000132)與規格頁(7928.md)有兩處
+/// 落差：
+/// 1. `AllowanceNo` 與 `InvoiceNo` 實測不論 `SearchType` 為何都必填(規格頁
+///    只說 `SearchType="0"` 時 `AllowanceNo` 必填、`SearchType="1"/"2"` 時
+///    `InvoiceNo` 必填)，任一留空都會被伺服器拒絕(分別回
+///    `RtnCode=2014003 折讓編號為必填` 與 `RtnCode=2014001 發票號碼為必填`)。
+///    `Date` 未單獨測試是否也強制必填，帶入不影響已驗證過的查詢皆成功。
+/// 2. 回應不是規格頁講的 `AllowanceInfo: Array[Object]`，而是把折讓欄位
+///    直接攤平在 Data 最外層(單筆查詢，不是清單)——見
+///    [`GetAllowanceOutput`] 的欄位設計。
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GetAllowanceInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    /// 查詢方式 0:以折讓編號 1:以發票號碼+開立日期 2:以發票號碼+折讓日期
+    /// (三種模式沙盒實測皆需同時帶 `AllowanceNo` 與 `InvoiceNo`，見本型別
+    /// 的文件註解)
+    #[serde(rename = "SearchType")]
+    pub search_type: String,
+    #[serde(rename = "AllowanceNo")]
+    pub allowance_no: String,
+    #[serde(rename = "InvoiceNo")]
+    pub invoice_no: String,
+    /// 格式為 yyyy-MM-dd
+    #[serde(rename = "Date")]
+    pub date: String,
+}
+
+/// [`GetAllowanceOutput::items`] 陣列元素裡的商品明細，欄位集合與
+/// [`AllowanceItem`] 不同(多了 `ItemRateAmt`)，故獨立定義。
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AllowanceInfoItem {
+    #[serde(rename = "ItemSeq")]
+    pub item_seq: i64,
+    #[serde(rename = "ItemName")]
+    pub item_name: String,
+    #[serde(rename = "ItemCount", with = "crate::crypto::go_float")]
+    pub item_count: f64,
+    #[serde(rename = "ItemWord")]
+    pub item_word: String,
+    #[serde(rename = "ItemPrice", with = "crate::crypto::go_float")]
+    pub item_price: f64,
+    #[serde(rename = "ItemRateAmt")]
+    pub item_rate_amt: serde_json::Value,
+    #[serde(rename = "ItemTaxType")]
+    pub item_tax_type: String,
+    #[serde(rename = "ItemAmount", with = "crate::crypto::go_float")]
+    pub item_amount: f64,
+}
+
+/// 查詢折讓明細的回傳參數。
+///
+/// 規格頁(7928.md)記載欄位包在 `AllowanceInfo: Array[Object]` 底下，但
+/// 沙盒實測(2026-09)回應把這些欄位直接攤平在最外層，沒有 `AllowanceInfo`
+/// 這個 key——與請求端 `AllowanceNo` 恆為必填的實測結果一致：這支 API
+/// 實際上永遠是「查一筆特定折讓單的明細」，不是清單查詢，故用單一物件
+/// 而非陣列回傳合理。
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GetAllowanceOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64,
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+    #[serde(rename = "ChannelPartner")]
+    pub channel_partner: String,
+    #[serde(rename = "IA_Allow_No")]
+    pub ia_allow_no: String,
+    #[serde(rename = "IA_Check_Send_Mail")]
+    pub ia_check_send_mail: String,
+    #[serde(rename = "IA_Date")]
+    pub ia_date: String,
+    #[serde(rename = "Items")]
+    pub items: Option<Vec<AllowanceInfoItem>>,
+    #[serde(rename = "IA_IP")]
+    pub ia_ip: String,
+    #[serde(rename = "IA_Identifier")]
+    pub ia_identifier: String,
+    #[serde(rename = "IA_Invalid_Status")]
+    pub ia_invalid_status: serde_json::Value,
+    #[serde(rename = "IA_Invoice_Issue_Date")]
+    pub ia_invoice_issue_date: String,
+    #[serde(rename = "IA_Invoice_No")]
+    pub ia_invoice_no: String,
+    #[serde(rename = "IA_Mer_ID")]
+    pub ia_mer_id: serde_json::Value,
+    #[serde(rename = "IA_Send_Mail")]
+    pub ia_send_mail: String,
+    #[serde(rename = "IA_Send_Phone")]
+    pub ia_send_phone: String,
+    #[serde(rename = "IA_Tax_Amount")]
+    pub ia_tax_amount: serde_json::Value,
+    #[serde(rename = "IA_Tax_Type")]
+    pub ia_tax_type: String,
+    #[serde(rename = "IA_Total_Amount")]
+    pub ia_total_amount: serde_json::Value,
+    #[serde(rename = "IA_Total_Tax_Amount")]
+    pub ia_total_tax_amount: serde_json::Value,
+    #[serde(rename = "IA_Upload_Date")]
+    pub ia_upload_date: String,
+    #[serde(rename = "IA_Upload_Status")]
+    pub ia_upload_status: serde_json::Value,
+    #[serde(rename = "IIS_Customer_Name")]
+    pub iis_customer_name: String,
+}
+
+impl Ecpay {
+    /// A query: a non-1 RtnCode is returned verbatim, not raised as an error.
+    ///
+    /// 端點名稱有兩個互相矛盾的官方來源：PHP SDK 範例(`GetAllowance.php`)
+    /// 打 `/B2CInvoice/GetAllowance`；規格頁(7928.md)寫
+    /// `/B2CInvoice/GetAllowanceList`。沙盒實測確認 `GetAllowance` 是對的
+    /// (能收到正常的 JSON 查詢結果，不是 ECPay 的一般錯誤頁)。
+    pub async fn get_allowance(&self, input: &GetAllowanceInput) -> Result<GetAllowanceOutput> {
+        self.call_invoice_api("GetAllowance", input).await
+    }
+}
+
+// --- GetAllowanceInvalid (查詢作廢折讓明細) — developers.ecpay.com.tw/7943.md ---
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GetAllowanceInvalidInput {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
+    #[serde(rename = "InvoiceNo")]
+    pub invoice_no: String,
+    #[serde(rename = "AllowanceNo")]
+    pub allowance_no: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GetAllowanceInvalidOutput {
+    #[serde(rename = "RtnCode")]
+    pub rtn_code: i64,
+    #[serde(rename = "RtnMsg")]
+    pub rtn_msg: String,
+    #[serde(rename = "AI_Allow_Date")]
+    pub ai_allow_date: String,
+    #[serde(rename = "AI_Allow_No")]
+    pub ai_allow_no: String,
+    #[serde(rename = "AI_Buyer_Identifier")]
+    pub ai_buyer_identifier: String,
+    #[serde(rename = "AI_Date")]
+    pub ai_date: String,
+    #[serde(rename = "AI_Invoice_No")]
+    pub ai_invoice_no: String,
+    /// ECPay 沙盒實測(2026-09)回傳型態是數字，不是規格頁講的字串。
+    #[serde(rename = "AI_Mer_ID")]
+    pub ai_mer_id: serde_json::Value,
+    #[serde(rename = "Reason")]
+    pub reason: String,
+    #[serde(rename = "AI_Seller_Identifier")]
+    pub ai_seller_identifier: String,
+    #[serde(rename = "AI_Upload_Date")]
+    pub ai_upload_date: String,
+    #[serde(rename = "AI_Upload_Status")]
+    pub ai_upload_status: serde_json::Value,
+}
+
+impl Ecpay {
+    /// A query: a non-1 RtnCode is returned verbatim, not raised as an error.
+    pub async fn get_allowance_invalid(
+        &self,
+        input: &GetAllowanceInvalidInput,
+    ) -> Result<GetAllowanceInvalidOutput> {
+        self.call_invoice_api("GetAllowanceInvalid", input).await
     }
 }

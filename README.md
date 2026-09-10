@@ -9,18 +9,25 @@ B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
 ## 特色
 
 - **付款 AIO 全涵蓋**:`create_order`(全付款方式 + 電子發票延伸)、查詢訂單
-  (QueryTradeInfo)、查詢信用卡定期定額、信用卡關帳/退刷/取消/放棄、單筆交易
-  查詢、下載特店餘額明細(Big5)、下載撥款明細(Big5)、定期定額訂單狀態作業。
-- **B2C 電子發票**:開立、作廢重開(VoidWithReIssue)、作廢、查詢、發送通知、
-  手機條碼驗證、統一編號查詢、政府字軌查詢等九支 API(AES-128-CBC + PKCS7 +
-  Base64 信封,與官方規格逐位元組一致)。⚠️ 官方「折讓」(`/B2CInvoice/Allowance`
-  系列)與「愛心碼驗證」(`/B2CInvoice/CheckLoveCode`)是各自獨立的端點,
-  目前**未實作**,請勿與作廢重開混淆。
+  (QueryTradeInfo)、查詢 ATM/CVS/BARCODE 取號結果(QueryPaymentInfo)、查詢
+  信用卡定期定額、信用卡關帳/退刷/取消/放棄、單筆交易查詢、下載特店餘額明細
+  (Big5)、下載撥款明細(Big5)、定期定額訂單狀態作業。
+- **B2C 電子發票全涵蓋**:開立、延遲開立/觸發開立/取消延遲開立、作廢重開
+  (VoidWithReIssue)、作廢、查詢(開立/作廢)、發送通知、折讓(紙本/線上合意)
+  及其作廢/查詢、手機條碼驗證、愛心碼驗證、統一編號查詢、政府與商店字軌查詢
+  共 20 支 API(AES-128-CBC + PKCS7 + Base64 信封,與官方規格及沙盒實測
+  逐位元組比對過)。
   - `Issue`/`IssueModel` 已補齊 `ChannelPartner`、`ProductServiceID`、
     `CarrierNum2`、`ZeroTaxRateReason`、`TaxAmount` 等官方規格欄位。
   - `GetIssue` 支援官方文件記載的兩種查詢模式(`RelateNumber` 或
     `InvoiceNo`+`InvoiceDate` 擇一),回應型別 `GetIssueOutput` 已對齊
     沙盒實測的完整欄位集。
+  - ⚠️ 折讓查詢 `get_allowance`(`GetAllowance`)與官方規格頁有兩處落差,
+    已依沙盒實測修正並記錄在型別文件註解:`AllowanceNo`/`InvoiceNo`
+    不論 `SearchType` 為何都必填(規格頁說只在特定模式才必填);回應是
+    攤平的單一物件,不是規格頁講的 `AllowanceInfo` 陣列。
+  - ⚠️ 取消線上折讓是獨立端點 `AllowanceInvalidByCollegiate`(規格頁
+    7913.md),官方 PHP SDK 沒有對應範例,容易誤用 `AllowanceInvalid`。
 - **以官方實作為測試基準**:測試向量由「真的」官方 Python SDK 執行產生
   (17 種 `create_order` 情境逐欄位比對、11 條驗證錯誤訊息原樣比對、
   CheckMacValue SHA-256/MD5、AES-CBC 官方向量、.NET UrlEncode 契約)。
@@ -141,6 +148,7 @@ println!("RtnMsg = {}", result["RtnMsg"]);
 | --- | --- |
 | `create_order` | `Ecpay::aio_check_out` → [`AioCheckOut`](src/payment/check_out.rs)(含 `html_form`) |
 | `order_search` | `Ecpay::order_search`(驗證回應 CheckMacValue) |
+| —(比對 `ECPay/SDK_PHP` 官方範例後新增) | `Ecpay::query_payment_info`(查詢 ATM/CVS/BARCODE 取號結果,`Cashier/QueryPaymentInfo`,請求參數與 `order_search` 共用 `OrderSearchParams`) |
 | `order_search_period` | `Ecpay::order_search_period` |
 | `credit_do_action` | `Ecpay::credit_do_action` |
 | `search_single_transaction` | `Ecpay::search_single_transaction` |
@@ -149,7 +157,8 @@ println!("RtnMsg = {}", result["RtnMsg"]);
 | `credit_card_period_action` | `Ecpay::credit_card_period_action` |
 | `gen_html_post_form` | `AioCheckOut::html_form`(屬性值已做 HTML escape) |
 | `generate_check_value` | `Ecpay::generate_check_value` / 自由函式 `check_mac_value` |
-| —(Go 版移植) | 發票:`issue`/`try_issue`、`void_with_reissue`、`invalid`、`get_issue`、`invoice_notify`、`check_barcode`、`get_company_name_by_tax_id`、`get_gov_invoice_word_setting`、`get_invoice_word_setting` |
+| —(Go 版移植) | 發票:`issue`/`try_issue`、`void_with_reissue`、`invalid`、`get_issue`、`get_invalid`、`invoice_notify`、`check_barcode`、`check_love_code`、`get_company_name_by_tax_id`、`get_gov_invoice_word_setting`、`get_invoice_word_setting` |
+| —(比對 `ECPay/SDK_PHP` 官方範例/規格頁後新增) | 發票延遲開立:`delay_issue`、`trigger_issue`、`cancel_delay_issue`;折讓:`allowance`、`allowance_invalid`、`allowance_by_collegiate`、`allowance_invalid_by_collegiate`、`get_allowance`、`get_allowance_invalid` |
 
 常數(付款方式、課稅類別、載具、捐贈、銀聯……)在 [`ecpay::payment`](src/payment/mod.rs)
 模組,名稱對應官方 dict:`ChoosePayment`(enum)、`choose_sub_payment`、
@@ -268,18 +277,29 @@ A Rust port of ECPay's official [ECPayAIO_Python](https://github.com/ECPay/ECPay
 payment SDK, extended with the B2C e-invoice AES-JSON APIs. MIT licensed.
 
 - **Full AIO payment surface**: checkout creation with the invoice extension,
-  order search (with response CheckMacValue verification), credit-card period
-  queries, capture/refund/cancel/abandon, single-transaction lookup, merchant
+  order search (with response CheckMacValue verification), ATM/CVS/BARCODE
+  payment-info lookup (`query_payment_info`), credit-card period queries,
+  capture/refund/cancel/abandon, single-transaction lookup, merchant
   balance & disbursement downloads (Big5), and period-order status actions.
-- **B2C e-invoice**: issue, void-and-reissue (`/B2CInvoice/VoidWithReIssue`),
-  void, query, notify, mobile-barcode check, and word-setting queries —
-  byte-exact against the official vectors. ⚠️ The separate `Allowance`
-  (折讓) and `CheckLoveCode` (愛心碼驗證) endpoints are **not** implemented.
+- **Full B2C e-invoice surface**: issue, delayed issue/trigger/cancel, void-
+  and-reissue (`/B2CInvoice/VoidWithReIssue`), void, query (issued/voided),
+  notify, allowance (paper and online-collegiate) plus its void/query,
+  mobile-barcode check, love-code check, and word-setting queries — 20 APIs
+  total, byte-exact against the official vectors and live-verified on stage.
   - `Issue`/`IssueModel` now cover `ChannelPartner`, `ProductServiceID`,
     `CarrierNum2`, `ZeroTaxRateReason`, and `TaxAmount`.
   - `GetIssue` supports both documented query modes (`RelateNumber`, or
     `InvoiceNo`+`InvoiceDate`), and `GetIssueOutput` matches the full
     field set observed live against the stage server.
+  - ⚠️ `get_allowance` (`GetAllowance`) diverges from its spec page in two
+    ways, fixed per live testing (documented on the type): `AllowanceNo`/
+    `InvoiceNo` are required for every `SearchType` (not just the one the
+    spec claims), and the response is a single flat object, not the
+    documented `AllowanceInfo` array.
+  - ⚠️ Cancelling an online/collegiate allowance is the separate
+    `AllowanceInvalidByCollegiate` endpoint (spec page 7913.md) — the
+    official PHP SDK has no example for it, so it's easy to assume
+    `AllowanceInvalid` covers both.
 - **Verified against the real official SDK**: the conformance fixtures were
   generated by executing upstream `sdk/ecpay_payment_sdk.py` itself.
 - **Typed API with an escape hatch**: required fields are compile-time,
