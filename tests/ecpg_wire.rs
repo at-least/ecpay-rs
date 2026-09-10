@@ -1,0 +1,631 @@
+//! The ECPG 站內付 2.0 wire contract against a hermetic local mock: the
+//! Timestamp-only RqHeader (no Revision/RqID — the load-bearing difference
+//! from the invoice/logistics envelopes), the dual-domain endpoint paths
+//! (ecpg `Merchant/*` vs ecpayment `1.0.0/*`), omission of unset optional
+//! pieces, the typed GetTokenbyTrade decode, and the TransCode gate.
+//!
+//! Nothing here touches the network; the one live stage probe at the bottom
+//! is `#[ignore]`d like `tests/stage_probes.rs`.
+
+use std::collections::BTreeSet;
+use std::sync::{Arc, Mutex};
+
+use serde_json::{json, Value};
+
+use ecpay::ecpg::{
+    AtmInfo, CardInfo, ConsumerInfo, CreateBindCardInput, CreatePaymentInput,
+    CreatePaymentWithCardIdInput, DeleteMemberBindCardInput, EcpgDoActionInput,
+    EcpgPeriodActionInput, EcpgTradeRefInput, GetMemberBindCardInput, GetTokenbyBindingCardInput,
+    GetTokenbyTradeInput, GetTokenbyUserInput, OrderInfo, QueryTradeMediaInput,
+};
+use ecpay::{decrypt_data, encrypt_data, Ecpay, Error};
+
+mod common;
+use common::spawn_http_server;
+
+/// Official public stage ECPG account (same as tests/stage_probes.rs): ECPG
+/// signs with the PAYMENT HashKey/HashIV.
+const MERCHANT: &str = "3002607";
+const KEY: &[u8] = b"pwFHCqoQZGmho4w6";
+const IV: &[u8] = b"EkRm7iFT261dpevs";
+
+fn client(ecpg_api_url: String, ecpayment_api_url: String) -> Ecpay {
+    Ecpay {
+        merchant_id: MERCHANT.to_owned(),
+        hash_key: "pwFHCqoQZGmho4w6".to_owned(),
+        hash_iv: "EkRm7iFT261dpevs".to_owned(),
+        ecpg_api_url,
+        ecpayment_api_url,
+        ..Default::default()
+    }
+}
+
+/// The GetTokenbyTrade body the round-trip tests send: OrderInfo + a
+/// load-bearing ConsumerInfo, everything else left unset.
+fn token_input() -> GetTokenbyTradeInput {
+    GetTokenbyTradeInput {
+        merchant_id: MERCHANT.to_owned(),
+        remember_card: Some(1),
+        payment_ui_type: Some(2),
+        choose_payment_list: "0".to_owned(),
+        order_info: Some(OrderInfo {
+            merchant_trade_date: "2026/09/11 06:57:06".to_owned(),
+            merchant_trade_no: "order1234567890".to_owned(),
+            total_amount: 100,
+            return_url: "https://example.com/return".to_owned(),
+            trade_desc: "ecpay-rs wire test".to_owned(),
+            item_name: "商品 x1".to_owned(),
+        }),
+        consumer_info: Some(ConsumerInfo {
+            merchant_member_id: Some("member000001".to_owned()),
+            email: "customer@email.com".to_owned(),
+            phone: "0912345678".to_owned(),
+            name: Some("王小美".to_owned()),
+            country_code: Some("158".to_owned()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// A TransCode=1 response envelope whose Data is `data` encrypted with the
+/// payment keys — the reply every mock hands back.
+fn envelope_reply(data: Value) -> (u16, String, Vec<u8>) {
+    let res = json!({
+        "TransCode": 1,
+        "TransMsg": "",
+        "Data": encrypt_data(&data, KEY, IV).unwrap(),
+    });
+    (
+        200,
+        "application/json".to_owned(),
+        serde_json::to_vec(&res).unwrap(),
+    )
+}
+
+/// Asserts the outer envelope shape EVERY ECPG request must have and returns
+/// the decrypted Data payload:
+///
+/// * top-level keys are exactly `{MerchantID, RqHeader, Data}` — no
+///   PlatformID (unlike the B2C invoice envelope);
+/// * RqHeader keys are exactly `{Timestamp}` — **NO Revision, NO RqID**.
+///   This is the load-bearing wire detail: ECPG's RqHeader carries only the
+///   Unix-seconds timestamp, unlike invoice/logistics/B2B. Set equality
+///   proves both the absence of Revision/RqID AND the presence of
+///   Timestamp; the value must be a real Unix-seconds integer.
+fn assert_envelope_and_decrypt(body: &[u8]) -> Value {
+    let req: Value = serde_json::from_slice(body).expect("envelope is JSON");
+    let obj = req.as_object().expect("envelope is an object");
+    let top: BTreeSet<&str> = obj.keys().map(|k| k.as_str()).collect();
+    assert_eq!(
+        top,
+        BTreeSet::from(["Data", "MerchantID", "RqHeader"]),
+        "envelope carries exactly MerchantID/RqHeader/Data (no PlatformID)"
+    );
+    assert_eq!(obj["MerchantID"], MERCHANT, "envelope MerchantID");
+    let rqh = obj["RqHeader"].as_object().unwrap();
+    let rq_keys: BTreeSet<&str> = rqh.keys().map(|k| k.as_str()).collect();
+    assert_eq!(
+        rq_keys,
+        BTreeSet::from(["Timestamp"]),
+        "ECPG RqHeader is Timestamp-only: no Revision, no RqID"
+    );
+    assert!(
+        !rq_keys.contains("Revision") && !rq_keys.contains("RqID"),
+        "spelled out: Revision/RqID must be absent"
+    );
+    let ts = rqh["Timestamp"].as_i64().expect("Timestamp is an integer");
+    assert!(
+        ts > 1_700_000_000,
+        "Timestamp is a current Unix-seconds value, got {ts}"
+    );
+    let data = obj["Data"].as_str().expect("Data is an AES string");
+    decrypt_data(data, KEY, IV).expect("Data decrypts with the payment keys")
+}
+
+/// The typed happy path: the mock verifies the exact wire shape (path,
+/// envelope key sets, decrypted OrderInfo/ConsumerInfo) and answers with the
+/// stage-proven response shape; the typed output must decode it.
+#[tokio::test]
+async fn get_token_by_trade_round_trips_the_proven_envelope() {
+    let seen_path: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let path = seen_path.clone();
+    let srv = spawn_http_server(move |p, body| {
+        *path.lock().unwrap() = p.to_owned();
+        let data = assert_envelope_and_decrypt(body);
+        assert_eq!(
+            data["MerchantID"], MERCHANT,
+            "ECPay wants MerchantID inside Data as well as the envelope"
+        );
+        assert_eq!(data["RememberCard"], 1);
+        assert_eq!(data["ChoosePaymentList"], "0");
+        assert_eq!(data["OrderInfo"]["MerchantTradeNo"], "order1234567890");
+        assert_eq!(
+            data["OrderInfo"]["MerchantTradeDate"],
+            "2026/09/11 06:57:06"
+        );
+        assert_eq!(
+            data["OrderInfo"]["TotalAmount"], 100,
+            "TotalAmount rides the wire as a JSON number (i64)"
+        );
+        assert_eq!(data["ConsumerInfo"]["Email"], "customer@email.com");
+        assert_eq!(data["ConsumerInfo"]["Phone"], "0912345678");
+        assert_eq!(data["ConsumerInfo"]["CountryCode"], "158");
+        // Nested objects carry exactly their specified keys (Address unset →
+        // omitted from ConsumerInfo; CardInfo unset → whole object absent).
+        let order = data["OrderInfo"].as_object().unwrap();
+        assert_eq!(
+            order.keys().map(|k| k.as_str()).collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "MerchantTradeDate",
+                "MerchantTradeNo",
+                "TotalAmount",
+                "ReturnURL",
+                "TradeDesc",
+                "ItemName",
+            ]),
+            "OrderInfo key set"
+        );
+        let consumer = data["ConsumerInfo"].as_object().unwrap();
+        assert_eq!(
+            consumer.keys().map(|k| k.as_str()).collect::<BTreeSet<_>>(),
+            BTreeSet::from(["MerchantMemberID", "Email", "Phone", "Name", "CountryCode",]),
+            "ConsumerInfo key set"
+        );
+        // The exact response shape proven live on stage (2026-09).
+        envelope_reply(json!({
+            "MerchantID": "3002607",
+            "RtnCode": 1,
+            "RtnMsg": "",
+            "Token": "37c33c79195f40339279dae54a96e39c",
+            "TokenExpireDate": "2026/09/11 06:57:06",
+        }))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+
+    let out = ec.get_token_by_trade(&token_input()).await.unwrap();
+    assert_eq!(out.merchant_id, "3002607");
+    assert_eq!(out.rtn_code, 1);
+    assert_eq!(out.rtn_msg, "");
+    assert_eq!(out.token, "37c33c79195f40339279dae54a96e39c");
+    assert_eq!(out.token_expire_date, "2026/09/11 06:57:06");
+    assert_eq!(*seen_path.lock().unwrap(), "/Merchant/GetTokenbyTrade");
+}
+
+/// Optional sub-objects and fields ride `Option` and must be OMITTED from
+/// the decrypted Data when unset (the PHP examples omit them — sending an
+/// empty object or null is a deviation), and a present sub-object omits its
+/// own unset fields too.
+#[tokio::test]
+async fn unset_optional_pieces_are_omitted_from_the_wire() {
+    let datas: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen = datas.clone();
+    let srv = spawn_http_server(move |_p, body| {
+        seen.lock().unwrap().push(assert_envelope_and_decrypt(body));
+        envelope_reply(json!({
+            "MerchantID": "3002607", "RtnCode": 1, "RtnMsg": "",
+            "Token": "t", "TokenExpireDate": "x",
+        }))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+
+    // Call 1: CardInfo/ATMInfo (and every other optional piece) unset.
+    ec.get_token_by_trade(&token_input()).await.unwrap();
+
+    // Call 2: CardInfo + ATMInfo set, but only ONE field inside each.
+    let mut with_pieces = token_input();
+    with_pieces.card_info = Some(CardInfo {
+        credit_installment: Some("3,6".to_owned()),
+        ..Default::default()
+    });
+    with_pieces.atm_info = Some(AtmInfo {
+        expire_date: Some(3),
+    });
+    ec.get_token_by_trade(&with_pieces).await.unwrap();
+
+    let d = datas.lock().unwrap();
+    let minimal = d[0].as_object().unwrap();
+    for absent in [
+        "CardInfo",
+        "ATMInfo",
+        "UnionPayInfo",
+        "CVSInfo",
+        "BarcodeInfo",
+    ] {
+        assert!(
+            !minimal.contains_key(absent),
+            "{absent} must be absent from Data when None, got {minimal:?}"
+        );
+    }
+
+    let full = d[1].as_object().unwrap();
+    assert!(full.contains_key("CardInfo"), "{full:?}");
+    assert!(full.contains_key("ATMInfo"), "{full:?}");
+    let card = full["CardInfo"].as_object().unwrap();
+    assert_eq!(
+        card.keys().collect::<Vec<_>>(),
+        ["CreditInstallment"],
+        "unset fields inside a present sub-object are omitted too"
+    );
+    assert_eq!(full["ATMInfo"]["ExpireDate"], 3);
+}
+
+/// TransCode != 1 (the transport layer) surfaces as `Error::Transport`
+/// before any Data decoding is attempted.
+#[tokio::test]
+async fn transcode_rejection_surfaces_as_a_transport_error() {
+    let srv = spawn_http_server(|_p, _body| {
+        let res = json!({"TransCode": 110, "TransMsg": "Data decrypt failed", "Data": ""});
+        (
+            200,
+            "application/json".to_owned(),
+            serde_json::to_vec(&res).unwrap(),
+        )
+    });
+    let ec = client(srv.clone(), srv);
+    let err = ec
+        .get_token_by_trade(&token_input())
+        .await
+        .expect_err("TransCode != 1 must be an error");
+    match err {
+        Error::Transport { code, msg } => {
+            assert_eq!(code, 110);
+            assert_eq!(msg, "Data decrypt failed");
+        }
+        other => panic!("expected Error::Transport, got {other:?}"),
+    }
+}
+
+/// The MerchantID duplicated inside Data must equal the client's: ECPay
+/// rejects a mismatch opaquely (RtnCode != 1, empty message), so the client
+/// refuses locally before any request leaves.
+#[tokio::test]
+async fn data_merchant_id_must_match_the_client_merchant() {
+    // Port 1: nothing listens there — the guard must fire BEFORE the request.
+    let ec = client(
+        "http://127.0.0.1:1/Merchant/".to_owned(),
+        "http://127.0.0.1:1/1.0.0/".to_owned(),
+    );
+    let mut input = token_input();
+    input.merchant_id = "someone-else".to_owned();
+    let err = ec
+        .get_token_by_trade(&input)
+        .await
+        .expect_err("mismatched Data MerchantID must be refused locally");
+    assert!(matches!(err, Error::Message(_)), "{err:?}");
+    assert!(err.to_string().contains("MerchantID"), "{err}");
+
+    let mut empty = token_input();
+    empty.merchant_id = String::new();
+    let err = ec
+        .get_token_by_trade(&empty)
+        .await
+        .expect_err("empty Data MerchantID must be refused locally");
+    assert!(matches!(err, Error::Message(_)), "{err:?}");
+}
+
+/// Every one of the 14 methods posts to its exact dual-domain path — the
+/// 8 creation/bindcard endpoints under `/Merchant/`, the 6 query/action
+/// endpoints under `/1.0.0/` (their paths carry the Cashier/Credit/
+/// CreditDetail prefix) — AND its decrypted Data carries exactly the
+/// specified wire keys, which pins every serde rename (including the
+/// otherwise-uncovered PayToken/BindCardID/BindCardPayToken/DateType/…
+/// names) hermetically: a rename typo anywhere fails here.
+#[tokio::test]
+async fn every_method_hits_its_exact_dual_domain_path() {
+    let seen: Arc<Mutex<Vec<(String, Value)>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorded = seen.clone();
+    let srv = spawn_http_server(move |p, body| {
+        let data = assert_envelope_and_decrypt(body);
+        recorded.lock().unwrap().push((p.to_owned(), data));
+        envelope_reply(json!({
+            "MerchantID": "3002607", "RtnCode": 1, "RtnMsg": "",
+            "Token": "t", "TokenExpireDate": "x",
+        }))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+
+    ec.get_token_by_trade(&token_input()).await.unwrap();
+    ec.create_payment(&CreatePaymentInput {
+        merchant_id: MERCHANT.to_owned(),
+        pay_token: "pay-token".to_owned(),
+        merchant_trade_no: "order1234567890".to_owned(),
+    })
+    .await
+    .unwrap();
+    ec.create_payment_with_card_id(&CreatePaymentWithCardIdInput {
+        merchant_id: MERCHANT.to_owned(),
+        bind_card_id: "bind-card-id".to_owned(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    ec.create_bind_card(&CreateBindCardInput {
+        merchant_id: MERCHANT.to_owned(),
+        bind_card_pay_token: "bind-token".to_owned(),
+        merchant_member_id: "member000001".to_owned(),
+    })
+    .await
+    .unwrap();
+    ec.get_token_by_binding_card(&GetTokenbyBindingCardInput {
+        merchant_id: MERCHANT.to_owned(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    ec.get_token_by_user(&GetTokenbyUserInput {
+        merchant_id: MERCHANT.to_owned(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    ec.get_member_bind_card(&GetMemberBindCardInput {
+        merchant_id: MERCHANT.to_owned(),
+        merchant_member_id: "member000001".to_owned(),
+        merchant_trade_no: "order1234567890".to_owned(),
+    })
+    .await
+    .unwrap();
+    ec.delete_member_bind_card(&DeleteMemberBindCardInput {
+        merchant_id: MERCHANT.to_owned(),
+        bind_card_id: "bind-card-id".to_owned(),
+    })
+    .await
+    .unwrap();
+
+    for out in [
+        ec.ecpg_query_trade(&EcpgTradeRefInput {
+            merchant_trade_no: "order1234567890".to_owned(),
+            ..Default::default()
+        })
+        .await
+        .unwrap(),
+        ec.ecpg_query_payment_info(&EcpgTradeRefInput {
+            merchant_trade_no: "order1234567890".to_owned(),
+            ..Default::default()
+        })
+        .await
+        .unwrap(),
+        ec.ecpg_query_trade_media(&QueryTradeMediaInput {
+            merchant_id: MERCHANT.to_owned(),
+            date_type: "1".to_owned(),
+            begin_date: "2026-09-01".to_owned(),
+            end_date: "2026-09-11".to_owned(),
+            payment_type: Some("01".to_owned()),
+        })
+        .await
+        .unwrap(),
+        ec.ecpg_credit_card_period_action(&EcpgPeriodActionInput {
+            merchant_trade_no: "order1234567890".to_owned(),
+            action: "ReAuth".to_owned(),
+            ..Default::default()
+        })
+        .await
+        .unwrap(),
+        ec.ecpg_do_action(&EcpgDoActionInput {
+            merchant_trade_no: "order1234567890".to_owned(),
+            trade_no: "ecpay-trade-no".to_owned(),
+            action: "R".to_owned(),
+            total_amount: 100,
+            ..Default::default()
+        })
+        .await
+        .unwrap(),
+        ec.ecpg_query_credit_trade(&EcpgTradeRefInput {
+            merchant_trade_no: "order1234567890".to_owned(),
+            ..Default::default()
+        })
+        .await
+        .unwrap(),
+    ] {
+        assert_eq!(
+            out["RtnCode"], 1,
+            "the Value output is the decrypted reply, not a pass-through"
+        );
+    }
+
+    let calls = seen.lock().unwrap();
+    let got_paths: Vec<&str> = calls.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(
+        got_paths,
+        vec![
+            // ecpg domain — creation/bindcard family.
+            "/Merchant/GetTokenbyTrade",
+            "/Merchant/CreatePayment",
+            "/Merchant/CreatePaymentWithCardID",
+            "/Merchant/CreateBindCard",
+            "/Merchant/GetTokenbyBindingCard",
+            "/Merchant/GetTokenbyUser",
+            "/Merchant/GetMemberBindCard",
+            "/Merchant/DeleteMemberBindCard",
+            // ecpayment domain — query/action family.
+            "/1.0.0/Cashier/QueryTrade",
+            "/1.0.0/Cashier/QueryPaymentInfo",
+            "/1.0.0/Cashier/QueryTradeMedia",
+            "/1.0.0/Cashier/CreditCardPeriodAction",
+            "/1.0.0/Credit/DoAction",
+            "/1.0.0/CreditDetail/QueryTrade",
+        ],
+        "each method must hit its exact dual-domain path"
+    );
+    // The exact key set of every decrypted Data payload: unset Option fields
+    // are ABSENT (not null, not ""), present ones carry their verbatim ECPay
+    // wire names.
+    let expected_keys: Vec<BTreeSet<&str>> = vec![
+        // GetTokenbyTrade (only the set pieces of token_input()).
+        BTreeSet::from([
+            "MerchantID",
+            "RememberCard",
+            "PaymentUIType",
+            "ChoosePaymentList",
+            "OrderInfo",
+            "ConsumerInfo",
+        ]),
+        // CreatePayment.
+        BTreeSet::from(["MerchantID", "PayToken", "MerchantTradeNo"]),
+        // CreatePaymentWithCardID (OrderInfo/ConsumerInfo/CustomField unset).
+        BTreeSet::from(["MerchantID", "BindCardID"]),
+        // CreateBindCard.
+        BTreeSet::from(["MerchantID", "BindCardPayToken", "MerchantMemberID"]),
+        // GetTokenbyBindingCard.
+        BTreeSet::from(["MerchantID"]),
+        // GetTokenbyUser.
+        BTreeSet::from(["MerchantID"]),
+        // GetMemberBindCard.
+        BTreeSet::from(["MerchantID", "MerchantMemberID", "MerchantTradeNo"]),
+        // DeleteMemberBindCard.
+        BTreeSet::from(["MerchantID", "BindCardID"]),
+        // QueryTrade / QueryPaymentInfo (ids unset → omitted).
+        BTreeSet::from(["MerchantTradeNo"]),
+        BTreeSet::from(["MerchantTradeNo"]),
+        // QueryTradeMedia.
+        BTreeSet::from([
+            "MerchantID",
+            "DateType",
+            "BeginDate",
+            "EndDate",
+            "PaymentType",
+        ]),
+        // CreditCardPeriodAction.
+        BTreeSet::from(["MerchantTradeNo", "Action"]),
+        // DoAction.
+        BTreeSet::from(["MerchantTradeNo", "TradeNo", "Action", "TotalAmount"]),
+        // QueryCreditTrade.
+        BTreeSet::from(["MerchantTradeNo"]),
+    ];
+    assert_eq!(calls.len(), expected_keys.len(), "every method sent once");
+    for (i, (_, data)) in calls.iter().enumerate() {
+        let keys: BTreeSet<&str> = data
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        assert_eq!(keys, expected_keys[i], "call {i} Data key set: {data}");
+    }
+}
+
+/// Query-family inputs: `PlatformID`/`MerchantID` are omitted from Data when
+/// `None` (the envelope MerchantID stands in), and ride along when `Some`;
+/// DoAction carries its required fields verbatim.
+#[tokio::test]
+async fn query_inputs_omit_unset_platform_and_merchant_ids() {
+    let datas: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen = datas.clone();
+    let srv = spawn_http_server(move |_p, body| {
+        seen.lock().unwrap().push(assert_envelope_and_decrypt(body));
+        envelope_reply(json!({"RtnCode": 1, "RtnMsg": ""}))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+
+    // 1) Both ids unset → Data is exactly {MerchantTradeNo}.
+    ec.ecpg_query_trade(&EcpgTradeRefInput {
+        merchant_trade_no: "no-1".to_owned(),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    // 2) Both ids set → they ride the Data.
+    ec.ecpg_query_trade(&EcpgTradeRefInput {
+        platform_id: Some("platform-id".to_owned()),
+        merchant_id: Some("sub-merchant".to_owned()),
+        merchant_trade_no: "no-2".to_owned(),
+    })
+    .await
+    .unwrap();
+
+    // 3) DoAction required fields ride verbatim.
+    ec.ecpg_do_action(&EcpgDoActionInput {
+        merchant_trade_no: "no-3".to_owned(),
+        trade_no: "ecpay-trade-no".to_owned(),
+        action: "R".to_owned(),
+        total_amount: 100,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    let d = datas.lock().unwrap();
+    let keys: Vec<&str> = d[0]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|k| k.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        ["MerchantTradeNo"],
+        "unset PlatformID/MerchantID must be omitted, got {keys:?}"
+    );
+    assert_eq!(d[0]["MerchantTradeNo"], "no-1");
+    assert_eq!(d[1]["PlatformID"], "platform-id");
+    assert_eq!(d[1]["MerchantID"], "sub-merchant");
+    assert_eq!(d[2]["TradeNo"], "ecpay-trade-no");
+    assert_eq!(d[2]["Action"], "R");
+    assert_eq!(d[2]["TotalAmount"], 100);
+}
+
+/// Live stage probe: the TYPED `get_token_by_trade` wire bytes against the
+/// real stage server — the same shape `tests/stage_probes.rs` proved with
+/// hand-built JSON, now re-proven through this module's structs and the
+/// post_aes_json helper. Never runs under plain `cargo test` (offline suite);
+/// run explicitly with:
+///
+/// ```bash
+/// cargo test --test ecpg_wire -- --ignored --nocapture stage_probe
+/// ```
+#[tokio::test]
+#[ignore = "hits the real stage server; the hermetic suite must stay offline"]
+async fn stage_probe_get_token_by_trade_with_the_typed_method() {
+    let ec = client(
+        "https://ecpg-stage.ecpay.com.tw/Merchant/".to_owned(),
+        "https://ecpayment-stage.ecpay.com.tw/1.0.0/".to_owned(),
+    );
+    let mut input = token_input();
+    // Unique per run so stage never sees a duplicate MerchantTradeNo.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    input.order_info.as_mut().unwrap().merchant_trade_no = format!("WIRE{stamp}");
+    // Mirror the stage-proven payload (tests/stage_probes.rs): RememberCard=1
+    // without CardInfo.OrderResultURL is rejected with RtnCode 5100010
+    // "[OrderResultURL] cannot be empty" (live-learned 2026-09).
+    input.card_info = Some(CardInfo {
+        redeem: Some(0),
+        order_result_url: Some("https://www.ecpay.com.tw/example/receive".to_owned()),
+        credit_installment: Some("3,6,12".to_owned()),
+        flexible_installment: Some(30),
+    });
+    // The proven payload carries the three non-card payment sub-objects too;
+    // stage rejects their absence one by one (5100010 "[ATMInfo] cannot be
+    // empty" live-learned right after the OrderResultURL one).
+    input.atm_info = Some(AtmInfo {
+        expire_date: Some(3),
+    });
+    input.cvs_info = Some(ecpay::ecpg::CvsInfo {
+        store_expire_date: Some(10080),
+    });
+    input.barcode_info = Some(ecpay::ecpg::BarcodeInfo {
+        store_expire_date: Some(7),
+    });
+
+    let out = ec
+        .get_token_by_trade(&input)
+        .await
+        .expect("transport layer: TransCode==1 and Data decrypts");
+    println!(
+        "stage GetTokenbyTrade: RtnCode={} RtnMsg={:?} Token={} TokenExpireDate={}",
+        out.rtn_code, out.rtn_msg, out.token, out.token_expire_date
+    );
+    assert_eq!(
+        out.rtn_code, 1,
+        "the typed structs must speak ECPG verbatim (RtnMsg={:?})",
+        out.rtn_msg
+    );
+    assert!(
+        !out.token.is_empty(),
+        "a token was issued through the typed path"
+    );
+}

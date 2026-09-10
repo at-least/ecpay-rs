@@ -9,12 +9,12 @@
 //! * 取號 / 建立交易 / 綁卡（8 個）：
 //!   `{ecpg_base_url}Merchant/<Action>`，即
 //!   `https://ecpg-stage.ecpay.com.tw/Merchant/`
-//!   （[`crate::Ecpay::ecpg_api_url`] / [`crate::Ecpay::ecpg_base_url`]）。
+//!   （設定欄位 [`crate::Ecpay::ecpg_api_url`]）。
 //! * 查詢 / 請退款 / 動作（6 個）：
 //!   `{ecpayment_base_url}<Path>`，Path 本身已含 `Cashier/`、`Credit/`、
 //!   `CreditDetail/` 前綴，即
 //!   `https://ecpayment-stage.ecpay.com.tw/1.0.0/`
-//!   （[`crate::Ecpay::ecpayment_api_url`] / [`crate::Ecpay::ecpayment_base_url`]）。
+//!   （設定欄位 [`crate::Ecpay::ecpayment_api_url`]）。
 //!
 //! 每個方法的文件都標示所屬網域；`QueryTrade` 打去 `ecpg` 網域（或反向）
 //! 只會拿到 404，不帶任何 ECPay 錯誤碼。
@@ -88,13 +88,17 @@ pub struct CardInfo {
     pub redeem: Option<i64>,
     /// 前端結果轉導網址（消費者瀏覽器 form POST 帶 `ResultData`，與
     /// ReturnURL 的 server 端 JSON POST 不同；不用回 `1|OK`）。
+    /// `RememberCard=1` 時必填（stage 實測缺漏回 5100010）。
     #[serde(rename = "OrderResultURL", skip_serializing_if = "Option::is_none")]
     pub order_result_url: Option<String>,
     /// 分期期數清單，逗號分隔，如 `"3,6,12"`。
     #[serde(rename = "CreditInstallment", skip_serializing_if = "Option::is_none")]
     pub credit_installment: Option<String>,
     /// 圓夢分期期數。
-    #[serde(rename = "FlexibleInstallment", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "FlexibleInstallment",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub flexible_installment: Option<i64>,
 }
 
@@ -167,6 +171,12 @@ pub struct ConsumerInfo {
 /// `GetTokenbyTrade`（站內付 2.0 取號，站內付流程的第一歩）的 Data 內容。
 /// 取得的 Token 交給前端 JS SDK 建立付款畫面，之後以 [`CreatePaymentInput`]
 /// 的 `PayToken` 送回。
+///
+/// stage 實測（2026-09，公開測試帳號 3002607）：缺漏的參數會被**逐一**點名
+/// 回 RtnCode 5100010 "The parameter \[&lt;Param&gt;\] cannot be empty"
+/// （實測中 `CardInfo.OrderResultURL` 與 `ATMInfo` 都曾被點名）；官方 PHP
+/// 範例送全套 OrderInfo + CardInfo + ATMInfo + CVSInfo + BarcodeInfo +
+/// ConsumerInfo。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GetTokenbyTradeInput {
@@ -174,7 +184,9 @@ pub struct GetTokenbyTradeInput {
     /// `merchant_id` 帶一次），兩處必須一致 — 方法會在本機先檢查。
     #[serde(rename = "MerchantID")]
     pub merchant_id: String,
-    /// 是否記憶卡號 0:不記憶 1:記憶。
+    /// 是否記憶卡號 0:不記憶 1:記憶。設 1 時 `CardInfo.OrderResultURL`
+    /// 必填 — stage 實測（2026-09）缺漏回 RtnCode 5100010
+    /// "The parameter \[OrderResultURL\] cannot be empty"。
     #[serde(rename = "RememberCard", skip_serializing_if = "Option::is_none")]
     pub remember_card: Option<i64>,
     /// 付款畫面呈現類型（ECPay 規格代碼；官方 stage 範例用 2）。
@@ -462,6 +474,13 @@ impl Ecpay {
     /// `Merchant/*` 家族會在 Data 內重複帶一次 MerchantID；與信封不一致時
     /// ECPay 只回 `RtnCode != 1` 且無訊息（與缺 ConsumerInfo 同類的啞巴
     /// 失敗），所以在本機先拒絕。
+    ///
+    /// 刻意不提供「Data 帶子特店編號」的逃生口：平台商模式的 ECPG 信封
+    /// 需帶 `PlatformID`，而共用的信封建構（`post_aes_json`）目前不送
+    /// PlatformID — 在此現狀下「Data MerchantID ≠ 信封」的請求只會被
+    /// stage 以空訊息拒絕，本機先擋不會擋掉任何原本可行的流程。查詢家族
+    /// （`EcpgTradeRefInput`/`EcpgPeriodActionInput`/`EcpgDoActionInput`）
+    /// 的 `MerchantID` 是 `Option`，省略時以信封為準，**不經此檢查**。
     fn require_data_merchant_id(&self, data_merchant_id: &str) -> Result<()> {
         if data_merchant_id.is_empty() || data_merchant_id != self.merchant_id {
             return Err(Error::Message(format!(
@@ -552,7 +571,10 @@ impl Ecpay {
     /// `GetTokenbyUser`（綁卡會員取號）。
     ///
     /// ⚠️ 端點在 **ecpg 網域**：`{ecpg_base_url}Merchant/GetTokenbyUser`。
-    pub async fn get_token_by_user(&self, input: &GetTokenbyUserInput) -> Result<serde_json::Value> {
+    pub async fn get_token_by_user(
+        &self,
+        input: &GetTokenbyUserInput,
+    ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(format!("{}GetTokenbyUser", self.ecpg_base_url()), input)
             .await
@@ -567,11 +589,8 @@ impl Ecpay {
         input: &GetMemberBindCardInput,
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
-        self.ecpg_post(
-            format!("{}GetMemberBindCard", self.ecpg_base_url()),
-            input,
-        )
-        .await
+        self.ecpg_post(format!("{}GetMemberBindCard", self.ecpg_base_url()), input)
+            .await
     }
 
     /// `DeleteMemberBindCard`（刪除會員綁卡）。
@@ -642,7 +661,10 @@ impl Ecpay {
         input: &EcpgPeriodActionInput,
     ) -> Result<serde_json::Value> {
         self.ecpg_post(
-            format!("{}Cashier/CreditCardPeriodAction", self.ecpayment_base_url()),
+            format!(
+                "{}Cashier/CreditCardPeriodAction",
+                self.ecpayment_base_url()
+            ),
             input,
         )
         .await
@@ -654,8 +676,11 @@ impl Ecpay {
     /// ⚠️ 端點在 **ecpayment 網域**：
     /// `{ecpayment_base_url}Credit/DoAction`。
     pub async fn ecpg_do_action(&self, input: &EcpgDoActionInput) -> Result<serde_json::Value> {
-        self.ecpg_post(format!("{}Credit/DoAction", self.ecpayment_base_url()), input)
-            .await
+        self.ecpg_post(
+            format!("{}Credit/DoAction", self.ecpayment_base_url()),
+            input,
+        )
+        .await
     }
 
     /// `CreditDetail/QueryTrade`（查詢信用卡交易明細）。

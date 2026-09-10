@@ -84,16 +84,14 @@ pub use client::{Request, Response, RqHeader, RqHeaderResponse};
 pub use crypto::{
     check_mac_value, decrypt, decrypt_data, encrypt, encrypt_data, hash_mac, unmarshal, url_encode,
 };
-pub use error::{ApiError, Error, Result};
-pub use logistics::{
-    AllInOneCancelC2cInput, AllInOneCreateTestDataInput, AllInOnePrintTradeDocumentInput,
-    AllInOneQueryInput, AllInOneRedirectInput, AllInOneReturnCvsInput, AllInOneReturnHomeInput,
-    AllInOneUpdateShipmentInfoInput, AllInOneUpdateStoreInfoInput, CancelC2cInput,
-    CreateByTempTradeInput, CrossBorderCreateInput, CrossBorderCreateTestDataInput,
-    CrossBorderMapInput, CrossBorderRefInput, DomesticQueryInput, GetStoreListInput,
-    LogisticsCreateInput, LogisticsForm, MapInput, PrintC2c, ReturnCvsInput, ReturnHomeInput,
-    UpdateShipmentInfoInput, UpdateStoreInfoInput, UpdateTempTradeInput,
+pub use ecpg::{
+    AtmInfo, BarcodeInfo, CardInfo, ConsumerInfo, CreateBindCardInput, CreatePaymentInput,
+    CreatePaymentWithCardIdInput, CvsInfo, DeleteMemberBindCardInput, EcpgDoActionInput,
+    EcpgPeriodActionInput, EcpgTradeRefInput, GetMemberBindCardInput, GetTokenbyBindingCardInput,
+    GetTokenbyTradeInput, GetTokenbyTradeOutput, GetTokenbyUserInput, OrderInfo,
+    QueryTradeMediaInput, UnionPayInfo,
 };
+pub use error::{ApiError, Error, Result};
 pub use invoice::{
     AllowanceByCollegiateInput, AllowanceByCollegiateOutput, AllowanceInfoItem, AllowanceInput,
     AllowanceInvalidByCollegiateInput, AllowanceInvalidByCollegiateOutput, AllowanceInvalidInput,
@@ -107,6 +105,15 @@ pub use invoice::{
     InvalidOutput, InvoiceInfo, InvoiceNotifyInput, InvoiceNotifyOutput, IssueInput, IssueModel,
     IssueOutput, Item, TriggerIssueInput, TriggerIssueOutput, VoidModel, VoidWithReIssueInput,
     VoidWithReIssueOutput,
+};
+pub use logistics::{
+    AllInOneCancelC2cInput, AllInOneCreateTestDataInput, AllInOnePrintTradeDocumentInput,
+    AllInOneQueryInput, AllInOneRedirectInput, AllInOneReturnCvsInput, AllInOneReturnHomeInput,
+    AllInOneUpdateShipmentInfoInput, AllInOneUpdateStoreInfoInput, CancelC2cInput,
+    CreateByTempTradeInput, CrossBorderCreateInput, CrossBorderCreateTestDataInput,
+    CrossBorderMapInput, CrossBorderRefInput, DomesticQueryInput, GetStoreListInput,
+    LogisticsCreateInput, LogisticsForm, MapInput, PrintC2c, ReturnCvsInput, ReturnHomeInput,
+    UpdateShipmentInfoInput, UpdateStoreInfoInput, UpdateTempTradeInput,
 };
 pub use payment::{
     AioCheckOut, AioCheckOutParams, ChoosePayment, CreditCardPeriodActionParams,
