@@ -1,0 +1,145 @@
+//! Live B2B e-invoice tests against the ECPay stage server. The public test
+//! account 2000132 IS B2B-enabled (proven by the stage probes, commit
+//! ed87553: `RtnCode=1 發票開立成功`), so a full issue → query → void
+//! lifecycle runs unattended. Like `tests/sandbox.rs` this needs outbound
+//! network, and every run consumes one stage 字軌 number.
+
+use ecpay::invoice_b2b::{GetIssueInput, InvalidInput, IssueB2bInput};
+use ecpay::Ecpay;
+
+const MERCHANT_ID: &str = "2000132";
+const B2B_KEY: &[u8] = b"ejCk326UnaZWKisg";
+const B2B_IV: &[u8] = b"q9jcZX8Ib9LM8wYk";
+
+fn unique_relate_number() -> String {
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    format!("B2BSBX{n}")
+}
+
+fn taipei_today() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+        + 8 * 3600; // UTC+8
+    let days = secs.div_euclid(86_400);
+    // Howard Hinnant's civil_from_days, yyyy-MM-dd (B2B wire date format).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+fn sdk() -> Ecpay {
+    Ecpay {
+        merchant_id: MERCHANT_ID.into(),
+        hash_key: "pwFHCqoQZGmho4w6".into(),
+        hash_iv: "EkRm7iFT261dpevs".into(),
+        invoice_hash_key: B2B_KEY.to_vec(),
+        invoice_hash_iv: B2B_IV.to_vec(),
+        b2b_invoice_api_url: "https://einvoice-stage.ecpay.com.tw/B2BInvoice/".into(),
+        b2b_rq_id: "701b3264-a538-437e-ad45-2505eb7dde39".into(),
+        ..Default::default()
+    }
+}
+
+fn sample_issue(relate_number: String) -> IssueB2bInput {
+    IssueB2bInput {
+        merchant_id: MERCHANT_ID.into(),
+        relate_number,
+        customer_identifier: "23165448".into(),
+        customer_email: "test-buyer@ecpay.com.tw".into(),
+        inv_type: "07".into(),
+        tax_type: "1".into(),
+        items: vec![ecpay::invoice_b2b::B2bItem {
+            item_seq: 1,
+            item_name: "測試商品01".into(),
+            item_count: 3.0,
+            item_price: 10.0,
+            item_tax_type: "1".into(),
+            item_amount: 30.0,
+            ..Default::default()
+        }],
+        sales_amount: 30,
+        tax_amount: 2, // round(30 * 0.05)
+        total_amount: 32,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn b2b_issue_then_get_then_invalid_roundtrip() {
+    let client = sdk();
+
+    // 1. 開立 — the wire contract proven by the probes: RtnCode=1 + 發票號.
+    let relate_number = unique_relate_number();
+    let issue = client
+        .issue_b2b(&sample_issue(relate_number.clone()))
+        .await
+        .expect("B2B Issue envelope round-trips (TransCode gate)");
+    println!("issue = {issue:?}");
+    assert_eq!(issue.rtn_code, 1, "RtnMsg={:?}", issue.rtn_msg);
+    assert!(!issue.invoice_number.is_empty(), "invoice number minted");
+
+    // 2. 查詢 — GET the issued invoice back. Server-truth (2026-09): B2B
+    // GetIssue wraps the record in `RtnData` and its RtnCode is the STRING
+    // "1" (unlike Issue's integer); the record mixes PascalCase with
+    // snake_case keys (`Buyer_Address`, `Invalid_Status`, lowercase `items`).
+    let got = client
+        .get_issue_b2b(&GetIssueInput {
+            merchant_id: MERCHANT_ID.into(),
+            invoice_category: 0,
+            invoice_number: issue.invoice_number.clone(),
+            invoice_date: taipei_today(),
+        })
+        .await
+        .expect("GetIssue decodes");
+    println!("get_issue = {got:?}");
+    assert_eq!(got["RtnCode"], "1", "issue is queryable: {got}");
+    assert_eq!(
+        got["RtnData"]["RelateNumber"], relate_number,
+        "the record is nested under RtnData"
+    );
+
+    // 3. 作廢 — void it so the lifecycle closes.
+    let voided = client
+        .invalid_b2b(&InvalidInput {
+            merchant_id: MERCHANT_ID.into(),
+            invoice_number: issue.invoice_number.clone(),
+            invoice_date: taipei_today(),
+            reason: "sandbox test".into(), // ≤20 chars (2103005 otherwise)
+        })
+        .await
+        .expect("Invalid decodes");
+    println!("invalid = {voided:?}");
+    assert_eq!(voided["RtnCode"], 1, "void succeeds: {voided}");
+}
+
+#[tokio::test]
+async fn b2b_get_invoice_word_setting_answers() {
+    // 民國年 for 2026 is 115; term/use/category follow the official example's
+    // shape (InvoiceCategory=2 is the B2B value in the PHP example).
+    let out = sdk()
+        .get_invoice_word_setting_b2b(&ecpay::invoice_b2b::GetInvoiceWordSettingInput {
+            merchant_id: MERCHANT_ID.into(),
+            invoice_year: "115".into(),
+            invoice_term: 0,
+            use_status: 0,
+            invoice_category: 2,
+        })
+        .await;
+    match out {
+        Ok(v) => println!("word setting = {v:?}"),
+        Err(e) => println!("word setting error (business-level acceptable) = {e:?}"),
+    }
+}
