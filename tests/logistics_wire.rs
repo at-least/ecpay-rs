@@ -160,6 +160,65 @@ async fn response_without_mac_is_rejected_not_swallowed() {
 }
 
 #[tokio::test]
+async fn http_500_with_a_valid_envelope_surfaces_the_business_error() {
+    // Server-truth (captured live on stage, 2026-09): v2 business errors can
+    // arrive as HTTP 500 with a VALID envelope whose Data decrypts to the
+    // RtnCode/RtnMsg. The client must surface that, not a bare HTTP error.
+    let server = spawn_http_server(|_path, _body| {
+        let reply = serde_json::json!({"RtnCode": 10100048, "RtnMsg": "查無此訂單"});
+        (
+            500,
+            "application/json".into(),
+            serde_json::json!({
+                "MerchantID": MERCHANT_ID,
+                "RpHeader": {"Timestamp": 1},
+                "TransCode": 1,
+                "TransMsg": "Success",
+                "Data": ecpay::crypto::encrypt_data(&reply, LOGISTICS_KEY.as_bytes(), LOGISTICS_IV.as_bytes()).unwrap(),
+            })
+            .to_string()
+            .into_bytes(),
+        )
+    });
+    let out = logistics_sdk(server)
+        .allinone_query_logistics_trade_info(&AllInOneQueryInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_id: "1".into(),
+        })
+        .await
+        .expect("a valid envelope on HTTP 500 must still decode");
+    assert_eq!(out["RtnCode"], 10100048, "business error decoded: {out}");
+}
+
+#[tokio::test]
+async fn gateway_json_without_transcode_is_not_mistaken_for_an_envelope() {
+    // A proxy/gateway JSON body on a non-2xx carries no TransCode — the
+    // client must keep the HTTP status and body instead of decoding it into
+    // a meaningless Transport{code:0}.
+    let server = spawn_http_server(|_path, _body| {
+        (
+            502,
+            "application/json".into(),
+            br#"{"error": "bad gateway"}"#.to_vec(),
+        )
+    });
+    let err = logistics_sdk(server)
+        .allinone_query_logistics_trade_info(&AllInOneQueryInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_id: "1".into(),
+        })
+        .await
+        .expect_err("gateway 502 must surface as InvoiceStatus");
+    match err {
+        ecpay::Error::InvoiceStatus { status, body } => {
+            assert_eq!(status, 502);
+            assert!(body.contains("bad gateway"), "{body}");
+        }
+        other => panic!("expected InvoiceStatus, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn allinone_v2_envelope_carries_timestamp_and_revision_only() {
     let server = spawn_http_server(|path, body| {
         assert!(

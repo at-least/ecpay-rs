@@ -367,6 +367,8 @@ mod tests {
             hash_iv: "EkRm7iFT261dpevs".into(),
             invoice_hash_key: b"ejCk326UnaZWKisg".to_vec(),
             invoice_hash_iv: b"q9jcZX8Ib9LM8wYk".to_vec(),
+            logistics_hash_key: b"5294y06JbISpM5x9".to_vec(),
+            logistics_hash_iv: b"v77hoKGq4kWxNNIS".to_vec(),
             ..Default::default()
         };
         let dumped = format!("{client:?}");
@@ -375,6 +377,8 @@ mod tests {
             "EkRm7iFT261dpevs",
             "ejCk326UnaZWKisg",
             "q9jcZX8Ib9LM8wYk",
+            "5294y06JbISpM5x9",
+            "v77hoKGq4kWxNNIS",
         ] {
             assert!(!dumped.contains(secret), "Debug leaked {secret}: {dumped}");
         }

@@ -266,8 +266,9 @@ async fn logistics_domestic_create_with_md5_cmv_answers() {
 #[ignore = "hits the real stage server"]
 async fn b2b_invoice_issue_reaches_the_service() {
     // Field set mirrors example/Invoice/B2B/Issue.php. B2B's RqHeader adds
-    // RqID (fixed GUID in the official example — its stability as an
-    // idempotency key is untested; the official example itself reuses it)
+    // RqID (fixed GUID in the official example, which itself reuses it —
+    // confirmed NOT an idempotency key: this probe ran twice with the same
+    // RqID and minted distinct invoices LP30000931 and LP30000933)
     // + Revision "1.0.0".
     // NOTE: every run issues a REAL stage invoice and consumes a 字軌 number
     // (logistics probes likewise create real stage orders; we do not cancel

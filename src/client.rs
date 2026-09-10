@@ -351,9 +351,12 @@ impl Ecpay {
             // Server-truth (logistics v2, captured live 2026-09): some
             // business errors answer HTTP 500 with a VALID envelope whose
             // Data decrypts to the RtnCode/RtnMsg. Prefer that over a bare
-            // HTTP error — fall back to InvoiceStatus only when the body
-            // isn't a usable envelope.
-            match Self::parse_envelope(&body) {
+            // HTTP error — but only when the body really carries a TransCode
+            // gate: every Response field is serde-defaulted, so any JSON
+            // object (a 403/502 gateway body, for example) would otherwise
+            // decode into a meaningless Transport{code:0} and swallow the
+            // real status and body.
+            match Self::parse_envelope(&body).filter(|res| res.trans_code != 0) {
                 Some(res) => return Self::decode_aes_response(res, key, iv),
                 None => return Err(Error::InvoiceStatus { status, body }),
             }

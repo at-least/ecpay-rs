@@ -47,10 +47,15 @@ fn issue_success_data() -> serde_json::Value {
 }
 
 /// The response envelope the real server sends: `{TransCode, TransMsg,
-/// Data}` with `Data` = AES-encrypted url-encoded JSON, as a raw body.
+/// Data}` — plus ECPay's own typo'd header spellings `RpHeader`/`Reversion`
+/// (captured live on stage, 2026-09), reproduced here verbatim to prove our
+/// decode is indifferent to them. `Data` = AES-encrypted url-encoded JSON,
+/// as a raw body.
 fn aes_reply(data: &serde_json::Value) -> (u16, String, Vec<u8>) {
     let encrypted = ecpay::crypto::encrypt_data(data, B2B_KEY, B2B_IV).expect("encrypt reply Data");
-    let body = format!(r#"{{"TransCode":1,"TransMsg":"Success","Data":"{encrypted}"}}"#);
+    let body = format!(
+        r#"{{"MerchantID":2000132,"RpHeader":{{"Timestamp":1789079520,"RqID":"701b3264-a538-437e-ad45-2505eb7dde39","Reversion":"1.0.0"}},"TransCode":1,"TransMsg":"Success","Data":"{encrypted}"}}"#
+    );
     (
         200,
         "application/json; charset=utf-8".to_owned(),

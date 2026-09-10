@@ -96,9 +96,15 @@ impl LogisticsForm {
 /// stage: signing the prefixed key never matches).
 fn split_status_prefix(body: &str) -> (Option<String>, &str) {
     match body.split_once('|') {
-        // A status prefix only exists when the head segment carries no '='
-        // (otherwise `1|` would be inside the first value, never the key).
-        Some((head, rest)) if !head.contains('=') && head.len() <= 3 => {
+        // A status prefix only exists when the head segment is a short
+        // alphanumeric status token (never empty, never carrying '=' —
+        // otherwise `1|` would sit inside the first VALUE, not the key).
+        Some((head, rest))
+            if !head.is_empty()
+                && head.len() <= 3
+                && !head.contains('=')
+                && head.chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
             (Some(head.to_owned()), rest)
         }
         _ => (None, body),

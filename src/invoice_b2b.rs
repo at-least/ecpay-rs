@@ -418,7 +418,7 @@ pub struct InvalidInput {
     #[serde(rename = "InvoiceDate")]
     pub invoice_date: String, // 發票開立日期 格式為 yyyy-MM-dd
     #[serde(rename = "Reason")]
-    pub reason: String, // 作廢原因
+    pub reason: String, // 作廢原因 maxlength 20（stage 實測 2026-09：超過回 2103005 發票作廢原因格式錯誤）
 }
 
 impl Ecpay {

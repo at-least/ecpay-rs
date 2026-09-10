@@ -286,16 +286,18 @@ staging 實測(2026-09)確立的 server 真相,全部寫進了各模組文件:
   (服務未開通,信封本身已驗)。v2 對「查無訂單」回 **HTTP 500 + 有效
   信封**,AES 核心會解出業務錯誤而非丟 HTTP 錯誤。
 
-### Staging probes for unimplemented PHP-SDK services
+### Staging probes: how the three missing services were pinned
 
-`tests/stage_probes.rs` (also `#[ignore]`d) probes the three services the
-official PHP SDK covers that this crate does not implement yet — ECPG 站內付 2.0
-(AES-JSON envelope with a `{Timestamp}`-only RqHeader; live-issued a real
-Token), domestic logistics (form POST + MD5 CheckMacValue; response is
-`1|<urlencoded query>` and the CMV signs only the query part — verified
-byte-exact live), and B2B e-invoice (RqHeader carries `RqID` + `Revision`
-1.0.0; issued successfully with the public stage account; note ECPay's own
-`RpHeader`/`Reversion` response spellings). Run:
+`tests/stage_probes.rs` (also `#[ignore]`d) is where the three services the
+official PHP SDK covers were first probed with this crate's own public crypto
+primitives before being implemented (see the feature list above — all three
+are now full modules). The probes pinned the wire formats the implementations
+follow: ECPG 站內付 2.0 (AES-JSON envelope with a `{Timestamp}`-only RqHeader;
+live-issued a real Token), domestic logistics (form POST + MD5 CheckMacValue;
+response is `1|<urlencoded query>` and the CMV signs only the query part —
+verified byte-exact live), and B2B e-invoice (RqHeader carries `RqID` +
+`Revision` 1.0.0; issued successfully with the public stage account; note
+ECPay's own `RpHeader`/`Reversion` response spellings). Run:
 
 ```bash
 cargo test --test stage_probes -- --ignored --test-threads=1 --nocapture
