@@ -4,8 +4,7 @@ ECPay(綠界科技)All-in-One 金流 SDK 的 Rust 版本 —— 完整移植官�
 [ECPayAIO_Python](https://github.com/ECPay/ECPayAIO_Python),並額外收錄
 B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
 
-[![CI](https://github.com/OWNER/ecpay-rs/actions/workflows/ci.yml/badge.svg)](./.github/workflows/ci.yml)
-<!-- 發佈到 crates.io 後,請自行加上版本與 docs.rs 徽章,並把 OWNER 換成你的 GitHub 帳號 -->
+[![CI](https://github.com/at-least/ecpay-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/at-least/ecpay-rs/actions/workflows/ci.yml)
 
 ## 特色
 
