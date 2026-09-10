@@ -9,6 +9,7 @@ repository = "https://github.com/at-least/ecpay-rs"
 readme = "README.md"
 keywords = ["ecpay", "payment", "invoice", "taiwan", "fintech"]
 categories = ["api-bindings", "finance"]
+exclude = [".claude/"]
 
 [dependencies]
 aes = "0.9"
