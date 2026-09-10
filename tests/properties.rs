@@ -224,8 +224,7 @@ proptest! {
         let mut ciphertext = or_fail(encrypt(plaintext.as_bytes(), key, iv))?;
         // The base64 body, not the block layout, is what an attacker edits:
         // flip one base64 char within the first block's span.
-        let start = ciphertext.len() - ciphertext.len(); // 0
-        let idx = start + flip_index % 16.min(ciphertext.len());
+        let idx = flip_index % 16.min(ciphertext.len());
         let original = ciphertext.as_bytes()[idx];
         let replacement = if original == b'A' { 'B' } else { 'A' };
         ciphertext.replace_range(idx..idx + 1, &replacement.to_string());

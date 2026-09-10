@@ -303,6 +303,7 @@ fn percent_decode(s: &str) -> String {
 fn validation_messages_match_the_official_sdk() {
     let f = fixture();
     let client = sdk();
+    let mut checked = 0;
     for (name, case) in &f.errors {
         let msg = case.error.clone().expect("the SDK raised");
         let err = client
@@ -313,9 +314,11 @@ fn validation_messages_match_the_official_sdk() {
             format!("ecpay: {msg}"),
             "{name}: validation message must match the official SDK"
         );
+        checked += 1;
     }
-    // The create_order cases that stored an error (none today, but the
-    // fixture shape allows it) must not silently pass.
+    // `errors` is `#[serde(default)]`: an empty or renamed fixture section
+    // must not turn this into a vacuous pass.
+    assert_eq!(checked, 11, "every error scenario in the fixture ran");
 }
 
 #[test]

@@ -8,14 +8,19 @@
 //! breaks the wire contract fails a test instead of production.
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
-use serde::Deserialize;
-
 use ecpay::{
-    encrypt_data, hash_mac, Ecpay, GetIssueInput, GetIssueOutput, InvalidInput, IssueInput, Item,
+    encrypt_data, hash_mac, AllowanceByCollegiateInput, AllowanceInput, AllowanceInvalidInput,
+    AllowanceItem, CancelDelayIssueInput, CheckBarcodeInput, CheckLoveCodeInput, DelayIssueInput,
+    Ecpay, GetAllowanceInput, GetAllowanceInvalidInput, GetCompanyNameByTaxIDInput,
+    GetGovInvoiceWordSettingInput, GetInvalidInput, GetInvoiceWordSettingInput, GetIssueInput,
+    GetIssueOutput, InvalidInput, InvoiceNotifyInput, IssueInput, IssueModel, Item,
+    TriggerIssueInput, VoidModel, VoidWithReIssueInput,
 };
+
+mod common;
+use common::spawn_http_server;
 
 // --- Go mock_test.go constants and helpers ---
 
@@ -43,72 +48,6 @@ fn test_payment_ecpay(base_url: &str) -> Ecpay {
         payment_api_url: base_url.to_owned(),
         ..Default::default()
     }
-}
-
-/// A tiny hermetic HTTP server (Go httptest.NewServer): binds 127.0.0.1:0,
-/// serves every request with the handler's response, one connection per
-/// request (Connection: close). Returns the base URL to point an Ecpay at.
-fn spawn_http_server<F>(handler: F) -> String
-where
-    F: Fn(&str, &[u8]) -> (u16, String, Vec<u8>) + Send + 'static,
-{
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
-    let addr = listener.local_addr().unwrap();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
-            let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
-            let mut buf: Vec<u8> = Vec::new();
-            let mut tmp = [0u8; 8192];
-            // Read until the end of the request head, then Content-Length bytes.
-            let head_end = loop {
-                match stream.read(&mut tmp) {
-                    Ok(0) => break buf.len(),
-                    Ok(n) => {
-                        buf.extend_from_slice(&tmp[..n]);
-                        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
-                            break pos + 4;
-                        }
-                    }
-                    Err(_) => break buf.len(),
-                }
-            };
-            let head = String::from_utf8_lossy(&buf[..head_end.min(buf.len())]);
-            let mut lines = head.split("\r\n");
-            let request_line = lines.next().unwrap_or("");
-            let path = request_line
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or("/")
-                .to_owned();
-            let mut content_length = 0usize;
-            for line in lines {
-                if let Some((k, v)) = line.split_once(':') {
-                    if k.trim().eq_ignore_ascii_case("content-length") {
-                        content_length = v.trim().parse().unwrap_or(0);
-                    }
-                }
-            }
-            let mut body = buf[head_end.min(buf.len())..].to_vec();
-            while body.len() < content_length {
-                match stream.read(&mut tmp) {
-                    Ok(0) => break,
-                    Ok(n) => body.extend_from_slice(&tmp[..n]),
-                    Err(_) => break,
-                }
-            }
-            let (status, content_type, resp_body) = handler(&path, &body);
-            let response = format!(
-                "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                resp_body.len()
-            );
-            let _ = stream.write_all(response.as_bytes());
-            let _ = stream.write_all(&resp_body);
-            // Dropping the stream closes the connection (Connection: close).
-        }
-    });
-    format!("http://{addr}/")
 }
 
 fn form_unescape(s: &str) -> String {
@@ -336,28 +275,331 @@ fn test_get_issue_input_omits_the_unused_query_mode() {
 
 /// TestGetIssueOutputFieldNames confirms the response fields the codebase
 /// reads (RtnCode, IIS_Number, IIS_Create_Date, IIS_Relate_Number) decode from
-/// ECPay's verbatim spec names.
+/// ECPay's verbatim spec names — through the crate's own `GetIssueOutput` and
+/// the `unmarshal` path `call_invoice_api` uses (an earlier version decoded
+/// into a local struct and never touched the crate's type).
 #[test]
 fn test_get_issue_output_field_names() {
-    let raw = r#"{"RtnCode":1,"RtnMsg":"ok","IIS_Number":"AB12345678","IIS_Create_Date":"2024-01-02 15:04:05","IIS_Relate_Number":"o1","IIS_Mer_ID":"2000132"}"#;
-    #[derive(Debug, Deserialize)]
-    struct Out {
-        #[serde(rename = "RtnCode")]
-        rtn_code: i64,
-        #[serde(rename = "IIS_Number")]
-        iis_number: String,
-        #[serde(rename = "IIS_Create_Date")]
-        iis_create_date: String,
-        #[serde(rename = "IIS_Relate_Number")]
-        iis_relate_number: String,
-        #[serde(rename = "IIS_Mer_ID")]
-        _iis_mer_id: serde_json::Value,
-    }
-    let out: Out = serde_json::from_str(raw).expect("decode GetIssueOutput");
+    let raw = r#"{"RtnCode":1,"RtnMsg":"ok","IIS_Number":"AB12345678","IIS_Create_Date":"2024-01-02 15:04:05","IIS_Relate_Number":"o1","IIS_Mer_ID":"2000132","IIS_Remain_Allowance_Amt":100,"Items":[{"ItemSeq":1,"ItemName":"x","ItemCount":2,"ItemPrice":50,"ItemAmount":100,"ItemRemark":null}],"QRCode_Left":"L","QRCode_Right":"R","PosBarCode":"P"}"#;
+    let out: GetIssueOutput = ecpay::unmarshal(raw).expect("decode GetIssueOutput");
     assert_eq!(out.rtn_code, 1);
+    assert_eq!(out.rtn_msg, "ok");
     assert_eq!(out.iis_number, "AB12345678");
     assert_eq!(out.iis_create_date, "2024-01-02 15:04:05");
     assert_eq!(out.iis_relate_number, "o1");
+    assert_eq!(out.iis_mer_id, serde_json::json!("2000132"));
+    assert_eq!(out.iis_remain_allowance_amt, serde_json::json!(100));
+    assert_eq!(out.qr_code_left, "L");
+    assert_eq!(out.qr_code_right, "R");
+    assert_eq!(out.pos_bar_code, "P");
+    let items = out.items.expect("Items decodes");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].item_count, 2.0);
+    assert_eq!(items[0].item_price, 50.0);
+    assert_eq!(items[0].item_amount, 100.0);
+    assert_eq!(
+        items[0].item_remark, "",
+        "a null inside an array element decodes to the zero value too"
+    );
+}
+
+/// Serialize an input and return its JSON object (every invoice input is a
+/// flat object except VoidWithReIssue).
+fn json_object<T: serde::Serialize>(input: &T) -> serde_json::Map<String, serde_json::Value> {
+    serde_json::to_value(input)
+        .expect("serialize")
+        .as_object()
+        .expect("a JSON object")
+        .clone()
+}
+
+/// The remaining request contracts that only the sandbox tests pinned so
+/// far, plus the spec quirks the doc comments call out: CheckBarcode's field
+/// is "Barcode" (not the Go field name BarCode), VoidWithReIssue nests two
+/// models, GetAllowance queries by SearchType/Date.
+#[test]
+fn test_remaining_invoice_input_field_names() {
+    let obj = json_object(&CheckBarcodeInput {
+        merchant_id: "2000132".into(),
+        barcode: "/1234567".into(),
+    });
+    assert_keys(&obj, &["MerchantID", "Barcode"]);
+    assert!(
+        !obj.contains_key("BarCode"),
+        r#"ECPay's spec field is "Barcode", not the Go field name "BarCode""#
+    );
+
+    let obj = json_object(&VoidWithReIssueInput {
+        void_model: VoidModel {
+            merchant_id: "2000132".into(),
+            invoice_no: "AB12345678".into(),
+            void_reason: "x".into(),
+        },
+        issue_model: IssueModel {
+            merchant_id: "2000132".into(),
+            relate_number: "o2".into(),
+            invoice_date: "2024-01-02 15:04:05".into(),
+            ..Default::default()
+        },
+    });
+    assert_keys(&obj, &["VoidModel", "IssueModel"]);
+    assert_eq!(obj.len(), 2, "nothing is flattened next to the two models");
+    let void_model = obj["VoidModel"].as_object().unwrap();
+    assert_keys(void_model, &["MerchantID", "InvoiceNo", "VoidReason"]);
+    let issue_model = obj["IssueModel"].as_object().unwrap();
+    assert_keys(
+        issue_model,
+        &["MerchantID", "RelateNumber", "InvoiceDate", "vat", "Items"],
+    );
+    assert!(
+        !issue_model.contains_key("TaxAmount"),
+        "TaxAmount=None is omitted so ECPay computes it"
+    );
+
+    let obj = json_object(&InvoiceNotifyInput {
+        merchant_id: "2000132".into(),
+        invoice_no: "AB12345678".into(),
+        notify: "E".into(),
+        notify_mail: "a@b.c".into(),
+        invoice_tag: "I".into(),
+        notified: "C".into(),
+        ..Default::default()
+    });
+    assert_keys(
+        &obj,
+        &[
+            "MerchantID",
+            "InvoiceNo",
+            "AllowanceNo",
+            "Phone",
+            "NotifyMail",
+            "Notify",
+            "InvoiceTag",
+            "Notified",
+        ],
+    );
+
+    let obj = json_object(&GetCompanyNameByTaxIDInput {
+        merchant_id: "2000132".into(),
+        unified_business_no: "53348111".into(),
+    });
+    assert_keys(&obj, &["MerchantID", "UnifiedBusinessNo"]);
+
+    let obj = json_object(&GetGovInvoiceWordSettingInput {
+        merchant_id: "2000132".into(),
+        invoice_year: "113".into(),
+    });
+    assert_keys(&obj, &["MerchantID", "InvoiceYear"]);
+
+    let obj = json_object(&GetInvoiceWordSettingInput {
+        merchant_id: "2000132".into(),
+        invoice_year: "113".into(),
+        invoice_term: 0,
+        use_status: 0,
+        invoice_category: 1,
+        inv_type: "07".into(),
+        invoice_header: String::new(),
+    });
+    assert_keys(
+        &obj,
+        &[
+            "MerchantID",
+            "InvoiceYear",
+            "InvoiceTerm",
+            "UseStatus",
+            "InvoiceCategory",
+            "InvType",
+            "InvoiceHeader",
+        ],
+    );
+
+    let obj = json_object(&DelayIssueInput {
+        merchant_id: "2000132".into(),
+        relate_number: "o1".into(),
+        delay_flag: "1".into(),
+        delay_day: 1,
+        tsr: "T1".into(),
+        pay_type: "2".into(),
+        pay_act: "ECPAY".into(),
+        notify_url: "https://example.com/n".into(),
+        ..Default::default()
+    });
+    assert_keys(
+        &obj,
+        &[
+            "MerchantID",
+            "RelateNumber",
+            "vat",
+            "DelayFlag",
+            "DelayDay",
+            "Tsr",
+            "PayType",
+            "PayAct",
+            "NotifyURL",
+        ],
+    );
+
+    let obj = json_object(&TriggerIssueInput {
+        merchant_id: "2000132".into(),
+        tsr: "T1".into(),
+        pay_type: "2".into(),
+    });
+    assert_keys(&obj, &["MerchantID", "Tsr", "PayType"]);
+
+    let obj = json_object(&CancelDelayIssueInput {
+        merchant_id: "2000132".into(),
+        tsr: "T1".into(),
+    });
+    assert_keys(&obj, &["MerchantID", "Tsr"]);
+
+    // GetInvalid sends all three keys together (no GetIssue-style omission).
+    let obj = json_object(&GetInvalidInput {
+        merchant_id: "2000132".into(),
+        ..Default::default()
+    });
+    assert_keys(
+        &obj,
+        &["MerchantID", "RelateNumber", "InvoiceNo", "InvoiceDate"],
+    );
+
+    let obj = json_object(&CheckLoveCodeInput {
+        merchant_id: "2000132".into(),
+        love_code: "168001".into(),
+    });
+    assert_keys(&obj, &["MerchantID", "LoveCode"]);
+
+    let obj = json_object(&AllowanceInput {
+        merchant_id: "2000132".into(),
+        invoice_no: "AB12345678".into(),
+        invoice_date: "2024-01-02".into(),
+        allowance_notify: "E".into(),
+        customer_name: "c".into(),
+        notify_mail: "a@b.c".into(),
+        allowance_amount: 10,
+        reason: "r".into(),
+        items: Some(vec![AllowanceItem {
+            item_seq: 1,
+            item_name: "x".into(),
+            item_count: 1.0,
+            item_word: "個".into(),
+            item_price: 10.0,
+            item_tax_type: "1".into(),
+            item_amount: 10.0,
+        }]),
+        ..Default::default()
+    });
+    assert_keys(
+        &obj,
+        &[
+            "MerchantID",
+            "InvoiceNo",
+            "InvoiceDate",
+            "AllowanceNotify",
+            "CustomerName",
+            "NotifyMail",
+            "NotifyPhone",
+            "AllowanceAmount",
+            "Reason",
+            "Items",
+        ],
+    );
+    let item = obj["Items"][0].as_object().unwrap();
+    assert_keys(
+        item,
+        &[
+            "ItemSeq",
+            "ItemName",
+            "ItemCount",
+            "ItemWord",
+            "ItemPrice",
+            "ItemTaxType",
+            "ItemAmount",
+        ],
+    );
+    assert!(
+        !item.contains_key("ItemRemark"),
+        "AllowanceItem has no ItemRemark (spec 7901.md)"
+    );
+
+    let obj = json_object(&AllowanceInvalidInput {
+        merchant_id: "2000132".into(),
+        invoice_no: "AB12345678".into(),
+        allowance_no: "A1".into(),
+        reason: "r".into(),
+    });
+    assert_keys(&obj, &["MerchantID", "InvoiceNo", "AllowanceNo", "Reason"]);
+
+    let obj = json_object(&AllowanceByCollegiateInput {
+        merchant_id: "2000132".into(),
+        return_url: "https://example.com/r".into(),
+        ..Default::default()
+    });
+    assert_keys(
+        &obj,
+        &[
+            "MerchantID",
+            "InvoiceNo",
+            "InvoiceDate",
+            "AllowanceNotify",
+            "CustomerName",
+            "NotifyMail",
+            "AllowanceAmount",
+            "Reason",
+            "ReturnURL",
+            "Items",
+        ],
+    );
+
+    let obj = json_object(&GetAllowanceInput {
+        merchant_id: "2000132".into(),
+        search_type: "0".into(),
+        allowance_no: "A1".into(),
+        invoice_no: "AB12345678".into(),
+        date: "2024-01-02".into(),
+    });
+    assert_keys(
+        &obj,
+        &[
+            "MerchantID",
+            "SearchType",
+            "AllowanceNo",
+            "InvoiceNo",
+            "Date",
+        ],
+    );
+
+    let obj = json_object(&GetAllowanceInvalidInput {
+        merchant_id: "2000132".into(),
+        invoice_no: "AB12345678".into(),
+        allowance_no: "A1".into(),
+    });
+    assert_keys(&obj, &["MerchantID", "InvoiceNo", "AllowanceNo"]);
+}
+
+/// The two `Option` conventions on the Issue-family inputs: `TaxAmount: None`
+/// is OMITTED (ECPay computes the tax; sending 0 would be a special-tax
+/// declaration) while `Items: None` is sent as `null` (the Go nil slice).
+#[test]
+fn test_issue_input_option_fields() {
+    let obj = json_object(&IssueInput::default());
+    assert!(!obj.contains_key("TaxAmount"), "keys: {:?}", obj.keys());
+    assert_eq!(obj["Items"], serde_json::Value::Null);
+
+    let obj = json_object(&IssueInput {
+        tax_amount: Some(0),
+        items: Some(Vec::new()),
+        ..Default::default()
+    });
+    assert_eq!(obj["TaxAmount"], serde_json::json!(0));
+    assert_eq!(obj["Items"], serde_json::json!([]));
+
+    for (name, obj) in [
+        ("IssueModel", json_object(&IssueModel::default())),
+        ("DelayIssueInput", json_object(&DelayIssueInput::default())),
+    ] {
+        assert!(!obj.contains_key("TaxAmount"), "{name}");
+        assert_eq!(obj["Items"], serde_json::Value::Null, "{name}");
+    }
 }
 
 /// TestInvoiceRequestEnvelope checks the outer AES-JSON envelope

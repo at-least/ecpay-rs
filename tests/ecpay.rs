@@ -298,6 +298,28 @@ fn test_decrypt() {
 }
 
 #[test]
+fn test_unmarshal_strips_nulls_inside_array_elements() {
+    // ECPay's GetIssue reply carries Items whose optional members can be
+    // null; Go zero-values them and so must the recursive strip.
+    let raw = r#"{"RtnCode":1,"Items":[{"ItemSeq":1,"ItemName":"x","ItemRemark":null,"ItemWord":null}],"IIS_Number":null}"#;
+    let out: GetIssueOutput = ecpay::unmarshal(raw).expect("unmarshal nested nulls");
+    let items = out.items.expect("Items present");
+    assert_eq!(items[0].item_name, "x");
+    assert_eq!(items[0].item_remark, "");
+    assert_eq!(items[0].item_word, "");
+    assert_eq!(out.iis_number, "");
+
+    // A null Items array itself is None (Go nil slice), and serde's strict
+    // path would have rejected the nested nulls outright.
+    let out: GetIssueOutput = ecpay::unmarshal(r#"{"RtnCode":1,"Items":null}"#).unwrap();
+    assert!(out.items.is_none());
+    assert!(
+        serde_json::from_str::<GetIssueOutput>(raw).is_err(),
+        "sanity: without the strip, a null String member fails to decode"
+    );
+}
+
+#[test]
 fn test_get_issue_output_unmarshal() {
     // 模擬 ECPay GetIssue 回傳的 JSON（解密後）
     let raw = r#"{

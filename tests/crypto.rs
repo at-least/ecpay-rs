@@ -97,34 +97,51 @@ fn test_decrypt_empty_ciphertext() {
     );
 }
 
-/// rawCBCEncrypt encrypts exactly one block of plaintext with no PKCS7
-/// padding, so a test can craft a ciphertext that decrypts to deliberately
-/// malformed padding and drive the unpad rejection branches through Decrypt.
+/// rawCBCEncrypt CBC-encrypts exactly one block of plaintext (XOR with the
+/// IV, then AES) with no PKCS7 padding, so a test can craft a ciphertext
+/// that decrypts to deliberately malformed padding and drive the unpad
+/// rejection branches through Decrypt.
+///
+/// The IV XOR matters: an earlier version skipped it, so `decrypt` (which
+/// does CBC) recovered `plain XOR IV` instead of `plain` — the padding
+/// tests below then passed only because the IV's last byte happens to be
+/// '5' (0x35 > 16), and the branches they claimed to cover never ran.
 fn raw_cbc_encrypt(plain: &[u8; 16]) -> String {
     type Aes128 = aes::Aes128;
     let cipher = Aes128::new_from_slice(CRYPTO_KEY).unwrap();
     let mut plain = *plain;
+    for (b, iv) in plain.iter_mut().zip(CRYPTO_IV) {
+        *b ^= iv;
+    }
     let block: &mut Block<Aes128> = plain.as_mut_slice().try_into().unwrap();
     cipher.encrypt_block(block);
     base64::engine::general_purpose::STANDARD.encode(block)
+}
+
+/// Sanity for the helper: a block that carries valid padding decrypts to
+/// exactly its payload bytes, proving the crafted plaintext is what
+/// `decrypt` sees.
+#[test]
+fn test_raw_cbc_encrypt_round_trips_through_decrypt() {
+    let block = *b"hello world\x05\x05\x05\x05\x05";
+    let got = decrypt(&raw_cbc_encrypt(&block), CRYPTO_KEY, CRYPTO_IV).unwrap();
+    assert_eq!(got, "hello world");
 }
 
 #[test]
 fn test_decrypt_invalid_padding_value() {
     // Last byte 0x00 is an invalid PKCS7 pad count.
     let block = [0u8; 16]; // all zero -> trailing byte 0
-    assert!(
-        decrypt(&raw_cbc_encrypt(&block), CRYPTO_KEY, CRYPTO_IV).is_err(),
-        "Decrypt should reject a zero padding value"
-    );
+    let err = decrypt(&raw_cbc_encrypt(&block), CRYPTO_KEY, CRYPTO_IV)
+        .expect_err("Decrypt should reject a zero padding value");
+    assert!(matches!(err, ecpay::Error::PaddingValue(0)), "{err:?}");
 
     // Last byte 0x20 (32) exceeds the AES block size -> invalid.
     let mut block2 = [0u8; 16];
     block2[15] = 0x20;
-    assert!(
-        decrypt(&raw_cbc_encrypt(&block2), CRYPTO_KEY, CRYPTO_IV).is_err(),
-        "Decrypt should reject a padding value larger than the block size"
-    );
+    let err = decrypt(&raw_cbc_encrypt(&block2), CRYPTO_KEY, CRYPTO_IV)
+        .expect_err("Decrypt should reject a padding value larger than the block size");
+    assert!(matches!(err, ecpay::Error::PaddingValue(0x20)), "{err:?}");
 }
 
 #[test]
@@ -134,9 +151,23 @@ fn test_decrypt_invalid_padding_bytes() {
     block[15] = 0x03;
     block[14] = 0x03;
     block[13] = 0x01; // wrong
+    let err = decrypt(&raw_cbc_encrypt(&block), CRYPTO_KEY, CRYPTO_IV)
+        .expect_err("Decrypt should reject inconsistent PKCS7 padding bytes");
+    assert!(matches!(err, ecpay::Error::PaddingBytes), "{err:?}");
+}
+
+#[test]
+fn test_decrypt_non_utf8_plaintext() {
+    // Valid PKCS7 (one pad byte) around 15 bytes of 0xFF: decrypts and
+    // unpads cleanly but is not UTF-8, which Go's string() tolerates and a
+    // Rust String cannot — so it must be an error, not a panic or lossy Ok.
+    let mut block = [0xFFu8; 16];
+    block[15] = 0x01;
+    let err = decrypt(&raw_cbc_encrypt(&block), CRYPTO_KEY, CRYPTO_IV)
+        .expect_err("non-UTF-8 plaintext must error");
     assert!(
-        decrypt(&raw_cbc_encrypt(&block), CRYPTO_KEY, CRYPTO_IV).is_err(),
-        "Decrypt should reject inconsistent PKCS7 padding bytes"
+        matches!(&err, ecpay::Error::Message(m) if m == "decrypted payload is not UTF-8"),
+        "{err:?}"
     );
 }
 

@@ -251,15 +251,15 @@ ReturnURL → merchant 端用 `verify_check_mac_value` 驗證並回 `1|OK` →
 ## 開發
 
 ```bash
-cargo test              # 90+ 測試:官方向量、Python SDK 一致性、mock transport
+cargo test              # 130+ 測試:官方向量、Python SDK 一致性、mock transport
 cargo test --test python_conformance   # 對官方 SDK 的逐欄位比對
 cargo clippy --all-targets
 ```
 
-⚠️ 上面的 `cargo test` **不是全離線**:`tests/sandbox.rs`、`tests/check_mac_stage.rs`
-會打真實的 ECPay stage 測試環境(公開測試特店 2000132),需要對外網路,CI 上以此
-做端對端驗證。只有 `tests/stage_smoke.rs` 是刻意 `#[ignore]`(見上方「Staging
-煙霧測試」),離線環境跑 `cargo test` 這兩個檔案會因連不到網路而失敗。
+⚠️ 上面的 `cargo test` **不是全離線**:`tests/sandbox.rs` 會打真實的 ECPay
+stage 測試環境(公開測試特店 2000132),需要對外網路,CI 上以此做端對端驗證。
+只有 `tests/stage_smoke.rs` 是刻意 `#[ignore]`(見上方「Staging 煙霧測試」),
+離線環境跑 `cargo test` 時 `tests/sandbox.rs` 會因連不到網路而失敗。
 
 `tests/fixtures/python_sdk_vectors.json` 由「真的」官方 Python SDK 執行產生
 (`requests` 以 stub 取代;產生腳本 `gen_vectors.py` 同目錄),重新產生方式見

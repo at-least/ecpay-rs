@@ -22,10 +22,11 @@ fn sdk() -> Ecpay {
 }
 
 /// A response body larger than the 1 MiB read cap must fail loudly (a
-/// truncated MAC or JSON is never accepted silently).
+/// truncated MAC or form body is never accepted silently).
 #[tokio::test]
 async fn oversized_response_bodies_are_rejected() {
-    // The reader caps at 1 MiB; 2 MiB of JSON truncates and must not parse.
+    // The mock declares Content-Length, so this exercises the up-front
+    // guard; the close-delimited variant below exercises the byte counter.
     let srv = spawn_http_server(move |_path, _body| {
         let payload = vec![b'a'; (1 << 21) + 16];
         (200, "application/json".to_owned(), payload)
@@ -125,12 +126,15 @@ async fn oversized_balance_reports_error() {
     );
 }
 
-/// Empty and header-only bodies must error, never panic or produce Ok.
+/// Empty bodies must error, never panic or produce Ok. Both 200 and 204 are
+/// success statuses, so the rejection has to come from the response
+/// verification: no CheckMacValue in an empty body is a
+/// `CheckMacValueMismatch`, not a parse error or a silent empty map.
 #[tokio::test]
 async fn empty_bodies_error() {
-    for (status, body) in [(204u16, Vec::new()), (200, Vec::new())] {
-        let (s, b) = (status, body.clone());
-        let srv = spawn_http_server(move |_path, _body| (s, "text/plain".to_owned(), b.clone()));
+    for status in [204u16, 200] {
+        let srv =
+            spawn_http_server(move |_path, _body| (status, "text/plain".to_owned(), Vec::new()));
         let client = Ecpay {
             payment_api_url: srv,
             ..sdk()
@@ -143,10 +147,55 @@ async fn empty_bodies_error() {
             })
             .await
             .expect_err("empty body must be an error, never an Ok with no fields");
-        // A 204 arrives as success-status; the missing CheckMacValue must
-        // still reject. Anything erroring is acceptable; nothing may pass.
-        let _ = err;
+        assert!(
+            matches!(err, ecpay::Error::CheckMacValueMismatch),
+            "status {status}: expected CheckMacValueMismatch, got {err:?}"
+        );
     }
+}
+
+/// The cap's second guard: with NO Content-Length (a close-delimited body,
+/// which is also how a lying chunked body arrives) the up-front check has
+/// nothing to look at, so the delivered-byte counter must reject the
+/// overage — and still accept a body that sits exactly at the cap.
+#[tokio::test]
+async fn oversized_close_delimited_bodies_are_rejected() {
+    let params = ecpay::payment::DownloadMerchantBalanceParams {
+        date_type: "1".into(),
+        begin_date: "2026-09-01".into(),
+        end_date: "2026-09-02".into(),
+        media_formated: "Y".into(),
+        ..Default::default()
+    };
+
+    let srv = common::spawn_close_delimited_server(vec![b'a'; (1 << 20) + 1]);
+    let client = Ecpay {
+        vendor_api_url: srv,
+        ..sdk()
+    };
+    let err = client
+        .download_merchant_balance(&params)
+        .await
+        .expect_err("1 MiB + 1 byte without Content-Length must be rejected by the byte counter");
+    // The up-front Content-Length guard appends "(N bytes)"; the counter
+    // guard does not. Pin the exact counter message so this test cannot
+    // pass via the other guard.
+    assert!(
+        matches!(&err, ecpay::Error::Message(m)
+            if m == "ecpay: response body exceeds the 1 MiB safety limit"),
+        "expected the byte-counter rejection, got {err:?}"
+    );
+
+    let srv = common::spawn_close_delimited_server(vec![b'a'; 1 << 20]);
+    let client = Ecpay {
+        vendor_api_url: srv,
+        ..sdk()
+    };
+    let got = client
+        .download_merchant_balance(&params)
+        .await
+        .expect("exactly 1 MiB without Content-Length is at the cap and must be accepted");
+    assert_eq!(got.len(), 1 << 20);
 }
 
 /// A body of exactly 1 MiB (the cap) must still be accepted — only the

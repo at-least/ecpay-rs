@@ -20,10 +20,10 @@
 
 use ecpay::{
     AllowanceByCollegiateInput, AllowanceInput, AllowanceInvalidByCollegiateInput,
-    AllowanceInvalidInput, AllowanceItem, CancelDelayIssueInput, CheckLoveCodeInput,
-    DelayIssueInput, Ecpay, GetAllowanceInput, GetAllowanceInvalidInput, GetInvalidInput,
-    GetIssueInput, InvalidInput, IssueInput, IssueModel, Item, TriggerIssueInput, VoidModel,
-    VoidWithReIssueInput, INVOICE_API_URL_STAGE, PAYMENT_API_URL_STAGE,
+    AllowanceInvalidInput, AllowanceItem, CancelDelayIssueInput, CheckBarcodeInput,
+    CheckLoveCodeInput, DelayIssueInput, Ecpay, GetAllowanceInput, GetAllowanceInvalidInput,
+    GetInvalidInput, GetIssueInput, InvalidInput, IssueInput, IssueModel, Item, TriggerIssueInput,
+    VoidModel, VoidWithReIssueInput, INVOICE_API_URL_STAGE, PAYMENT_API_URL_STAGE,
 };
 
 fn stage_client() -> Ecpay {
@@ -100,16 +100,22 @@ fn sample_issue_input(relate_number: String, merchant_id: String) -> IssueInput 
     }
 }
 
+/// 覆蓋 AES 信封 URL 編碼（`aes_url_encode`）會出錯的字元類別：.NET/PHP
+/// urlencode 的保留字元、`~`、`+`、`%`、`&`、`=`、引號、空白、多位元組。
+/// 伺服器解密後 url-decode 再存檔，GetIssue 回顯的就是它實際收到的位元組。
+const TRICKY_TEXT: &str = "全部!混~合*(字).-_%+&=/:'\"測試ABC123 空格";
+
 #[tokio::test]
 async fn issue_then_get_then_invalid_roundtrip() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
 
     let relate = unique_relate_number();
-    let issued = client
-        .try_issue(&sample_issue_input(relate.clone(), merchant_id.clone()))
-        .await
-        .expect("stage issue 應成功");
+    let mut input = sample_issue_input(relate.clone(), merchant_id.clone());
+    input.customer_name = TRICKY_TEXT.to_owned();
+    input.invoice_remark = TRICKY_TEXT.to_owned();
+    input.items.as_mut().unwrap()[0].item_name = TRICKY_TEXT.to_owned();
+    let issued = client.try_issue(&input).await.expect("stage issue 應成功");
     assert_eq!(issued.rtn_code, 1, "issue rtn_msg={}", issued.rtn_msg);
     assert!(!issued.invoice_no.is_empty());
 
@@ -123,6 +129,14 @@ async fn issue_then_get_then_invalid_roundtrip() {
         .expect("stage get_issue 應成功");
     assert_eq!(got.rtn_code, 1, "get_issue rtn_msg={}", got.rtn_msg);
     assert_eq!(got.iis_number, issued.invoice_no, "查得的發票號碼應一致");
+    // 逐位元組回顯：這是 aes_url_encode 對真實伺服器唯一的精確證明
+    // （CheckBarcode 那類查詢只能證明解密/解碼階段通過，看不出字元是否
+    // 被改寫，例如 `+` 變空白）。現場實測 2026-09 三個欄位皆原樣回顯。
+    assert_eq!(got.iis_customer_name, TRICKY_TEXT, "CustomerName 回顯");
+    assert_eq!(got.invoice_remark, TRICKY_TEXT, "InvoiceRemark 回顯");
+    let items = got.items.as_deref().unwrap_or_default();
+    assert_eq!(items.len(), 1, "Items 回顯: {items:?}");
+    assert_eq!(items[0].item_name, TRICKY_TEXT, "ItemName 回顯");
 
     // GetIssue 的第二種查詢模式：只用 InvoiceNo + InvoiceDate（不帶
     // RelateNumber）。offline 的 conformance 測試只能證明 JSON 信封形狀
@@ -192,6 +206,99 @@ async fn check_love_code_roundtrip() {
     assert_eq!(got.rtn_code, 1, "check_love_code rtn_msg={}", got.rtn_msg);
     assert_eq!(got.is_exist, "Y");
     assert!(!got.organ_name.is_empty());
+}
+
+/// AES 信封的 URL 編碼（`aes_url_encode`：PHP urlencode 風格，`~` → `%7E`）
+/// 對真實 stage server 的「解碼階段」驗證，用無狀態的 `CheckBarcode` 當
+/// 探針：伺服器必須先成功解密、url-decode、JSON 解析 `Data` 才能進到商業
+/// 檢查，所以每個含特殊字元的條碼都必須得到 `Ok`（TransCode=1 的商業
+/// 回應：格式正確的條碼回 RtnCode=1 + IsExist，其餘回條碼格式錯誤
+/// 2019001；現場實測 2026-09）。一個會產生非法 `%xx` 的編碼在這裡就會
+/// 被擋下。它證明不了字元是否被改寫（例如 `+` 變空白）——那由
+/// [`issue_then_get_then_invalid_roundtrip`] 的逐位元組回顯負責。
+///
+/// 負向對照：用錯的 invoice AES key 送同一個請求，伺服器必須拒絕
+/// （現場實測 2026-09：HTTP 500 信封 TransCode=110 "The parameter [Data]
+/// decrypt fail."，本函式庫以 `Err` 回報）。沒有這個對照，「全部 Ok」
+/// 可能只是伺服器根本不看 Data。
+///
+/// 前身 `tests/check_mac_stage.rs` 宣稱在驗 CheckMacValue，但 B2C 發票
+/// 端點走 AES 信封、請求裡根本沒有 CheckMacValue，其斷言（回應不含
+/// "CheckMacValue" 字樣）連錯 key、空 body 都能通過，已移除。
+#[tokio::test]
+async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
+    let client = stage_client();
+    let merchant_id = client.merchant_id.clone();
+    let tricky: Vec<(&str, String)> = vec![
+        ("plain", "ABC123".into()),
+        ("chinese", "測試中文字元".into()),
+        ("space", "with space".into()),
+        ("tilde", "tilde~test".into()),
+        ("exclamation", "excl!test".into()),
+        ("star", "star*test".into()),
+        ("parentheses", "paren(test)".into()),
+        ("plus", "plus+test".into()),
+        ("percent", "percent%test".into()),
+        ("ampersand", "amp&test".into()),
+        ("equals", "eq=test".into()),
+        ("single-quote", "single'quote".into()),
+        ("slash", "slash/test".into()),
+        ("colon", "colon:test".into()),
+        ("long-100-cjk", "長".repeat(100)),
+        ("mixed", "全部!混~合*(字).-_%+&=/:'測試ABC123".into()),
+        ("well-formed", "/1234567".into()),
+    ];
+    for (label, barcode) in tricky {
+        let out = client
+            .check_barcode(&CheckBarcodeInput {
+                merchant_id: merchant_id.clone(),
+                barcode: barcode.clone(),
+            })
+            .await
+            .unwrap_or_else(|e| {
+                panic!("{label}: stage rejected the AES payload for {barcode:?}: {e}")
+            });
+        println!("{label}: {out:?}");
+        match out.rtn_code {
+            // Well-formed barcode: the business answer is IsExist (stage
+            // answers with an empty RtnMsg here, observed 2026-09).
+            1 => assert!(
+                out.is_exist == "Y" || out.is_exist == "N",
+                "{label}: {out:?}"
+            ),
+            // Format rejection: the server decoded our exact bytes and
+            // judged them, which is the encoding proof.
+            2019001 => assert!(!out.rtn_msg.is_empty(), "{label}: {out:?}"),
+            other => panic!("{label}: expected RtnCode 1 or 2019001, got {other}: {out:?}"),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    }
+
+    // Negative control: the same request under a wrong AES key must not
+    // reach the business check.
+    let wrong_key = Ecpay {
+        invoice_hash_key: b"0000000000000000".to_vec(),
+        ..stage_client()
+    };
+    let err = wrong_key
+        .check_barcode(&CheckBarcodeInput {
+            merchant_id,
+            barcode: "/1234567".into(),
+        })
+        .await
+        .expect_err("a payload encrypted with the wrong key must be rejected by stage");
+    // Observed on stage (2026-09): HTTP 500 with a TransCode 110 envelope,
+    // TransMsg "The parameter [Data] decrypt fail.". Pin the decrypt
+    // rejection itself so a flake (timeout, 502, DNS) cannot pass as the
+    // negative control.
+    let text = err.to_string();
+    assert!(
+        matches!(
+            err,
+            ecpay::Error::InvoiceStatus { .. } | ecpay::Error::Transport { .. }
+        ) && text.contains("decrypt"),
+        "expected stage to reject the wrong-key payload at decrypt, got {err:?}"
+    );
 }
 
 /// 折讓(Allowance)系列的沙盒回合測試：開立發票 → 開立折讓(紙本) →
