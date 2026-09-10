@@ -29,8 +29,12 @@ pub struct IssueInput {
     pub merchant_id: String, // 特店編號
     #[serde(rename = "RelateNumber")]
     pub relate_number: String, // 特店自訂編號 需為唯一值不可重複使用。 注意事項:請勿使用特殊符號
+    #[serde(rename = "ChannelPartner")]
+    pub channel_partner: String, // 通路商編號 '1'=蝦皮，其餘忽略
     #[serde(rename = "CustomerID")]
     pub customer_id: String, // 客戶編號 格式為『英文、數字、下底線』等字元。
+    #[serde(rename = "ProductServiceID")]
+    pub product_service_id: String, // 產品服務別代號 (需開通「B2C 系統多組字軌」功能)
     #[serde(rename = "CustomerIdentifier")]
     pub customer_identifier: String, // 統一編號 格式為數字
     #[serde(rename = "CustomerName")]
@@ -53,12 +57,22 @@ pub struct IssueInput {
     pub carrier_type: String, // 載具類別 空字串:無載具 1:綠界電子發票載具 2:自然人憑證號碼 3:手機條碼載具
     #[serde(rename = "CarrierNum")]
     pub carrier_num: String, // 載具編號
+    #[serde(rename = "CarrierNum2")]
+    pub carrier_num2: String, // 實體卡片顯碼id(外觀號碼) CarrierType=4 或 5 時必填
     #[serde(rename = "TaxType")]
     pub tax_type: String, // 課稅類別 1:應稅 2:零稅率 3:免稅 4:應稅(特種稅率) 9:混合
+    /// 零稅率原因代號(71~79)。官方文件(developers.ecpay.com.tw/7896.md、
+    /// guides/04)載明 TaxType=2 或 9 時必填，自 2026-01-01 起強制；沙盒
+    /// 實測(2026-09,公開測試特店 2000132)未填仍開立成功，該帳號似未強制
+    /// 此規則，正式環境/其他特店請勿依賴沙盒行為，務必依文件填寫。
+    #[serde(rename = "ZeroTaxRateReason")]
+    pub zero_tax_rate_reason: String,
     #[serde(rename = "SpecialTaxType")]
     pub special_tax_type: i64, // 特種稅額類別
     #[serde(rename = "SalesAmount")]
     pub sales_amount: i64, // 發票總金額(含稅) 金額不可為 0 元。
+    #[serde(rename = "TaxAmount", skip_serializing_if = "Option::is_none")]
+    pub tax_amount: Option<i64>, // 稅額合計 未填由綠界代算(省略此欄位)；特種稅額請帶 0
     #[serde(rename = "InvoiceRemark")]
     pub invoice_remark: String, // 發票備註
     #[serde(rename = "Items")]
@@ -159,8 +173,12 @@ pub struct IssueModel {
     /// 一般開立（Issue）沒有這個欄位。
     #[serde(rename = "InvoiceDate")]
     pub invoice_date: String,
+    #[serde(rename = "ChannelPartner")]
+    pub channel_partner: String,
     #[serde(rename = "CustomerID")]
     pub customer_id: String,
+    #[serde(rename = "ProductServiceID")]
+    pub product_service_id: String,
     #[serde(rename = "CustomerIdentifier")]
     pub customer_identifier: String,
     #[serde(rename = "CustomerName")]
@@ -183,12 +201,20 @@ pub struct IssueModel {
     pub carrier_type: String,
     #[serde(rename = "CarrierNum")]
     pub carrier_num: String,
+    #[serde(rename = "CarrierNum2")]
+    pub carrier_num2: String,
     #[serde(rename = "TaxType")]
     pub tax_type: String,
+    /// 零稅率原因代號(71~79)。TaxType=2 或 9 時必填，見 IssueInput 對應
+    /// 欄位的說明（含沙盒實測備註）。
+    #[serde(rename = "ZeroTaxRateReason")]
+    pub zero_tax_rate_reason: String,
     #[serde(rename = "SpecialTaxType")]
     pub special_tax_type: i64,
     #[serde(rename = "SalesAmount")]
     pub sales_amount: i64,
+    #[serde(rename = "TaxAmount", skip_serializing_if = "Option::is_none")]
+    pub tax_amount: Option<i64>,
     #[serde(rename = "InvoiceRemark")]
     pub invoice_remark: String,
     #[serde(rename = "Items")]
@@ -500,14 +526,26 @@ impl Ecpay {
 
 // --- GetIssue (查詢發票開立資訊) — get_issue.go ---
 
-/// 查詢發票開立資訊的輸入參數。
+/// 查詢發票開立資訊的輸入參數。兩種互斥的查詢方式擇一：只填
+/// `relate_number`；或只填 `invoice_no` + `invoice_date`（格式 yyyy-MM-dd）。
+///
+/// ECPay 沙盒實測(2026-09):是否存在於 JSON（而非其值是否為空字串）決定
+/// 查詢模式——就算欄位是空字串,只要 key 出現在請求裡,伺服器就會採用該
+/// 模式。實測兩個方向都成立：帶空 `InvoiceNo`/`InvoiceDate`
+/// 會讓合法的 `RelateNumber` 查詢失敗；帶空 `RelateNumber` 同樣會讓合法的
+/// `InvoiceNo`+`InvoiceDate` 查詢失敗（皆回 RtnCode=2 查無資料）。因此這三
+/// 個欄位只要空值就必須整個省略,不能像本檔其他欄位一樣送空字串。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GetIssueInput {
     #[serde(rename = "MerchantID")]
     pub merchant_id: String, // 特店編號
-    #[serde(rename = "RelateNumber")]
-    pub relate_number: String, // 特店自訂編號（即 OrderID）
+    #[serde(rename = "RelateNumber", skip_serializing_if = "String::is_empty")]
+    pub relate_number: String, // 特店自訂編號（即 OrderID）；與 InvoiceNo+InvoiceDate 擇一
+    #[serde(rename = "InvoiceNo", skip_serializing_if = "String::is_empty")]
+    pub invoice_no: String, // 發票號碼；與 RelateNumber 擇一，需搭配 InvoiceDate
+    #[serde(rename = "InvoiceDate", skip_serializing_if = "String::is_empty")]
+    pub invoice_date: String, // 發票開立日期 格式為 yyyy-MM-dd；搭配 InvoiceNo 使用
 }
 
 /// 查詢發票開立資訊的回傳參數。
@@ -522,24 +560,84 @@ pub struct GetIssueOutput {
     pub rtn_msg: String, // 回應訊息
     #[serde(rename = "IIS_Mer_ID")]
     pub iis_mer_id: serde_json::Value, // 特店編號
+    #[serde(rename = "ChannelPartner")]
+    pub channel_partner: String, // 通路商編號
     #[serde(rename = "IIS_Number")]
     pub iis_number: String, // 發票號碼
     #[serde(rename = "IIS_Relate_Number")]
     pub iis_relate_number: String, // 特店自訂編號
+    #[serde(rename = "IIS_Customer_ID")]
+    pub iis_customer_id: String, // 客戶編號
+    #[serde(rename = "IIS_Identifier")]
+    pub iis_identifier: String, // 統一編號
+    #[serde(rename = "IIS_Customer_Name")]
+    pub iis_customer_name: String, // 客戶名稱
+    #[serde(rename = "IIS_Customer_Addr")]
+    pub iis_customer_addr: String, // 客戶地址
+    #[serde(rename = "IIS_Customer_Phone")]
+    pub iis_customer_phone: String, // 客戶手機號碼
+    #[serde(rename = "IIS_Customer_Email")]
+    pub iis_customer_email: String, // 客戶電子信箱
+    #[serde(rename = "IIS_Clearance_Mark")]
+    pub iis_clearance_mark: String, // 通關方式
+    #[serde(rename = "IIS_Type")]
+    pub iis_type: String, // 字軌類別 07/08
+    #[serde(rename = "IIS_Category")]
+    pub iis_category: serde_json::Value, // 發票種類
+    #[serde(rename = "IIS_Tax_Type")]
+    pub iis_tax_type: String, // 課稅類別
+    #[serde(rename = "ZeroTaxRateReason")]
+    pub zero_tax_rate_reason: String, // 零稅率原因
+    #[serde(rename = "SpecialTaxType")]
+    pub special_tax_type: serde_json::Value, // 特種稅額類別
+    #[serde(rename = "IIS_Tax_Rate")]
+    pub iis_tax_rate: serde_json::Value, // 稅率
+    #[serde(rename = "IIS_Tax_Amount")]
+    pub iis_tax_amount: serde_json::Value, // 稅額
+    #[serde(rename = "IIS_Sales_Amount")]
+    pub iis_sales_amount: serde_json::Value, // 發票金額
+    #[serde(rename = "IIS_Check_Number")]
+    pub iis_check_number: String, // 檢查碼
+    #[serde(rename = "IIS_Carrier_Type")]
+    pub iis_carrier_type: String, // 載具類別
+    #[serde(rename = "IIS_Carrier_Num")]
+    pub iis_carrier_num: String, // 載具編號
+    #[serde(rename = "IIS_Love_Code")]
+    pub iis_love_code: String, // 捐贈碼
+    #[serde(rename = "IIS_IP")]
+    pub iis_ip: String, // 開立來源 IP
     #[serde(rename = "IIS_Create_Date")]
     pub iis_create_date: String, // 發票開立時間 格式為 yyyy-MM-dd HH:mm:ss
-    #[serde(rename = "IIS_Award_Flag")]
-    pub iis_award_flag: serde_json::Value, // 中獎旗標
+    #[serde(rename = "IIS_Issue_Status")]
+    pub iis_issue_status: serde_json::Value, // 發票開立狀態
     #[serde(rename = "IIS_Invalid_Status")]
     pub iis_invalid_status: serde_json::Value, // 作廢旗標
     #[serde(rename = "IIS_Upload_Status")]
     pub iis_upload_status: serde_json::Value, // 上傳旗標
-    #[serde(rename = "IIS_Sales_Amount")]
-    pub iis_sales_amount: serde_json::Value, // 發票金額
-    #[serde(rename = "IIS_Issue_Status")]
-    pub iis_issue_status: serde_json::Value, // 發票開立狀態
-    #[serde(rename = "IIS_Category")]
-    pub iis_category: serde_json::Value, // 發票種類
+    #[serde(rename = "IIS_Upload_Date")]
+    pub iis_upload_date: String, // 上傳時間
+    #[serde(rename = "IIS_Turnkey_Status")]
+    pub iis_turnkey_status: String, // 財政部處理狀態
+    #[serde(rename = "IIS_Remain_Allowance_Amt")]
+    pub iis_remain_allowance_amt: serde_json::Value, // 剩餘可折讓金額
+    #[serde(rename = "IIS_Print_Flag")]
+    pub iis_print_flag: String, // 列印註記
+    #[serde(rename = "IIS_Award_Flag")]
+    pub iis_award_flag: serde_json::Value, // 中獎旗標
+    #[serde(rename = "IIS_Award_Type")]
+    pub iis_award_type: serde_json::Value, // 中獎獎別
+    #[serde(rename = "Items")]
+    pub items: Option<Vec<Item>>, // 商品明細
+    #[serde(rename = "IIS_Random_Number")]
+    pub iis_random_number: String, // 隨機碼
+    #[serde(rename = "InvoiceRemark")]
+    pub invoice_remark: String, // 發票備註
+    #[serde(rename = "PosBarCode")]
+    pub pos_bar_code: String, // POS 機用短碼
+    #[serde(rename = "QRCode_Left")]
+    pub qr_code_left: String, // QRCode 左碼
+    #[serde(rename = "QRCode_Right")]
+    pub qr_code_right: String, // QRCode 右碼
 }
 
 impl Ecpay {

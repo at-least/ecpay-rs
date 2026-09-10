@@ -78,11 +78,31 @@ async fn issue_then_get_then_invalid_roundtrip() {
         .get_issue(&GetIssueInput {
             merchant_id: merchant_id.clone(),
             relate_number: relate,
+            ..Default::default()
         })
         .await
         .expect("stage get_issue 應成功");
     assert_eq!(got.rtn_code, 1, "get_issue rtn_msg={}", got.rtn_msg);
     assert_eq!(got.iis_number, issued.invoice_no, "查得的發票號碼應一致");
+
+    // GetIssue 的第二種查詢模式：只用 InvoiceNo + InvoiceDate（不帶
+    // RelateNumber）。offline 的 conformance 測試只能證明 JSON 信封形狀
+    // 正確，這裡是唯一能證明伺服器真的接受這個查詢模式的地方。
+    let got_by_invoice_no = client
+        .get_issue(&GetIssueInput {
+            merchant_id: merchant_id.clone(),
+            invoice_no: issued.invoice_no.clone(),
+            invoice_date: issued.invoice_date.chars().take(10).collect(),
+            ..Default::default()
+        })
+        .await
+        .expect("stage get_issue（以發票號碼查詢）應成功");
+    assert_eq!(
+        got_by_invoice_no.rtn_code, 1,
+        "get_issue(by invoice_no) rtn_msg={}",
+        got_by_invoice_no.rtn_msg
+    );
+    assert_eq!(got_by_invoice_no.iis_number, issued.invoice_no);
 
     // 作廢（Invalid 需要 yyyy-MM-dd 的開立日期），讓 stage 帳號不留
     // 未作廢的測試發票。

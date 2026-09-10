@@ -361,6 +361,7 @@ fn test_get_issue_input_encrypt_decrypt_round_trip() {
     let input = GetIssueInput {
         merchant_id: "2000132".to_owned(),
         relate_number: "order_001".to_owned(),
+        ..Default::default()
     };
     let encrypted = encrypt_data(&input, hash_key, hash_iv).expect("encrypt");
 

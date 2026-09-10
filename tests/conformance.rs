@@ -296,9 +296,42 @@ fn test_get_issue_input_field_names() {
     let input = GetIssueInput {
         merchant_id: "2000132".to_owned(),
         relate_number: "o1".to_owned(),
+        ..Default::default()
     };
     let m = serde_json::to_value(&input).unwrap();
     assert_keys(m.as_object().unwrap(), &["MerchantID", "RelateNumber"]);
+}
+
+/// GetIssue supports two mutually exclusive query modes (RelateNumber alone,
+/// or InvoiceNo+InvoiceDate). ECPay's server picks the mode by which keys are
+/// *present* in the JSON, not by whether their values are empty — sending an
+/// empty RelateNumber alongside InvoiceNo/InvoiceDate (or vice versa) makes
+/// the server pick the wrong mode and answer "not found" even for a real
+/// invoice (confirmed live against stage, 2026-09). This pins that the unused
+/// side is omitted entirely, not sent as `""`.
+#[test]
+fn test_get_issue_input_omits_the_unused_query_mode() {
+    let by_relate = GetIssueInput {
+        merchant_id: "2000132".to_owned(),
+        relate_number: "o1".to_owned(),
+        ..Default::default()
+    };
+    let m = serde_json::to_value(&by_relate).unwrap();
+    let obj = m.as_object().unwrap();
+    assert_keys(obj, &["MerchantID", "RelateNumber"]);
+    assert!(!obj.contains_key("InvoiceNo"));
+    assert!(!obj.contains_key("InvoiceDate"));
+
+    let by_invoice_no = GetIssueInput {
+        merchant_id: "2000132".to_owned(),
+        invoice_no: "AB12345678".to_owned(),
+        invoice_date: "2024-01-02".to_owned(),
+        ..Default::default()
+    };
+    let m = serde_json::to_value(&by_invoice_no).unwrap();
+    let obj = m.as_object().unwrap();
+    assert_keys(obj, &["MerchantID", "InvoiceNo", "InvoiceDate"]);
+    assert!(!obj.contains_key("RelateNumber"));
 }
 
 /// TestGetIssueOutputFieldNames confirms the response fields the codebase
@@ -367,6 +400,7 @@ async fn test_invoice_request_envelope() {
     let input = GetIssueInput {
         merchant_id: ec.merchant_id.clone(),
         relate_number: "o1".to_owned(),
+        ..Default::default()
     };
     let out = ec
         .get_issue(&input)
@@ -465,6 +499,7 @@ async fn test_call_invoice_api_trans_code_gate() {
     let input = GetIssueInput {
         merchant_id: ec.merchant_id.clone(),
         relate_number: "o1".to_owned(),
+        ..Default::default()
     };
     let err = ec
         .get_issue(&input)
@@ -495,6 +530,7 @@ async fn test_api_non_2xx_errors() {
     let input = GetIssueInput {
         merchant_id: ec.merchant_id.clone(),
         relate_number: "o1".to_owned(),
+        ..Default::default()
     };
     let err = ec
         .get_issue(&input)

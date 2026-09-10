@@ -274,6 +274,7 @@ fn test_encrypt_data_decrypt_data_real_types() {
     let input = ecpay::GetIssueInput {
         merchant_id: "2000132".to_owned(),
         relate_number: "order_001".to_owned(),
+        ..Default::default()
     };
     let enc = encrypt_data(&input, INV_KEY, INV_IV).unwrap();
     let out: ecpay::GetIssueInput = decrypt_data(&enc, INV_KEY, INV_IV).unwrap();
