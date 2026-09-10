@@ -12,7 +12,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// succeeded, but the response carried a non-success RtnCode (ECPay uses
 /// RtnCode == 1 for success).
 ///
-/// Command calls (Issue, Invalid, VoidWithIssue, InvoiceNotify) return it so
+/// Command calls (Issue, Invalid, VoidWithReIssue, InvoiceNotify) return it so
 /// callers can distinguish a genuine rejection from a transport/decode error
 /// via `matches!(err, Error::Api(_))`. Query calls such as GetIssue, where a
 /// non-1 RtnCode is a normal "not found" result, do NOT return it — the caller

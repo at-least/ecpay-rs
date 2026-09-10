@@ -51,7 +51,10 @@ fn tricky_cases() -> Vec<(&'static str, String)> {
         ("colon", "colon:test".into()),
         // 200 個多位元組字元：編碼長度放大也必須正確。
         ("long-200", "長".repeat(100)),
-        ("mixed-everything", "全部!混~合*(字).-_%+&=/:'測試ABC123".into()),
+        (
+            "mixed-everything",
+            "全部!混~合*(字).-_%+&=/:'測試ABC123".into(),
+        ),
     ]
 }
 

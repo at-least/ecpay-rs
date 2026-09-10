@@ -3,9 +3,8 @@
 //! APIs from the reference Go SDK port.
 //!
 //! The CheckMacValue signing, AES envelope, and every wire field name are
-//! pinned against ECPay's official test vectors; see the README for the two
-//! documented deviations from the Python SDK's literal behavior (both are
-//! cases where the Python SDK disagrees with ECPay's own server).
+//! pinned against ECPay's official test vectors; see the README for the
+//! three documented deviations from the Python SDK's literal behavior.
 //!
 //! [ECPayAIO_Python]: https://github.com/ECPay/ECPayAIO_Python
 //!
@@ -87,8 +86,8 @@ pub use invoice::{
     CheckBarcodeInput, CheckBarcodeOutput, GetCompanyNameByTaxIDInput, GetCompanyNameByTaxIDOutput,
     GetGovInvoiceWordSettingInput, GetGovInvoiceWordSettingOutput, GetInvoiceWordSettingInput,
     GetInvoiceWordSettingOutput, GetIssueInput, GetIssueOutput, GovInvoiceInfo, InvalidInput,
-    InvalidOutput, InvoiceInfo, InvoiceNotifyInput, InvoiceNotifyOutput, IssueInput, IssueOutput,
-    Item, VoidWithIssueInput, VoidWithIssueOutput,
+    InvalidOutput, InvoiceInfo, InvoiceNotifyInput, InvoiceNotifyOutput, IssueInput, IssueModel,
+    IssueOutput, Item, VoidModel, VoidWithReIssueInput, VoidWithReIssueOutput,
 };
 pub use payment::{
     AioCheckOut, AioCheckOutParams, ChoosePayment, CreditCardPeriodActionParams,

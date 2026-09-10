@@ -3,6 +3,14 @@
 //! get_gov_invoice_word_setting.go, get_invoice_word_setting.go, get_issue.go).
 //! JSON field names are ECPay's verbatim spec names — locked by the
 //! conformance tests.
+//!
+//! `VoidWithReIssue` is the one exception: the reference Go port names both
+//! the file and the wire action `VoidWithIssue`, but ECPay's real endpoint is
+//! `/B2CInvoice/VoidWithReIssue` (confirmed live against stage: the old name
+//! hits ECPay's generic error page, HTTP 500, not a JSON response). This
+//! crate uses the correct wire name and the accurate Rust name/semantics
+//! (作廢重開, void-and-reissue — not 折讓/allowance, which is a distinct,
+//! unimplemented `/B2CInvoice/Allowance` endpoint).
 
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +20,8 @@ use crate::Ecpay;
 // --- Issue (開立發票) — issue.go ---
 
 /// 開立發票的輸入參數。
-/// 欄位與 VoidWithIssueInput 相同，但語意不同（開立 vs 折讓），刻意分開維護。
+/// 欄位與 IssueModel（VoidWithReIssue 的重開部分）相同，外加 IssueModel
+/// 專屬必填的 InvoiceDate，刻意分開維護。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct IssueInput {
@@ -116,17 +125,40 @@ impl Ecpay {
     }
 }
 
-// --- VoidWithIssue (折讓開立發票) — void_with_issue.go ---
+// --- VoidWithReIssue (作廢重開) — void_with_issue.go ---
+//
+// ECPay 的真實端點是 /B2CInvoice/VoidWithReIssue（Go 版原始檔名/action
+// 字串誤植為 VoidWithIssue，本函式庫已改用正確名稱，見上方 module doc）。
+//
+// Data 信封本身是 `{VoidModel: {...}, IssueModel: {...}}` 兩個巢狀物件
+// （不是像 Issue/Invalid 那樣的扁平欄位）；核對官方 PHP 範例
+// `scripts/SDK_PHP/example/Invoice/B2C/VoidWithReIssue.php` 逐位元組一致。
 
-/// 折讓開立發票的輸入參數。
-/// 欄位與 IssueInput 相同，但語意不同（折讓 vs 開立），刻意分開維護。
+/// `VoidModel`：要作廢的舊發票。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct VoidWithIssueInput {
+pub struct VoidModel {
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String, // 特店編號
+    #[serde(rename = "InvoiceNo")]
+    pub invoice_no: String, // 發票號碼 長度固定為 10 碼
+    #[serde(rename = "VoidReason")]
+    pub void_reason: String, // 註銷原因
+}
+
+/// `IssueModel`：重開的新發票。欄位與 `IssueInput` 相同，外加作廢重開專屬
+/// 的必填欄位 `InvoiceDate`。
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IssueModel {
     #[serde(rename = "MerchantID")]
     pub merchant_id: String,
     #[serde(rename = "RelateNumber")]
     pub relate_number: String,
+    /// 發票開立時間 格式為 yyyy-MM-dd HH:mm:ss。作廢重開專屬必填欄位，
+    /// 一般開立（Issue）沒有這個欄位。
+    #[serde(rename = "InvoiceDate")]
+    pub invoice_date: String,
     #[serde(rename = "CustomerID")]
     pub customer_id: String,
     #[serde(rename = "CustomerIdentifier")]
@@ -167,9 +199,19 @@ pub struct VoidWithIssueInput {
     pub vat: String,
 }
 
+/// 作廢重開的輸入參數：`VoidModel`（作廢舊發票）+ `IssueModel`（開立新發票）。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct VoidWithIssueOutput {
+pub struct VoidWithReIssueInput {
+    #[serde(rename = "VoidModel")]
+    pub void_model: VoidModel,
+    #[serde(rename = "IssueModel")]
+    pub issue_model: IssueModel,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VoidWithReIssueOutput {
     #[serde(rename = "RtnCode")]
     pub rtn_code: i64,
     #[serde(rename = "RtnMsg")]
@@ -183,11 +225,14 @@ pub struct VoidWithIssueOutput {
 }
 
 impl Ecpay {
-    /// VoidWithIssue (折讓開立) is a command like Issue/Invalid, so a
+    /// VoidWithReIssue (作廢重開) is a command like Issue/Invalid, so a
     /// non-success RtnCode is surfaced as [`crate::ApiError`] rather than
     /// swallowed.
-    pub async fn void_with_issue(&self, input: &VoidWithIssueInput) -> Result<VoidWithIssueOutput> {
-        let output: VoidWithIssueOutput = self.call_invoice_api("VoidWithIssue", input).await?;
+    pub async fn void_with_reissue(
+        &self,
+        input: &VoidWithReIssueInput,
+    ) -> Result<VoidWithReIssueOutput> {
+        let output: VoidWithReIssueOutput = self.call_invoice_api("VoidWithReIssue", input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
         Ok(output)
     }
@@ -266,7 +311,7 @@ pub struct InvoiceNotifyOutput {
 impl Ecpay {
     /// InvoiceNotify is a command (it triggers ECPay to re-send a
     /// notification), so it follows the same contract as Issue / Invalid /
-    /// VoidWithIssue: a non-success RtnCode surfaces as a
+    /// VoidWithReIssue: a non-success RtnCode surfaces as a
     /// [`crate::ApiError`] rather than being silently swallowed.
     pub async fn invoice_notify(&self, input: &InvoiceNotifyInput) -> Result<InvoiceNotifyOutput> {
         let output: InvoiceNotifyOutput = self.call_invoice_api("InvoiceNotify", input).await?;
