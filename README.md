@@ -17,6 +17,27 @@ B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
   及其作廢/查詢、手機條碼驗證、愛心碼驗證、統一編號查詢、政府與商店字軌查詢
   共 20 支 API(AES-128-CBC + PKCS7 + Base64 信封,與官方規格及沙盒實測
   逐位元組比對過)。
+- **ECPG 站內付 2.0 全涵蓋**(14 支):取號 GetTokenbyTrade(staging 實測取得
+  真實 Token,typed 回應)、CreatePayment、綁卡家族(CreateBindCard /
+  GetTokenbyBindingCard / GetTokenbyUser / GetMemberBindCard /
+  DeleteMemberBindCard / CreatePaymentWithCardID)、查詢與請款動作
+  (QueryTrade / QueryPaymentInfo / QueryTradeMedia / CreditCardPeriodAction /
+  DoAction / CreditDetail QueryTrade)。雙 domain(ecpg vs ecpayment)由
+  `ecpg_api_url` / `ecpayment_api_url` 分開承載,接錯必 404 的陷阱在文件中
+  逐方法標示。
+- **物流三家族全涵蓋**:國內物流(CMV-**MD5** form:建立訂單、查詢
+  QueryLogisticsTradeInfo/V2、門市清單、更新出貨/門市、C2C 取消、逆物流
+  CVS/UNIMART/HOME;瀏覽器表單:電子地圖、列印出貨單、四家 C2C 交貨便、
+  產生測試資料)、全方位物流 v2(14 支 AES-JSON:暫存訂單建立/更新、
+  查詢、逆物流、列印、物流選擇頁)與跨境物流(建立/查詢/列印/地圖)。
+  staging 實測:國內建單(RtnCode=300 + AllPayLogisticsID)→查詢全程往返、
+  v2 CreateTestData 成功;`1|<query>` 回應格式與 MD5 簽章範圍逐位元組釘死。
+- **B2B 電子發票全涵蓋**(23 支):開立/確認、折讓/確認/取消、作廢、拒收、
+  通知、客戶資料維護、字軌查詢與全部 Get* 查詢。staging 實測完整生命週期:
+  開立(發票開立成功)→ 查詢 → 作廢全綠。
+- **以官方實作為測試基準**:測試向量由「真的」官方 Python SDK 執行產生
+  (17 種 `create_order` 情境逐欄位比對、11 條驗證錯誤訊息原樣比對、
+  CheckMacValue SHA-256/MD5、AES-CBC 官方向量、.NET UrlEncode 契約)。
   - `Issue`/`IssueModel` 已補齊 `ChannelPartner`、`ProductServiceID`、
     `CarrierNum2`、`ZeroTaxRateReason`、`TaxAmount` 等官方規格欄位。
   - `GetIssue` 支援官方文件記載的兩種查詢模式(`RelateNumber` 或
@@ -159,6 +180,9 @@ println!("RtnMsg = {}", result["RtnMsg"]);
 | `generate_check_value` | `Ecpay::generate_check_value` / 自由函式 `check_mac_value` |
 | —(Go 版移植) | 發票:`issue`/`try_issue`、`void_with_reissue`、`invalid`、`get_issue`、`get_invalid`、`invoice_notify`、`check_barcode`、`check_love_code`、`get_company_name_by_tax_id`、`get_gov_invoice_word_setting`、`get_invoice_word_setting` |
 | —(比對 `ECPay/SDK_PHP` 官方範例/規格頁後新增) | 發票延遲開立:`delay_issue`、`trigger_issue`、`cancel_delay_issue`;折讓:`allowance`、`allowance_invalid`、`allowance_by_collegiate`、`allowance_invalid_by_collegiate`、`get_allowance`、`get_allowance_invalid` |
+| —(比對 `ECPay/SDK_PHP` 後新增) | **ECPG 站內付 2.0**(`ecpay::ecpg`):`get_token_by_trade`、`create_payment`、綁卡 6 支、查詢/請款動作 6 支,共 14 支 |
+| —(比對 `ECPay/SDK_PHP` 後新增) | **物流**(`ecpay::logistics`):國內 9 支 MD5 form API + 6 種瀏覽器表單、全方位物流 v2 13 支、跨境 4 支 + 表單,含 MD5 回呼驗證與 AES 回呼解密 |
+| —(比對 `ECPay/SDK_PHP` 後新增) | **B2B 電子發票**(`ecpay::invoice_b2b`):開立/折讓/作廢/拒收/通知/客戶資料/字軌與全部查詢,共 23 支 |
 
 常數(付款方式、課稅類別、載具、捐贈、銀聯……)在 [`ecpay::payment`](src/payment/mod.rs)
 模組,名稱對應官方 dict:`ChoosePayment`(enum)、`choose_sub_payment`、
@@ -238,26 +262,29 @@ cargo test --test stage_smoke -- --ignored --nocapture
 CheckMacValue Error 頁(負向對照)、QueryCreditCardPeriodInfo / DoAction /
 QueryTrade(V2) / vendor 對帳端點皆可達。
 
-#### Staging 探測:尚未實作的官方 SDK 服務
+#### Staging 探測與實作:官方 PHP SDK 有、本來沒有的三個服務
 
-`tests/stage_probes.rs`(同樣 `#[ignore]`)用本函式庫的公開加密原語
-(`encrypt_data` / `check_mac_value`)直接探測官方 PHP SDK 有、本函式庫還
-沒有的三個服務,實測結果(2026-09,staging server 實跑):
+這三個服務( ECPG 站內付 2.0、國內物流、B2B 電子發票)當初先用
+`tests/stage_probes.rs`(#[ignore])以本函式庫的公開加密原語實測 staging、
+釘死 wire 格式,再照探測結果實作成正式模組(見上方「特色」)。探測與後續
+staging 實測(2026-09)確立的 server 真相,全部寫進了各模組文件:
 
-- **ECPG 站內付 2.0**:`GetTokenbyTrade` 以 `{Timestamp}`-only 的 RqHeader
-  信封直接取得真實 Token(RtnCode=1);查詢走 `ecpayment-stage/1.0.0/`
-  雙 domain(未建單回 RtnCode=10000185);錯誤路徑:壞 AES key 回
-  `TransCode=110`。
+- **ECPG**:`GetTokenbyTrade` 以 `{Timestamp}`-only 的 RqHeader 信封直接
+  取得真實 Token(RtnCode=1);查詢走 `ecpayment-stage/1.0.0/` 雙 domain;
+  壞 AES key 回 `TransCode=110`;`RememberCard=1` 必帶
+  `CardInfo.OrderResultURL`(5100010)。
 - **國內物流**:`Express/Create`(form + CheckMacValue **MD5**)實際建單
-  成功(AllPayLogisticsID 取得,RtnCode=300 處理中)。回應格式為
-  `1|<urlencoded query>`,**CMV 只簽 `1|` 之後的 query 部分**(MD5、
-  排序鍵)— 已逐位元組驗證。
+  (RtnCode=300 + AllPayLogisticsID)→ `QueryLogisticsTradeInfo/V2` 查得
+  完整貨態。回應格式 `1|<urlencoded query>`,**CMV 只簽 `1|` 之後的
+  query 部分**(MD5、排序鍵)— 逐位元組驗證並寫成斷言。
 - **B2B 電子發票**:RqHeader 需帶 `RqID` + `Revision=1.0.0`,公開測試帳號
-  2000132 即可開立成功(RtnCode=1,取得發票號);回應信封的 header 是
-  `RpHeader`、版號欄位是 `Reversion`(綠界原始拼字,如實記錄)。
-
-三個服務的協議層已被 staging 證實可由本函式庫現有加密原語承載,可作為
-日後 typed 實作的設計基準。
+  2000132 開立成功(取得發票號)。`GetIssue` 回應包在 `RtnData`、RtnCode 是
+  **字串** `"1"`;作廢原因上限 20 字元(2103005);RqID 不是冪等鍵(同一
+  RqID 開出多張發票);回應信封是 `RpHeader`/`Reversion`(綠界原始拼字)。
+- **全方位物流 v2 / 跨境**:同一段 AES 信封(`Revision 1.0.0`、物流金鑰)。
+  v2 `CreateTestData` 開出測試單成功;跨境在該帳號回 `TransCode=128`
+  (服務未開通,信封本身已驗)。v2 對「查無訂單」回 **HTTP 500 + 有效
+  信封**,AES 核心會解出業務錯誤而非丟 HTTP 錯誤。
 
 ### Staging probes for unimplemented PHP-SDK services
 
@@ -292,7 +319,7 @@ ReturnURL → merchant 端用 `verify_check_mac_value` 驗證並回 `1|OK` →
 ```bash
 git clone --recurse-submodules https://github.com/at-least/ecpay-rs.git
 # 已 clone 的話:git submodule update --init
-cargo test              # 130+ 測試:官方向量、Python SDK 一致性、mock transport
+cargo test              # 160+ 測試:官方向量、Python SDK 一致性、mock transport
 cargo test --test python_conformance   # 對官方 SDK 的逐欄位比對
 cargo clippy --all-targets
 ```
@@ -344,6 +371,11 @@ payment SDK, extended with the B2C e-invoice AES-JSON APIs. MIT licensed.
     `AllowanceInvalidByCollegiate` endpoint (spec page 7913.md) — the
     official PHP SDK has no example for it, so it's easy to assume
     `AllowanceInvalid` covers both.
+- **ECPG 站內付 2.0, logistics (domestic / AllInOne v2 / cross-border), and
+  B2B e-invoice — full parity with the official PHP SDK**, ported from its
+  example files and live-verified on the stage server (issue → query → void
+  B2B lifecycle, a real ECPG token, real domestic logistics orders; see the
+  staging section below for the pinned server truths).
 - **Verified against the real official SDK**: the conformance fixtures were
   generated by executing upstream `sdk/ecpay_payment_sdk.py` itself.
 - **Typed API with an escape hatch**: required fields are compile-time,
