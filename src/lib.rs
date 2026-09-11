@@ -379,4 +379,29 @@ mod tests {
         assert!(dumped.contains("hash_key: \"***\""), "{dumped}");
         assert!(dumped.contains("merchant_id: \"3002607\""), "{dumped}");
     }
+
+    #[test]
+    fn verify_check_mac_value_is_sha256_only_ignoring_encrypt_type_field() {
+        let client = Ecpay {
+            merchant_id: "3002607".into(),
+            hash_key: "pwFHCqoQZGmho4w6".into(),
+            hash_iv: "EkRm7iFT261dpevs".into(),
+            ..Default::default()
+        };
+        // A posted form that carries EncryptType=0: verification must still
+        // recompute with SHA-256 (EncryptType=0 is retired) and therefore
+        // match the SHA-256 mac over the same fields.
+        let mut posted = HashMap::new();
+        posted.insert("MerchantID".to_owned(), "3002607".to_owned());
+        posted.insert("EncryptType".to_owned(), "0".to_owned());
+        let sha = crypto::check_mac_value(&posted, &client.hash_key, &client.hash_iv, 1).unwrap();
+        posted.insert("CheckMacValue".to_owned(), sha);
+        assert!(client.verify_check_mac_value(&posted));
+
+        // And an MD5 mac fails verification even when EncryptType=0 claims
+        // MD5 — the field is never honored on inbound verification.
+        let md5 = crypto::check_mac_value(&posted, &client.hash_key, &client.hash_iv, 0).unwrap();
+        posted.insert("CheckMacValue".to_owned(), md5);
+        assert!(!client.verify_check_mac_value(&posted));
+    }
 }

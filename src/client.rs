@@ -524,3 +524,30 @@ impl Ecpay {
         check_mac_value(&with_id, &self.hash_key, &self.hash_iv, encrypt_type)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::render_auto_submit_form;
+
+    #[test]
+    fn auto_submit_form_is_byte_identical_to_the_former_inline_copies() {
+        // Pins the exact shape shared by the AIO checkout and logistics
+        // forms (formerly two copy-pasted html_form methods), including
+        // attribute escaping and the auto-submit script tag.
+        let html = render_auto_submit_form(
+            "https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5",
+            &[
+                ("MerchantID".to_owned(), "3002607".to_owned()),
+                ("TradeDesc".to_owned(), "a\"b<c>&'d".to_owned()),
+            ],
+        );
+        assert_eq!(
+            html,
+            "<form id=\"data_set\" action=\"https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5\" \
+method=\"post\"><input type=\"hidden\" name=\"MerchantID\" value=\"3002607\" />\
+<input type=\"hidden\" name=\"TradeDesc\" value=\"a&quot;b&lt;c&gt;&amp;&#39;d\" />\
+<script type=\"text/javascript\">document.getElementById(\"data_set\").submit();</script>\
+</form>"
+        );
+    }
+}
