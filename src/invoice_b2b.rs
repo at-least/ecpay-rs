@@ -38,6 +38,7 @@
 //! `get_invoice_word_setting`) take a `_b2b` suffix — the same treatment
 //! [`Ecpay::issue_b2b`] gets to avoid [`Ecpay::issue`].
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{api_error, Error, Result};
@@ -57,6 +58,33 @@ impl Ecpay {
             )));
         }
         Ok(())
+    }
+
+    /// 每個 B2B 端點共用的出網路徑：`Data` 層 `MerchantID` 防呆 → 組
+    /// `RqHeader`（`Timestamp`/`RqID`/`Revision: "1.0.0"`）→
+    /// AES-JSON POST 到 `{b2b_base_url}{action}`。
+    async fn b2b_post<I: Serialize, O: DeserializeOwned>(
+        &self,
+        action: &str,
+        data_merchant_id: &str,
+        data: &I,
+    ) -> Result<O> {
+        self.b2b_require_data_merchant_id(data_merchant_id)?;
+        let endpoint = format!("{}{}", self.b2b_base_url(), action);
+        let rq_header = serde_json::json!({
+            "Timestamp": crate::crypto::unix_now(),
+            "RqID": self.b2b_rq_id.clone(),
+            "Revision": "1.0.0",
+        });
+        self.post_aes_json(
+            &endpoint,
+            rq_header,
+            &self.merchant_id,
+            data,
+            &self.invoice_hash_key,
+            &self.invoice_hash_iv,
+        )
+        .await
     }
 }
 
@@ -177,23 +205,7 @@ impl Ecpay {
     /// `issue` 的雙回傳 shape）：業務層失敗（RtnCode ≠ 1）回
     /// [`crate::Error::Api`]，傳輸層失敗回各自的錯誤。
     pub async fn issue_b2b(&self, input: &IssueB2bInput) -> Result<B2bIssueOutput> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "Issue");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        let output: B2bIssueOutput = self
-            .post_aes_json(
-                &endpoint,
-                rq_header,
-                &self.merchant_id,
-                input,
-                &self.invoice_hash_key,
-                &self.invoice_hash_iv,
-            )
-            .await?;
+        let output: B2bIssueOutput = self.b2b_post("Issue", &input.merchant_id, input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
         Ok(output)
     }
@@ -217,22 +229,8 @@ impl Ecpay {
     /// 逐欄位驗證，故以解密後的 `serde_json::Value` 原樣回傳（`RtnCode`
     /// 為整數 1 代表成功，由呼叫端檢查）——本模組其餘非 Issue 端點同此。
     pub async fn issue_confirm(&self, input: &IssueConfirmInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "IssueConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("IssueConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -277,22 +275,7 @@ impl Ecpay {
     /// Allowance (開立折讓)。名稱帶 `_b2b` 後綴以免與 B2C 的
     /// [`Ecpay::allowance`] 衝突。
     pub async fn allowance_b2b(&self, input: &AllowanceInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "Allowance");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("Allowance", &input.merchant_id, input).await
     }
 }
 
@@ -313,22 +296,8 @@ impl Ecpay {
         &self,
         input: &AllowanceConfirmInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "AllowanceConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("AllowanceConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -351,22 +320,8 @@ impl Ecpay {
         &self,
         input: &CancelAllowanceInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "CancelAllowance");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("CancelAllowance", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -387,22 +342,8 @@ impl Ecpay {
         &self,
         input: &CancelAllowanceConfirmInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "CancelAllowanceConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("CancelAllowanceConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -425,22 +366,7 @@ impl Ecpay {
     /// Invalid (作廢發票)。名稱帶 `_b2b` 後綴以免與 B2C 的
     /// [`Ecpay::invalid`] 衝突。
     pub async fn invalid_b2b(&self, input: &InvalidInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "Invalid");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("Invalid", &input.merchant_id, input).await
     }
 }
 
@@ -460,22 +386,8 @@ pub struct InvalidConfirmInput {
 impl Ecpay {
     /// InvalidConfirm (確認作廢，交換模式)。
     pub async fn invalid_confirm(&self, input: &InvalidConfirmInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "InvalidConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("InvalidConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -501,22 +413,7 @@ pub struct NotifyInput {
 impl Ecpay {
     /// Notify (發送通知)。
     pub async fn notify(&self, input: &NotifyInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "Notify");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("Notify", &input.merchant_id, input).await
     }
 }
 
@@ -538,22 +435,7 @@ pub struct RejectInput {
 impl Ecpay {
     /// Reject (退回，交換模式店家拒收)。
     pub async fn reject(&self, input: &RejectInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "Reject");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("Reject", &input.merchant_id, input).await
     }
 }
 
@@ -573,22 +455,8 @@ pub struct RejectConfirmInput {
 impl Ecpay {
     /// RejectConfirm (確認退回，交換模式)。
     pub async fn reject_confirm(&self, input: &RejectConfirmInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "RejectConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("RejectConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -624,22 +492,8 @@ impl Ecpay {
         &self,
         input: &MaintainMerchantCustomerDataInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "MaintainMerchantCustomerData");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("MaintainMerchantCustomerData", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -663,22 +517,7 @@ impl Ecpay {
     /// GetIssue (查詢開立發票)。名稱帶 `_b2b` 後綴以免與 B2C 的
     /// [`Ecpay::get_issue`] 衝突。
     pub async fn get_issue_b2b(&self, input: &GetIssueInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetIssue");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetIssue", &input.merchant_id, input).await
     }
 }
 
@@ -703,22 +542,8 @@ impl Ecpay {
         &self,
         input: &GetIssueConfirmInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetIssueConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetIssueConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -741,22 +566,7 @@ impl Ecpay {
     /// GetInvalid (查詢作廢發票)。名稱帶 `_b2b` 後綴以免與 B2C 的
     /// [`Ecpay::get_invalid`] 衝突。
     pub async fn get_invalid_b2b(&self, input: &GetInvalidInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetInvalid");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetInvalid", &input.merchant_id, input).await
     }
 }
 
@@ -781,22 +591,8 @@ impl Ecpay {
         &self,
         input: &GetInvalidConfirmInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetInvalidConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetInvalidConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -815,22 +611,8 @@ impl Ecpay {
     /// GetAllowance (查詢折讓)。名稱帶 `_b2b` 後綴以免與 B2C 的
     /// [`Ecpay::get_allowance`] 衝突。
     pub async fn get_allowance_b2b(&self, input: &GetAllowanceInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetAllowance");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetAllowance", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -851,22 +633,8 @@ impl Ecpay {
         &self,
         input: &GetAllowanceConfirmInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetAllowanceConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetAllowanceConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -888,22 +656,8 @@ impl Ecpay {
         &self,
         input: &GetAllowanceInvalidInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetAllowanceInvalid");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetAllowanceInvalid", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -924,22 +678,8 @@ impl Ecpay {
         &self,
         input: &GetAllowanceInvalidConfirmInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetAllowanceInvalidConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetAllowanceInvalidConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -964,22 +704,7 @@ pub struct GetRejectInput {
 impl Ecpay {
     /// GetReject (查詢退回)。
     pub async fn get_reject(&self, input: &GetRejectInput) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetReject");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetReject", &input.merchant_id, input).await
     }
 }
 
@@ -1004,22 +729,8 @@ impl Ecpay {
         &self,
         input: &GetRejectConfirmInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetRejectConfirm");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetRejectConfirm", &input.merchant_id, input)
+            .await
     }
 }
 
@@ -1047,21 +758,7 @@ impl Ecpay {
         &self,
         input: &GetInvoiceWordSettingInput,
     ) -> Result<serde_json::Value> {
-        self.b2b_require_data_merchant_id(&input.merchant_id)?;
-        let endpoint = format!("{}{}", self.b2b_base_url(), "GetInvoiceWordSetting");
-        let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
-            "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
-        });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            input,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        self.b2b_post("GetInvoiceWordSetting", &input.merchant_id, input)
+            .await
     }
 }
