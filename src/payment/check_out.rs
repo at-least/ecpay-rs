@@ -369,15 +369,24 @@ impl Ecpay {
     }
 }
 
+/// Which parameter groups the chosen `ChoosePayment` activates (`All`
+/// activates every group). `validate_groups` and `add_group_fields` must
+/// agree on this — one shared predicate, not two copies.
+fn groups(p: &AioCheckOutParams) -> (bool, bool, bool) {
+    let is_all_or =
+        |a: ChoosePayment| p.choose_payment == ChoosePayment::All || p.choose_payment == a;
+    (
+        is_all_or(ChoosePayment::Atm),
+        is_all_or(ChoosePayment::Cvs) || is_all_or(ChoosePayment::Barcode),
+        is_all_or(ChoosePayment::Credit),
+    )
+}
+
 /// 組別歸屬檢查:the official SDK merges exactly one group set per
 /// ChoosePayment; a field set for an inactive group would be silently signed
 /// and sent, so the typed API rejects it loudly instead.
 fn validate_groups(p: &AioCheckOutParams) -> Result<()> {
-    let is_all_or =
-        |a: ChoosePayment| p.choose_payment == ChoosePayment::All || p.choose_payment == a;
-    let atm_group = is_all_or(ChoosePayment::Atm);
-    let cvs_barcode_group = is_all_or(ChoosePayment::Cvs) || is_all_or(ChoosePayment::Barcode);
-    let credit_group = is_all_or(ChoosePayment::Credit);
+    let (atm_group, cvs_barcode_group, credit_group) = groups(p);
 
     let group = |name: &str| -> Error {
         Error::Validation(format!(
@@ -478,11 +487,7 @@ fn build_base_map(p: &AioCheckOutParams, merchant_id: &str) -> HashMap<String, S
 /// The active payment-method group's extend fields, plus the common
 /// `Language` param (CHT/ENG/KOR/JPN/CHI, valid for every payment method).
 fn add_group_fields(m: &mut HashMap<String, String>, p: &AioCheckOutParams) {
-    let is_all_or =
-        |a: ChoosePayment| p.choose_payment == ChoosePayment::All || p.choose_payment == a;
-    let atm_group = is_all_or(ChoosePayment::Atm);
-    let cvs_barcode_group = is_all_or(ChoosePayment::Cvs) || is_all_or(ChoosePayment::Barcode);
-    let credit_group = is_all_or(ChoosePayment::Credit);
+    let (atm_group, cvs_barcode_group, credit_group) = groups(p);
 
     if atm_group {
         insert_optional_int(m, "ExpireDate", &p.expire_date);
