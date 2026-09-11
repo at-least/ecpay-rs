@@ -384,12 +384,7 @@ impl Ecpay {
         let as_map: HashMap<String, String> =
             query.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         let encrypt_type = crate::crypto::parse_encrypt_type(&as_map);
-        let want =
-            crate::crypto::check_mac_value(&as_map, &self.hash_key, &self.hash_iv, encrypt_type)?;
-        // Upper-case defensively before the constant-time compare, like
-        // [`crate::Ecpay::verify_check_mac_value`] — ECPay sends uppercase,
-        // but a received value's case isn't a signal worth failing on.
-        if !crate::crypto::constant_time_eq(got.to_uppercase().as_bytes(), want.as_bytes()) {
+        if !crate::crypto::verify_mac(&got, &as_map, &self.hash_key, &self.hash_iv, encrypt_type)? {
             return Err(Error::CheckMacValueMismatch);
         }
         query.remove("CheckMacValue");

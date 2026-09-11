@@ -342,16 +342,10 @@ impl Ecpay {
             Some(v) if !v.is_empty() => v,
             _ => return false,
         };
-        let rest: HashMap<String, String> = params
-            .iter()
-            .filter(|(k, _)| *k != "CheckMacValue")
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        // check_mac_value returns uppercase hex; ECPay sends uppercase too.
-        // Upper-case the inbound value defensively before the constant-time
-        // compare.
-        let want = hash_mac(&rest, &self.hash_key, &self.hash_iv);
-        crypto::constant_time_eq(got.to_uppercase().as_bytes(), want.as_bytes())
+        // SHA-256 only: EncryptType=0 is retired. A caller-supplied
+        // EncryptType field is deliberately ignored here.
+        crypto::verify_mac(got, params, &self.hash_key, &self.hash_iv, 1)
+            .expect("SHA-256 is always supported")
     }
 }
 

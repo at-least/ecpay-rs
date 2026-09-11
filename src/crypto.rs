@@ -157,6 +157,31 @@ pub fn hash_mac(params: &HashMap<String, String>, hash_key: &str, hash_iv: &str)
     check_mac_value(params, hash_key, hash_iv, 1).expect("EncryptType=1 cannot fail")
 }
 
+/// Shared verification half of [`check_mac_value`]: recompute the mac over
+/// `params` (a leftover `CheckMacValue` key in the map is scrubbed) and
+/// constant-time compare against `got`, upper-casing the inbound value
+/// defensively (ECPay sends uppercase, but a received value's case isn't a
+/// signal worth failing on). Empty `got` verifies as `false`;
+/// `encrypt_type` is chosen by the caller (payment responses derive it from
+/// the response's `EncryptType`, logistics hardcodes MD5 = 0, the AIO
+/// callback verifies SHA-256 only).
+pub(crate) fn verify_mac(
+    got: &str,
+    params: &HashMap<String, String>,
+    hash_key: &str,
+    hash_iv: &str,
+    encrypt_type: i64,
+) -> Result<bool> {
+    if got.is_empty() {
+        return Ok(false);
+    }
+    let want = check_mac_value(params, hash_key, hash_iv, encrypt_type)?;
+    Ok(constant_time_eq(
+        got.to_uppercase().as_bytes(),
+        want.as_bytes(),
+    ))
+}
+
 /// Reads the `EncryptType` field out of a params map, defaulting to 1
 /// (SHA-256) like the official SDK when it's missing or unparsable. Shared
 /// by [`crate::Ecpay::generate_check_value`] (signing an outbound request)
@@ -555,6 +580,34 @@ mod tests {
         assert!(matches!(
             check_mac_value(&params, "k", "i", 2),
             Err(Error::UnsupportedEncryptType(2))
+        ));
+    }
+
+    #[test]
+    fn verify_mac_matches_both_digests_and_is_case_defensive() {
+        let mut params = HashMap::new();
+        params.insert("MerchantID".to_owned(), "2000132".to_owned());
+        params.insert("EncryptType".to_owned(), "1".to_owned());
+
+        let sha = check_mac_value(&params, "k", "i", 1).unwrap();
+        assert!(verify_mac(&sha, &params, "k", "i", 1).unwrap());
+        // Lowercase inbound verifies too (upper-cased before compare).
+        assert!(verify_mac(&sha.to_lowercase(), &params, "k", "i", 1).unwrap());
+        // Wrong key / wrong digest type / empty got all verify as false.
+        assert!(!verify_mac(&sha, &params, "other", "i", 1).unwrap());
+        assert!(!verify_mac(&sha, &params, "k", "i", 0).unwrap());
+        assert!(!verify_mac("", &params, "k", "i", 1).unwrap());
+
+        // A leftover CheckMacValue in the map is scrubbed before hashing.
+        params.insert("CheckMacValue".to_owned(), "stale".to_owned());
+        assert!(verify_mac(&sha, &params, "k", "i", 1).unwrap());
+
+        // MD5 (EncryptType 0) verifies against its own digest.
+        let md5 = check_mac_value(&params, "k", "i", 0).unwrap();
+        assert!(verify_mac(&md5, &params, "k", "i", 0).unwrap());
+        assert!(matches!(
+            verify_mac(&md5, &params, "k", "i", 7),
+            Err(Error::UnsupportedEncryptType(7))
         ));
     }
 

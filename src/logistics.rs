@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::client::{post_form, render_auto_submit_form};
-use crate::crypto::{check_mac_value, constant_time_eq, unix_now};
+use crate::crypto::{check_mac_value, unix_now, verify_mac};
 use crate::error::{Error, Result};
 use crate::Ecpay;
 
@@ -152,8 +152,7 @@ impl Ecpay {
         let (key, iv) = self.logistics_keys();
         let key = std::str::from_utf8(key).map_err(|_| Error::AesKeySize(key.len()))?;
         let iv = std::str::from_utf8(iv).map_err(|_| Error::AesKeySize(iv.len()))?;
-        let want = check_mac_value(&as_map, key, iv, 0)?;
-        if !constant_time_eq(want.as_bytes(), got.to_uppercase().as_bytes()) {
+        if !verify_mac(&got, &as_map, key, iv, 0)? {
             return Err(Error::CheckMacValueMismatch);
         }
         if let Some(status) = status {
@@ -759,19 +758,11 @@ impl Ecpay {
             Some(v) if !v.is_empty() => v,
             _ => return false,
         };
-        let rest: HashMap<String, String> = params
-            .iter()
-            .filter(|(k, _)| *k != "CheckMacValue")
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
         let (key, iv) = self.logistics_keys();
         let (Ok(key), Ok(iv)) = (std::str::from_utf8(key), std::str::from_utf8(iv)) else {
             return false;
         };
-        let Ok(want) = check_mac_value(&rest, key, iv, 0) else {
-            return false;
-        };
-        constant_time_eq(want.as_bytes(), got.to_uppercase().as_bytes())
+        verify_mac(got, params, key, iv, 0).unwrap_or(false)
     }
 
     /// 解密全方位物流 v2 / 跨境物流的 ServerReplyURL 回呼(整包 JSON POST,
