@@ -4,11 +4,14 @@
 //!
 //! The simulators prove FLOW WIRING — request signing → server acceptance →
 //! callback delivery → merchant verification/decryption → required reply
-//! format → authoritative state via query APIs. They CANNOT prove parity
+//! format → state threading through the query APIs. They CANNOT prove parity
 //! with the real server (a simulator built on this crate's own crypto
 //! can't); that burden stays on `tests/stage_probes.rs`, the live sandbox
 //! suites (`tests/sandbox_logistics.rs`, `tests/sandbox_b2b.rs`), and the
-//! official vectors.
+//! official vectors. Negative paths ARE delivered over the wire (tampered
+//! MD5 callback, wrong-key AES callback) to prove the verifiers do real
+//! work; a handler panic surfaces as an opaque connection error, so run
+//! failures with `--nocapture` to see the cause.
 //!
 //! Callback wire formats follow the official docs (ECPay-API-Skill
 //! guides/21): domestic logistics ServerReplyURL is an MD5-CMV form POST
@@ -19,13 +22,17 @@
 //! VALUES inside callbacks are illustrative unless noted as live-captured.
 //!
 //! Four flows:
-//! 1. 國內物流 — create → MD5 status callback (with idempotent replay) →
-//!    verified query round-trip.
+//! 1. 國內物流 — create → MD5 status callback, accepted and answered
+//!    `1|OK`; a tampered-MAC replay is rejected (`0|ERR`); the replayed
+//!    VALID callback verifies and acks again while the merchant-side dedup
+//!    (application logic, not this crate) counts it once; the query API
+//!    returns the simulator's status.
 //! 2. 全方位物流 v2 — store-selection redirect → TempTradeEstablished
 //!    (ClientReplyURL) → create_by_temp_trade → AES notify + encrypted ack →
 //!    query.
-//! 3. ECPG 站內付 — token → PayToken payment → ReturnURL AES callback →
-//!    `1|OK` → query shows paid.
+//! 3. ECPG 站內付 — token → PayToken payment (PayToken is the JS SDK's
+//!    exchange product, modeled as a distinct derived value) → ReturnURL AES
+//!    callback → `1|OK`; a wrong-key callback is rejected → query shows paid.
 //! 4. B2B 發票 — issue → get → invalid → get_invalid. B2B has NO inbound
 //!    callback (all results are pulled via queries), so this flow asserts
 //!    envelope/state threading only, not callback handling.
@@ -170,8 +177,8 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
     let sim = Arc::new(Mutex::new(DomesticSim::default()));
     let merchant_log: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // --- the merchant's ServerReplyURL handler: verify MD5 CMV, dedup,
-    // --- reply the exact `1|OK` ECPay requires.
+    // --- the merchant's ServerReplyURL handler: verify MD5 CMV (a tampered
+    // --- callback must be rejected with `0|ERR`), dedup, reply exact `1|OK`.
     let merchant = {
         let client = Ecpay {
             merchant_id: MERCHANT_ID.into(),
@@ -184,10 +191,10 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
         let log = merchant_log.clone();
         spawn_http_server(move |_path, body| {
             let fields = parse_form(&String::from_utf8_lossy(body));
-            assert!(
-                client.verify_logistics_check_mac_value(&fields),
-                "callback CMV must verify (MD5): {fields:?}"
-            );
+            if !client.verify_logistics_check_mac_value(&fields) {
+                // Tampered/forged callback: reject so ECPay retries.
+                return (200, "text/plain".into(), b"0|ERR".to_vec());
+            }
             let key = format!(
                 "{}|{}",
                 fields["AllPayLogisticsID"], fields["LogisticsStatus"]
@@ -342,11 +349,36 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
         assert_eq!(
             log.iter().filter(|(k, _)| k.contains("|310")).count(),
             1,
-            "replayed callback deduped by (id, status)"
+            "replayed callback deduped by (id, status) — application logic; \
+             what the crate guarantees is that the replayed payload still verifies"
         );
     }
 
-    // 3. Authoritative state via the verified query API.
+    // A FORGED callback (MAC that signs different content) must be rejected
+    // over the wire — proving verify_logistics_check_mac_value does real work.
+    {
+        let url = format!("{merchant_url}server-reply");
+        let forged: Vec<(String, String)> = vec![
+            ("MerchantID".into(), MERCHANT_ID.into()),
+            ("MerchantTradeNo".into(), trade_no.clone()),
+            ("AllPayLogisticsID".into(), logistics_id.clone()),
+            ("LogisticsSubType".into(), "FAMI".into()),
+            ("LogisticsStatus".into(), "999".into()),
+            ("CheckMacValue".into(), "0".repeat(32)),
+        ];
+        let (st, reply) = post_form(&url, &forged).await;
+        assert_eq!(st, 200);
+        assert_eq!(reply, "0|ERR", "forged MAC must not be accepted");
+        let log = merchant_log.lock().unwrap();
+        assert!(
+            !log.iter().any(|(k, _)| k.contains("|999")),
+            "rejected callback must not be processed"
+        );
+    }
+
+    // 3. The query API returns the simulator's status. (The status itself was
+    //    advanced test-side — this asserts the query round-trip, while the
+    //    callback handling above is proven by the log/ack assertions.)
     let info = client
         .logistics_query_logistics_trade_info(&ecpay::logistics::DomesticQueryInput {
             all_pay_logistics_id: logistics_id,
@@ -354,7 +386,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
         })
         .await
         .expect("query");
-    assert_eq!(info["LogisticsStatus"], "310", "callback state is visible");
+    assert_eq!(info["LogisticsStatus"], "310");
 }
 
 // ===========================================================================
@@ -606,10 +638,13 @@ async fn ecpg_full_flow_from_token_to_paid_query() {
         };
         spawn_http_server(move |_path, body| {
             // guides/21: parse JSON → TransCode gate → AES decrypt Data →
-            // inner RtnCode → reply EXACT `1|OK`.
-            let decoded: serde_json::Value = client
-                .decrypt_ecpg_callback(&String::from_utf8_lossy(body))
-                .expect("ReturnURL callback decodes");
+            // inner RtnCode → reply EXACT `1|OK`. Anything that fails the
+            // gate/decryption is answered `0|ERR` (ECPay retries).
+            let decoded: serde_json::Value =
+                match client.decrypt_ecpg_callback(&String::from_utf8_lossy(body)) {
+                    Ok(v) => v,
+                    Err(_) => return (200, "text/plain".into(), b"0|ERR".to_vec()),
+                };
             assert_eq!(decoded["RtnCode"], 1, "payment success");
             assert_eq!(decoded["MerchantTradeNo"], "E2E0000001");
             (200, "text/plain".into(), b"1|OK".to_vec())
@@ -663,7 +698,15 @@ async fn ecpg_full_flow_from_token_to_paid_query() {
                     .into_bytes(),
                 )
             } else if path.ends_with("/Merchant/CreatePayment") {
-                assert_eq!(payload["PayToken"], state.token, "PayToken == issued token");
+                // The real front-end JS SDK exchanges the Token for a
+                // DISTINCT PayToken; model that exchange as a derivation so
+                // the simulator refuses a raw token.
+                let expected = format!("PAY{}", state.token);
+                assert_eq!(
+                    payload["PayToken"], expected,
+                    "PayToken is the JS-SDK exchange value, not the raw token"
+                );
+                assert_ne!(payload["PayToken"], state.token);
                 assert_eq!(payload["MerchantTradeNo"], state.merchant_trade_no);
                 state.paid = true;
                 let data = ecpay::crypto::encrypt_data(
@@ -726,19 +769,27 @@ async fn ecpg_full_flow_from_token_to_paid_query() {
     assert_eq!(token_out.rtn_code, 1);
     assert!(!token_out.token.is_empty());
 
-    // 2. The front-end JS SDK exchanges the token for a PayToken and the
-    //    consumer pays; the merchant then creates the payment server-side.
+    // 2. The front-end JS SDK exchanges the token for a DISTINCT PayToken
+    //    (modeled as `PAY{token}`); the merchant then creates the payment
+    //    server-side with that exchange value.
+    let pay_token = format!("PAY{}", token_out.token);
+    assert_ne!(
+        pay_token, token_out.token,
+        "the exchange produces a distinct value"
+    );
     let pay = client
         .create_payment(&ecpay::ecpg::CreatePaymentInput {
             merchant_id: MERCHANT_ID.into(),
-            pay_token: token_out.token.clone(),
+            pay_token,
             merchant_trade_no: "E2E0000001".into(),
         })
         .await
         .expect("payment accepted");
     assert_eq!(pay["RtnCode"], 1);
 
-    // 3. ECPay delivers the payment result to ReturnURL (JSON + AES Data).
+    // 3. ECPay delivers the payment result to ReturnURL (JSON + AES Data);
+    //    answered exactly `1|OK`. A callback encrypted under a WRONG key
+    //    must be rejected (`0|ERR`) — proving the AES gate does real work.
     let return_url = format!("{merchant_url}return");
     let callback = serde_json::json!({
         "MerchantID": MERCHANT_ID, "RqHeader": {"Timestamp": 3},
@@ -756,7 +807,18 @@ async fn ecpg_full_flow_from_token_to_paid_query() {
     assert_eq!(st, 200);
     assert_eq!(reply, "1|OK", "ECPG ReturnURL must be answered 1|OK");
 
-    // 4. Authoritative paid state via the query API.
+    let forged = serde_json::json!({
+        "MerchantID": MERCHANT_ID, "TransCode": 1, "TransMsg": "",
+        "Data": ecpay::crypto::encrypt_data(
+            &serde_json::json!({"RtnCode": 1, "MerchantTradeNo": "FORGED"}),
+            b"XXXXXXXXXXXXXXXX", PAY_IV.as_bytes()).unwrap(),
+    });
+    let (st, reply) = post_json(&return_url, forged.to_string()).await;
+    assert_eq!(st, 200);
+    assert_eq!(reply, "0|ERR", "wrong-key callback must be rejected");
+
+    // 4. The query API reflects the payment state (set by CreatePayment —
+    //    the ReturnURL handling is proven by the 1|OK/0|ERR asserts above).
     let trade = client
         .ecpg_query_trade(&ecpay::ecpg::EcpgTradeRefInput {
             merchant_trade_no: "E2E0000001".into(),
@@ -764,7 +826,7 @@ async fn ecpg_full_flow_from_token_to_paid_query() {
         })
         .await
         .expect("query");
-    assert_eq!(trade["TradeStatus"], "1", "paid");
+    assert_eq!(trade["TradeStatus"], "1");
 }
 
 // ===========================================================================
