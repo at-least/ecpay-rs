@@ -1,4 +1,4 @@
-//! Hermetic wire-conformance tests for the B2B e-invoice module
+//! Hermetic wire-conformance tests for ALL 23 B2B e-invoice endpoints
 //! (`src/invoice_b2b.rs`). Every call must produce ECPay's verbatim
 //! `{MerchantID, RqHeader, Data}` envelope — the B2B `RqHeader` with exactly
 //! `Timestamp` + `RqID` + `Revision: "1.0.0"` — and a `Data` payload whose
@@ -108,6 +108,29 @@ fn assert_envelope_and_decrypt(path: &str, body: &[u8], action: &str) -> serde_j
         B2B_IV,
     )
     .expect("Data decrypts with the B2C invoice keys")
+}
+
+/// Asserts the decrypted `Data` carries EXACTLY `keys` (sorted compare) —
+/// the strongest wire pin: a serde rename typo, a new/removed field, or a
+/// stray default breaks the set, exactly as a real ECPay payload mismatch
+/// would.
+fn assert_data_keys(data: &serde_json::Value, keys: &[&str]) {
+    let mut got: Vec<String> = data
+        .as_object()
+        .expect("Data is an object")
+        .keys()
+        .cloned()
+        .collect();
+    got.sort();
+    let mut want: Vec<&str> = keys.to_vec();
+    want.sort();
+    assert_eq!(got, want, "exact Data key set");
+    assert_eq!(data["MerchantID"], MERCHANT_ID, "Data MerchantID rides too");
+}
+
+/// The generic query/confirm reply the untyped endpoints pass through.
+fn ok_reply(rtn_msg: &str) -> (u16, String, Vec<u8>) {
+    aes_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": rtn_msg}))
 }
 
 /// Issue: the full PHP-example payload rides verbatim inside `Data`, and the
@@ -393,3 +416,333 @@ async fn mismatched_data_merchant_id_is_rejected_before_the_wire() {
         "no request may be sent for a locally-rejected envelope"
     );
 }
+// --- The remaining 18 endpoints: each pinned to its exact `Data` key set
+// (sorted) and its action path, in the module's own order. ---
+
+macro_rules! b2b_wire_test {
+    ($name:ident, $action:literal, $keys:expr, $call:expr) => {
+        #[tokio::test]
+        async fn $name() {
+            let srv = spawn_http_server(move |path, body| {
+                let data = assert_envelope_and_decrypt(path, body, $action);
+                assert_data_keys(&data, $keys);
+                ok_reply("測試成功")
+            });
+            let client = b2b_client(srv);
+            let out = ($call)(&client)
+                .await
+                .expect(concat!(stringify!($name), " succeeds"));
+            assert_eq!(out["RtnCode"], 1, "untyped output passes Data through");
+            assert_eq!(out["RtnMsg"], "測試成功");
+        }
+    };
+}
+
+use ecpay::invoice_b2b::*;
+
+async fn call_issue_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.issue_confirm(&IssueConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    issue_confirm_pins_the_exact_data_key_set,
+    "IssueConfirm",
+    &["MerchantID", "InvoiceNumber", "InvoiceDate"],
+    call_issue_confirm
+);
+
+async fn call_allowance_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.allowance_confirm(&AllowanceConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        allowance_no: "2109011200000001".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    allowance_confirm_pins_the_exact_data_key_set,
+    "AllowanceConfirm",
+    &["MerchantID", "AllowanceNo"],
+    call_allowance_confirm
+);
+
+async fn call_cancel_allowance(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.cancel_allowance(&CancelAllowanceInput {
+        merchant_id: MERCHANT_ID.into(),
+        allowance_no: "2109011200000001".into(),
+        reason: "Testing reason".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    cancel_allowance_pins_the_exact_data_key_set,
+    "CancelAllowance",
+    &["MerchantID", "AllowanceNo", "Reason"],
+    call_cancel_allowance
+);
+
+async fn call_cancel_allowance_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.cancel_allowance_confirm(&CancelAllowanceConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        allowance_no: "2109011200000001".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    cancel_allowance_confirm_pins_the_exact_data_key_set,
+    "CancelAllowanceConfirm",
+    &["MerchantID", "AllowanceNo"],
+    call_cancel_allowance_confirm
+);
+
+async fn call_invalid_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.invalid_confirm(&InvalidConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    invalid_confirm_pins_the_exact_data_key_set,
+    "InvalidConfirm",
+    &["MerchantID", "InvoiceNumber", "InvoiceDate"],
+    call_invalid_confirm
+);
+
+async fn call_notify(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.notify(&NotifyInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_date: "2026-09-01".into(),
+        invoice_number: "LP30000931".into(),
+        notify_mail: "test-buyer@ecpay.com.tw".into(),
+        invoice_tag: "1".into(),
+        notified: "C".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    notify_pins_the_exact_data_key_set,
+    "Notify",
+    &[
+        "MerchantID",
+        "InvoiceDate",
+        "InvoiceNumber",
+        "NotifyMail",
+        "InvoiceTag",
+        "Notified"
+    ],
+    call_notify
+);
+
+async fn call_reject(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.reject(&RejectInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+        reason: "Testing reason".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    reject_pins_the_exact_data_key_set,
+    "Reject",
+    &["MerchantID", "InvoiceNumber", "InvoiceDate", "Reason"],
+    call_reject
+);
+
+async fn call_reject_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.reject_confirm(&RejectConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    reject_confirm_pins_the_exact_data_key_set,
+    "RejectConfirm",
+    &["MerchantID", "InvoiceNumber", "InvoiceDate"],
+    call_reject_confirm
+);
+
+async fn call_get_issue_b2b(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_issue_b2b(&GetIssueInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_category: 0,
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_issue_b2b_pins_the_exact_data_key_set,
+    "GetIssue",
+    &[
+        "MerchantID",
+        "InvoiceCategory",
+        "InvoiceNumber",
+        "InvoiceDate"
+    ],
+    call_get_issue_b2b
+);
+
+async fn call_get_issue_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_issue_confirm(&GetIssueConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_category: 0,
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_issue_confirm_pins_the_exact_data_key_set,
+    "GetIssueConfirm",
+    &[
+        "MerchantID",
+        "InvoiceCategory",
+        "InvoiceNumber",
+        "InvoiceDate"
+    ],
+    call_get_issue_confirm
+);
+
+async fn call_get_invalid_b2b(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_invalid_b2b(&GetInvalidInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_category: 0,
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_invalid_b2b_pins_the_exact_data_key_set,
+    "GetInvalid",
+    &[
+        "MerchantID",
+        "InvoiceCategory",
+        "InvoiceNumber",
+        "InvoiceDate"
+    ],
+    call_get_invalid_b2b
+);
+
+async fn call_get_invalid_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_invalid_confirm(&GetInvalidConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_category: 0,
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_invalid_confirm_pins_the_exact_data_key_set,
+    "GetInvalidConfirm",
+    &[
+        "MerchantID",
+        "InvoiceCategory",
+        "InvoiceNumber",
+        "InvoiceDate"
+    ],
+    call_get_invalid_confirm
+);
+
+async fn call_get_allowance_b2b(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_allowance_b2b(&GetAllowanceInput {
+        merchant_id: MERCHANT_ID.into(),
+        allowance_no: "2109011200000001".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_allowance_b2b_pins_the_exact_data_key_set,
+    "GetAllowance",
+    &["MerchantID", "AllowanceNo"],
+    call_get_allowance_b2b
+);
+
+async fn call_get_allowance_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_allowance_confirm(&GetAllowanceConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        allowance_no: "2109011200000001".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_allowance_confirm_pins_the_exact_data_key_set,
+    "GetAllowanceConfirm",
+    &["MerchantID", "AllowanceNo"],
+    call_get_allowance_confirm
+);
+
+async fn call_get_allowance_invalid_b2b(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_allowance_invalid_b2b(&GetAllowanceInvalidInput {
+        merchant_id: MERCHANT_ID.into(),
+        allowance_no: "2109011200000001".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_allowance_invalid_b2b_pins_the_exact_data_key_set,
+    "GetAllowanceInvalid",
+    &["MerchantID", "AllowanceNo"],
+    call_get_allowance_invalid_b2b
+);
+
+async fn call_get_allowance_invalid_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_allowance_invalid_confirm(&GetAllowanceInvalidConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        allowance_no: "2109011200000001".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_allowance_invalid_confirm_pins_the_exact_data_key_set,
+    "GetAllowanceInvalidConfirm",
+    &["MerchantID", "AllowanceNo"],
+    call_get_allowance_invalid_confirm
+);
+
+async fn call_get_reject(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_reject(&GetRejectInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+        reason: "Testing reason".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_reject_pins_the_exact_data_key_set_and_its_odd_reason_field,
+    "GetReject",
+    // 官方 PHP 範例在這個查詢端點的 Data 也帶 Reason（照抄，見模組註解）。
+    &["MerchantID", "InvoiceNumber", "InvoiceDate", "Reason"],
+    call_get_reject
+);
+
+async fn call_get_reject_confirm(c: &Ecpay) -> ecpay::Result<serde_json::Value> {
+    c.get_reject_confirm(&GetRejectConfirmInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_category: 0,
+        invoice_number: "LP30000931".into(),
+        invoice_date: "2026-09-01".into(),
+    })
+    .await
+}
+b2b_wire_test!(
+    get_reject_confirm_pins_the_exact_data_key_set,
+    "GetRejectConfirm",
+    &[
+        "MerchantID",
+        "InvoiceCategory",
+        "InvoiceNumber",
+        "InvoiceDate"
+    ],
+    call_get_reject_confirm
+);
