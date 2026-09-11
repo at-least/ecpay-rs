@@ -330,72 +330,7 @@ impl Ecpay {
         }
 
         // --- 付款方式延伸參數:組別歸屬檢查 ---
-        // The official SDK merges exactly one group set per ChoosePayment; a
-        // field set for an inactive group would be silently signed and sent,
-        // so the typed API rejects it loudly instead.
-        let is_all_or =
-            |a: ChoosePayment| p.choose_payment == ChoosePayment::All || p.choose_payment == a;
-        let atm_group = is_all_or(ChoosePayment::Atm);
-        let cvs_barcode_group = is_all_or(ChoosePayment::Cvs) || is_all_or(ChoosePayment::Barcode);
-        let credit_group = is_all_or(ChoosePayment::Credit);
-
-        let group = |name: &str| -> Error {
-            Error::Validation(format!(
-                "{name} is only valid with its ChoosePayment group (the official SDK would not send it)."
-            ))
-        };
-        if p.expire_date.is_some() && !atm_group {
-            return Err(group("ExpireDate"));
-        }
-        let cvs_fields_set = p.store_expire_date.is_some()
-            || p.desc_1.is_some()
-            || p.desc_2.is_some()
-            || p.desc_3.is_some()
-            || p.desc_4.is_some();
-        if cvs_fields_set && !cvs_barcode_group {
-            return Err(group(
-                "a CVS/BARCODE extend field (StoreExpireDate/Desc_1..4)",
-            ));
-        }
-        if (p.payment_info_url.is_some() || p.client_redirect_url.is_some())
-            && !atm_group
-            && !cvs_barcode_group
-        {
-            return Err(group(
-                "PaymentInfoURL/ClientRedirectURL (ATM/CVS/BARCODE groups)",
-            ));
-        }
-
-        // --- 信用卡延伸參數 (三擇一) ---
-        let one_off = p.redeem.is_some() || p.union_pay.is_some(); // 一次付清
-        let installment = p.credit_installment.is_some(); // 分期付款
-        let periodic = p.period_amount.is_some()
-            || p.period_type.is_some()
-            || p.frequency.is_some()
-            || p.exec_times.is_some()
-            || p.period_return_url.is_some(); // 定期定額
-        if (p.binding_card.is_some() || p.merchant_member_id.is_some()) && !credit_group {
-            return Err(group(
-                "a Credit bind-card field (BindingCard/MerchantMemberID)",
-            ));
-        }
-        if (one_off || installment || periodic) && !credit_group {
-            return Err(group(
-                "a Credit payment-plan field (Redeem/UnionPay/CreditInstallment/Period*)",
-            ));
-        }
-        // The official SDK picks one plan group via an if/elif chain; setting
-        // more than one silently signs the mixture. Reject it instead.
-        if [one_off, installment, periodic]
-            .iter()
-            .filter(|b| **b)
-            .count()
-            > 1
-        {
-            return Err(Error::Validation(
-                "choose only one of Redeem/UnionPay (一次付清), CreditInstallment (分期付款), or the Period* group (定期定額).".into(),
-            ));
-        }
+        validate_groups(p)?;
 
         // --- 電子發票延伸參數 ---
         // InvoiceMark: `Y` 開立發票 / `N` 不開立 (official samples send `N`
@@ -415,126 +350,11 @@ impl Ecpay {
             }
             _ => {}
         }
-        let mut m: HashMap<String, String> = HashMap::new();
-        m.insert("MerchantID".to_owned(), self.merchant_id.clone());
-        m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
-        insert_optional_str(&mut m, "StoreID", &p.store_id);
-        m.insert(
-            "MerchantTradeDate".to_owned(),
-            p.merchant_trade_date.clone(),
-        );
-        m.insert("PaymentType".to_owned(), p.payment_type.clone());
-        m.insert("TotalAmount".to_owned(), p.total_amount.to_string());
-        m.insert("TradeDesc".to_owned(), p.trade_desc.clone());
-        m.insert("ItemName".to_owned(), p.item_name.clone());
-        m.insert("ReturnURL".to_owned(), p.return_url.clone());
-        m.insert(
-            "ChoosePayment".to_owned(),
-            p.choose_payment.as_str().to_owned(),
-        );
-        insert_optional_str(&mut m, "ClientBackURL", &p.client_back_url);
-        insert_optional_str(&mut m, "ItemURL", &p.item_url);
-        insert_optional_str(&mut m, "Remark", &p.remark);
-        insert_optional_str(&mut m, "ChooseSubPayment", &p.choose_sub_payment);
-        insert_optional_str(&mut m, "OrderResultURL", &p.order_result_url);
-        insert_optional_str(&mut m, "NeedExtraPaidInfo", &p.need_extra_paid_info);
-        insert_optional_str(&mut m, "DeviceSource", &p.device_source);
-        insert_optional_str(&mut m, "IgnorePayment", &p.ignore_payment);
-        insert_optional_str(&mut m, "PlatformID", &p.platform_id);
-        insert_optional_str(&mut m, "CustomField1", &p.custom_field1);
-        insert_optional_str(&mut m, "CustomField2", &p.custom_field2);
-        insert_optional_str(&mut m, "CustomField3", &p.custom_field3);
-        insert_optional_str(&mut m, "CustomField4", &p.custom_field4);
-        m.insert("EncryptType".to_owned(), p.encrypt_type.to_string());
 
-        if atm_group {
-            insert_optional_int(&mut m, "ExpireDate", &p.expire_date);
-        }
-        if cvs_barcode_group {
-            insert_optional_int(&mut m, "StoreExpireDate", &p.store_expire_date);
-            insert_optional_str(&mut m, "Desc_1", &p.desc_1);
-            insert_optional_str(&mut m, "Desc_2", &p.desc_2);
-            insert_optional_str(&mut m, "Desc_3", &p.desc_3);
-            insert_optional_str(&mut m, "Desc_4", &p.desc_4);
-        }
-        // PaymentInfoURL/ClientRedirectURL are shared by the ATM and the
-        // CVS/BARCODE groups.
-        if atm_group || cvs_barcode_group {
-            insert_optional_str(&mut m, "PaymentInfoURL", &p.payment_info_url);
-            insert_optional_str(&mut m, "ClientRedirectURL", &p.client_redirect_url);
-        }
-        if credit_group {
-            insert_optional_int(&mut m, "BindingCard", &p.binding_card);
-            insert_optional_str(&mut m, "MerchantMemberID", &p.merchant_member_id);
-            if let Some(plan) = credit_plan_pairs(p) {
-                for (k, v) in plan {
-                    m.insert(k, v);
-                }
-            }
-        }
-        // Language (CHT/ENG/KOR/JPN/CHI) is a common optional param in the
-        // current spec, valid for every payment method.
-        insert_optional_str(&mut m, "Language", &p.language);
-
-        if p.invoice_mark.is_some() && !mark.is_empty() {
-            m.insert("InvoiceMark".to_owned(), mark.to_owned());
-        }
-
-        if let Some(inv) = &p.invoice {
-            validate_invoice(inv)?;
-            if mark != "Y" {
-                // invoice present with no explicit mark: auto-fill Y.
-                m.insert(
-                    "InvoiceMark".to_owned(),
-                    crate::payment::INVOICE_MARK.to_owned(),
-                );
-            }
-            m.insert("RelateNumber".to_owned(), inv.relate_number.clone());
-            insert_optional_str(&mut m, "CustomerID", &inv.customer_id);
-            insert_optional_str(&mut m, "CustomerIdentifier", &inv.customer_identifier);
-            // The six free-text invoice fields are urlencoded before signing
-            // (the official SDK does too), but NOT lowercased — see README.
-            insert_escaped(&mut m, "CustomerName", &inv.customer_name);
-            insert_escaped(&mut m, "CustomerAddr", &inv.customer_addr);
-            insert_optional_str(&mut m, "CustomerPhone", &inv.customer_phone);
-            insert_escaped(&mut m, "CustomerEmail", &inv.customer_email);
-            insert_optional_str(&mut m, "ClearanceMark", &inv.clearance_mark);
-            m.insert("TaxType".to_owned(), inv.tax_type.clone());
-            insert_optional_str(&mut m, "CarruerType", &inv.carruer_type);
-            insert_optional_str(&mut m, "CarruerNum", &inv.carruer_num);
-            m.insert("Donation".to_owned(), inv.donation.clone());
-            insert_optional_str(&mut m, "LoveCode", &inv.love_code);
-            m.insert("Print".to_owned(), inv.print.clone());
-            m.insert(
-                "InvoiceItemName".to_owned(),
-                query_escape(&inv.invoice_item_name),
-            );
-            m.insert(
-                "InvoiceItemCount".to_owned(),
-                inv.invoice_item_count.clone(),
-            );
-            m.insert(
-                "InvoiceItemWord".to_owned(),
-                query_escape(&inv.invoice_item_word),
-            );
-            m.insert(
-                "InvoiceItemPrice".to_owned(),
-                inv.invoice_item_price.clone(),
-            );
-            insert_optional_str(&mut m, "InvoiceItemTaxType", &inv.invoice_item_tax_type);
-            insert_escaped(&mut m, "InvoiceRemark", &inv.invoice_remark);
-            m.insert("DelayDay".to_owned(), inv.delay_day.to_string());
-            m.insert("InvType".to_owned(), inv.inv_type.clone());
-        }
-
-        for (k, v) in &p.extra {
-            if m.contains_key(k) || k == "CheckMacValue" {
-                return Err(Error::Validation(format!(
-                    "extra parameter {k:?} collides with a modeled field"
-                )));
-            }
-            m.insert(k.clone(), v.clone());
-        }
+        let mut m = build_base_map(p, &self.merchant_id);
+        add_group_fields(&mut m, p);
+        add_invoice_fields(&mut m, p, mark)?;
+        merge_extras(&mut m, &p.extra)?;
 
         let mac = self.generate_check_value(&m)?;
         m.insert("CheckMacValue".to_owned(), mac);
@@ -547,6 +367,222 @@ impl Ecpay {
             action,
         })
     }
+}
+
+/// 組別歸屬檢查:the official SDK merges exactly one group set per
+/// ChoosePayment; a field set for an inactive group would be silently signed
+/// and sent, so the typed API rejects it loudly instead.
+fn validate_groups(p: &AioCheckOutParams) -> Result<()> {
+    let is_all_or =
+        |a: ChoosePayment| p.choose_payment == ChoosePayment::All || p.choose_payment == a;
+    let atm_group = is_all_or(ChoosePayment::Atm);
+    let cvs_barcode_group = is_all_or(ChoosePayment::Cvs) || is_all_or(ChoosePayment::Barcode);
+    let credit_group = is_all_or(ChoosePayment::Credit);
+
+    let group = |name: &str| -> Error {
+        Error::Validation(format!(
+            "{name} is only valid with its ChoosePayment group (the official SDK would not send it)."
+        ))
+    };
+    if p.expire_date.is_some() && !atm_group {
+        return Err(group("ExpireDate"));
+    }
+    let cvs_fields_set = p.store_expire_date.is_some()
+        || p.desc_1.is_some()
+        || p.desc_2.is_some()
+        || p.desc_3.is_some()
+        || p.desc_4.is_some();
+    if cvs_fields_set && !cvs_barcode_group {
+        return Err(group(
+            "a CVS/BARCODE extend field (StoreExpireDate/Desc_1..4)",
+        ));
+    }
+    if (p.payment_info_url.is_some() || p.client_redirect_url.is_some())
+        && !atm_group
+        && !cvs_barcode_group
+    {
+        return Err(group(
+            "PaymentInfoURL/ClientRedirectURL (ATM/CVS/BARCODE groups)",
+        ));
+    }
+
+    // --- 信用卡延伸參數 (三擇一) ---
+    let one_off = p.redeem.is_some() || p.union_pay.is_some(); // 一次付清
+    let installment = p.credit_installment.is_some(); // 分期付款
+    let periodic = p.period_amount.is_some()
+        || p.period_type.is_some()
+        || p.frequency.is_some()
+        || p.exec_times.is_some()
+        || p.period_return_url.is_some(); // 定期定額
+    if (p.binding_card.is_some() || p.merchant_member_id.is_some()) && !credit_group {
+        return Err(group(
+            "a Credit bind-card field (BindingCard/MerchantMemberID)",
+        ));
+    }
+    if (one_off || installment || periodic) && !credit_group {
+        return Err(group(
+            "a Credit payment-plan field (Redeem/UnionPay/CreditInstallment/Period*)",
+        ));
+    }
+    // The official SDK picks one plan group via an if/elif chain; setting
+    // more than one silently signs the mixture. Reject it instead.
+    if [one_off, installment, periodic]
+        .iter()
+        .filter(|b| **b)
+        .count()
+        > 1
+    {
+        return Err(Error::Validation(
+            "choose only one of Redeem/UnionPay (一次付清), CreditInstallment (分期付款), or the Period* group (定期定額).".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// The base (payment-method-independent) request fields.
+fn build_base_map(p: &AioCheckOutParams, merchant_id: &str) -> HashMap<String, String> {
+    let mut m: HashMap<String, String> = HashMap::new();
+    m.insert("MerchantID".to_owned(), merchant_id.to_owned());
+    m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
+    insert_optional_str(&mut m, "StoreID", &p.store_id);
+    m.insert(
+        "MerchantTradeDate".to_owned(),
+        p.merchant_trade_date.clone(),
+    );
+    m.insert("PaymentType".to_owned(), p.payment_type.clone());
+    m.insert("TotalAmount".to_owned(), p.total_amount.to_string());
+    m.insert("TradeDesc".to_owned(), p.trade_desc.clone());
+    m.insert("ItemName".to_owned(), p.item_name.clone());
+    m.insert("ReturnURL".to_owned(), p.return_url.clone());
+    m.insert(
+        "ChoosePayment".to_owned(),
+        p.choose_payment.as_str().to_owned(),
+    );
+    insert_optional_str(&mut m, "ClientBackURL", &p.client_back_url);
+    insert_optional_str(&mut m, "ItemURL", &p.item_url);
+    insert_optional_str(&mut m, "Remark", &p.remark);
+    insert_optional_str(&mut m, "ChooseSubPayment", &p.choose_sub_payment);
+    insert_optional_str(&mut m, "OrderResultURL", &p.order_result_url);
+    insert_optional_str(&mut m, "NeedExtraPaidInfo", &p.need_extra_paid_info);
+    insert_optional_str(&mut m, "DeviceSource", &p.device_source);
+    insert_optional_str(&mut m, "IgnorePayment", &p.ignore_payment);
+    insert_optional_str(&mut m, "PlatformID", &p.platform_id);
+    insert_optional_str(&mut m, "CustomField1", &p.custom_field1);
+    insert_optional_str(&mut m, "CustomField2", &p.custom_field2);
+    insert_optional_str(&mut m, "CustomField3", &p.custom_field3);
+    insert_optional_str(&mut m, "CustomField4", &p.custom_field4);
+    m.insert("EncryptType".to_owned(), p.encrypt_type.to_string());
+    m
+}
+
+/// The active payment-method group's extend fields, plus the common
+/// `Language` param (CHT/ENG/KOR/JPN/CHI, valid for every payment method).
+fn add_group_fields(m: &mut HashMap<String, String>, p: &AioCheckOutParams) {
+    let is_all_or =
+        |a: ChoosePayment| p.choose_payment == ChoosePayment::All || p.choose_payment == a;
+    let atm_group = is_all_or(ChoosePayment::Atm);
+    let cvs_barcode_group = is_all_or(ChoosePayment::Cvs) || is_all_or(ChoosePayment::Barcode);
+    let credit_group = is_all_or(ChoosePayment::Credit);
+
+    if atm_group {
+        insert_optional_int(m, "ExpireDate", &p.expire_date);
+    }
+    if cvs_barcode_group {
+        insert_optional_int(m, "StoreExpireDate", &p.store_expire_date);
+        insert_optional_str(m, "Desc_1", &p.desc_1);
+        insert_optional_str(m, "Desc_2", &p.desc_2);
+        insert_optional_str(m, "Desc_3", &p.desc_3);
+        insert_optional_str(m, "Desc_4", &p.desc_4);
+    }
+    // PaymentInfoURL/ClientRedirectURL are shared by the ATM and the
+    // CVS/BARCODE groups.
+    if atm_group || cvs_barcode_group {
+        insert_optional_str(m, "PaymentInfoURL", &p.payment_info_url);
+        insert_optional_str(m, "ClientRedirectURL", &p.client_redirect_url);
+    }
+    if credit_group {
+        insert_optional_int(m, "BindingCard", &p.binding_card);
+        insert_optional_str(m, "MerchantMemberID", &p.merchant_member_id);
+        if let Some(plan) = credit_plan_pairs(p) {
+            for (k, v) in plan {
+                m.insert(k, v);
+            }
+        }
+    }
+    insert_optional_str(m, "Language", &p.language);
+}
+
+/// `InvoiceMark` (when set explicitly) plus the invoice block: validate, then
+/// build the invoice fields. The six free-text invoice fields are urlencoded
+/// before signing (the official SDK does too), but NOT lowercased — see
+/// README.
+fn add_invoice_fields(
+    m: &mut HashMap<String, String>,
+    p: &AioCheckOutParams,
+    mark: &str,
+) -> Result<()> {
+    if p.invoice_mark.is_some() && !mark.is_empty() {
+        m.insert("InvoiceMark".to_owned(), mark.to_owned());
+    }
+    if let Some(inv) = &p.invoice {
+        validate_invoice(inv)?;
+        if mark != "Y" {
+            // invoice present with no explicit mark: auto-fill Y.
+            m.insert(
+                "InvoiceMark".to_owned(),
+                crate::payment::INVOICE_MARK.to_owned(),
+            );
+        }
+        m.insert("RelateNumber".to_owned(), inv.relate_number.clone());
+        insert_optional_str(m, "CustomerID", &inv.customer_id);
+        insert_optional_str(m, "CustomerIdentifier", &inv.customer_identifier);
+        insert_escaped(m, "CustomerName", &inv.customer_name);
+        insert_escaped(m, "CustomerAddr", &inv.customer_addr);
+        insert_optional_str(m, "CustomerPhone", &inv.customer_phone);
+        insert_escaped(m, "CustomerEmail", &inv.customer_email);
+        insert_optional_str(m, "ClearanceMark", &inv.clearance_mark);
+        m.insert("TaxType".to_owned(), inv.tax_type.clone());
+        insert_optional_str(m, "CarruerType", &inv.carruer_type);
+        insert_optional_str(m, "CarruerNum", &inv.carruer_num);
+        m.insert("Donation".to_owned(), inv.donation.clone());
+        insert_optional_str(m, "LoveCode", &inv.love_code);
+        m.insert("Print".to_owned(), inv.print.clone());
+        m.insert(
+            "InvoiceItemName".to_owned(),
+            query_escape(&inv.invoice_item_name),
+        );
+        m.insert(
+            "InvoiceItemCount".to_owned(),
+            inv.invoice_item_count.clone(),
+        );
+        m.insert(
+            "InvoiceItemWord".to_owned(),
+            query_escape(&inv.invoice_item_word),
+        );
+        m.insert(
+            "InvoiceItemPrice".to_owned(),
+            inv.invoice_item_price.clone(),
+        );
+        insert_optional_str(m, "InvoiceItemTaxType", &inv.invoice_item_tax_type);
+        insert_escaped(m, "InvoiceRemark", &inv.invoice_remark);
+        m.insert("DelayDay".to_owned(), inv.delay_day.to_string());
+        m.insert("InvType".to_owned(), inv.inv_type.clone());
+    }
+    Ok(())
+}
+
+/// Reject `extra` parameters that collide with a modeled field or would
+/// forge a signature.
+fn merge_extras(m: &mut HashMap<String, String>, extra: &BTreeMap<String, String>) -> Result<()> {
+    for (k, v) in extra {
+        if m.contains_key(k) || k == "CheckMacValue" {
+            return Err(Error::Validation(format!(
+                "extra parameter {k:?} collides with a modeled field"
+            )));
+        }
+        m.insert(k.clone(), v.clone());
+    }
+    Ok(())
 }
 
 /// The active Credit plan group's wire pairs (Python's if/elif chain over
