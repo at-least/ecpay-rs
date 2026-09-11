@@ -396,6 +396,18 @@ impl Ecpay {
         Ok(query)
     }
 
+    /// Signs `m` in place with `CheckMacValue` and POSTs it to `endpoint`;
+    /// callers decode the raw body themselves (JSON / query-string / Big5).
+    async fn post_signed_form(
+        &self,
+        endpoint: String,
+        m: &mut HashMap<String, String>,
+    ) -> Result<Vec<u8>> {
+        let mac = self.generate_check_value(m)?;
+        m.insert("CheckMacValue".to_owned(), mac);
+        self.send_post_form(&endpoint, m).await
+    }
+
     /// Shared request map for [`Self::order_search`] and
     /// [`Self::query_payment_info`], which take the same `OrderSearchParams`
     /// and only differ in endpoint.
@@ -450,11 +462,8 @@ impl Ecpay {
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
-        let mac = self.generate_check_value(&m)?;
-        m.insert("CheckMacValue".to_owned(), mac);
-
         let endpoint = format!("{}QueryCreditCardPeriodInfo", self.payment_base_url());
-        let body = self.send_post_form(&endpoint, &m).await?;
+        let body = self.post_signed_form(endpoint, &mut m).await?;
         Ok(serde_json::from_slice(&body)?)
     }
 
@@ -476,11 +485,8 @@ impl Ecpay {
         m.insert("Action".to_owned(), p.action.clone());
         m.insert("TotalAmount".to_owned(), p.total_amount.to_string());
         insert_optional_str(&mut m, "PlatformID", &p.platform_id);
-        let mac = self.generate_check_value(&m)?;
-        m.insert("CheckMacValue".to_owned(), mac);
-
         let endpoint = format!("{}DoAction", self.credit_base_url());
-        let body = self.send_post_form(&endpoint, &m).await?;
+        let body = self.post_signed_form(endpoint, &mut m).await?;
         Ok(parse_qsl(&String::from_utf8_lossy(&body)))
     }
 
@@ -511,13 +517,9 @@ impl Ecpay {
         insert_optional_str(&mut m, "PaymentStatus", &p.payment_status);
         insert_optional_str(&mut m, "AllocateStatus", &p.allocate_status);
         m.insert("MediaFormated".to_owned(), p.media_formated.clone());
-        let mac = self.generate_check_value(&m)?;
-        m.insert("CheckMacValue".to_owned(), mac);
-
         let endpoint = format!("{}TradeNoAio", self.vendor_base_url());
-        let body = self.send_post_form(&endpoint, &m).await?;
-        let (text, _, _) = encoding_rs::BIG5.decode(&body);
-        Ok(text.into_owned())
+        let body = self.post_signed_form(endpoint, &mut m).await?;
+        Ok(decode_big5(&body))
     }
 
     /// `SearchSingleTransaction.search_single_transaction`(單筆交易查詢):
@@ -534,11 +536,8 @@ impl Ecpay {
             "CreditCheckCode".to_owned(),
             p.credit_check_code.to_string(),
         );
-        let mac = self.generate_check_value(&m)?;
-        m.insert("CheckMacValue".to_owned(), mac);
-
         let endpoint = format!("{}QueryTrade/V2", self.credit_base_url());
-        let body = self.send_post_form(&endpoint, &m).await?;
+        let body = self.post_signed_form(endpoint, &mut m).await?;
         Ok(serde_json::from_slice(&body)?)
     }
 
@@ -558,13 +557,9 @@ impl Ecpay {
         m.insert("PayDateType".to_owned(), p.pay_date_type.clone());
         m.insert("StartDate".to_owned(), p.start_date.clone());
         m.insert("EndDate".to_owned(), p.end_date.clone());
-        let mac = self.generate_check_value(&m)?;
-        m.insert("CheckMacValue".to_owned(), mac);
-
         let endpoint = format!("{}FundingReconDetail", self.credit_base_url());
-        let body = self.send_post_form(&endpoint, &m).await?;
-        let (text, _, _) = encoding_rs::BIG5.decode(&body);
-        Ok(text.into_owned())
+        let body = self.post_signed_form(endpoint, &mut m).await?;
+        Ok(decode_big5(&body))
     }
 
     /// `CreditCardPeriodAction.credit_card_period_action`(信用卡定期定額訂單
@@ -584,13 +579,17 @@ impl Ecpay {
         m.insert("Action".to_owned(), p.action.clone());
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
         insert_optional_str(&mut m, "PlatformID", &p.platform_id);
-        let mac = self.generate_check_value(&m)?;
-        m.insert("CheckMacValue".to_owned(), mac);
-
         let endpoint = format!("{}CreditCardPeriodAction", self.payment_base_url());
-        let body = self.send_post_form(&endpoint, &m).await?;
+        let body = self.post_signed_form(endpoint, &mut m).await?;
         Ok(parse_qsl(&String::from_utf8_lossy(&body)))
     }
+}
+
+/// The official SDK sets `response.encoding='big5'` for the download
+/// endpoints. Undecodable bytes become U+FFFD rather than an error.
+fn decode_big5(body: &[u8]) -> String {
+    let (text, _, _) = encoding_rs::BIG5.decode(body);
+    text.into_owned()
 }
 
 // --- Go-port compatibility surface (QueryTradeInfo with a typed output) ---
@@ -653,5 +652,30 @@ impl Ecpay {
             custom_field3: get("CustomField3"),
             custom_field4: get("CustomField4"),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_big5;
+
+    #[test]
+    fn big5_decodes_chinese_and_passes_ascii() {
+        assert_eq!(decode_big5(b"hello"), "hello");
+        // "X bef" — the word 全中文 in Big5.
+        let big5_quan_zhong_wen = [0xA5, 0xFE, 0xA4, 0xA4, 0xA4, 0xE5];
+        assert_eq!(
+            decode_big5(&big5_quan_zhong_wen),
+            "\u{5168}\u{4E2D}\u{6587}"
+        );
+    }
+
+    #[test]
+    fn big5_invalid_bytes_become_replacement_chars() {
+        // 0x81/0xFF have no Big5 mapping on their own; encoding_rs yields
+        // U+FFFD. (A leading 0xFF 0xFE pair is instead the UTF-16LE BOM and
+        // gets stripped by decode() — BOM sniffing, not Big5 decoding.)
+        assert_eq!(decode_big5(&[0x81]), "\u{FFFD}");
+        assert_eq!(decode_big5(&[0xFF]), "\u{FFFD}");
     }
 }
