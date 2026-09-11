@@ -90,6 +90,29 @@ pub(crate) fn html_escape(s: &str) -> String {
     out
 }
 
+/// Port of `ExtendFunction.gen_html_post_form`: an auto-submitting HTML form
+/// (id `data_set`) that sends the browser to ECPay's page — shared by the AIO
+/// checkout form and the logistics forms. Attribute values are HTML-escaped
+/// (see [`html_escape`]).
+pub(crate) fn render_auto_submit_form(action: &str, pairs: &[(String, String)]) -> String {
+    let mut html = format!(
+        "<form id=\"data_set\" action=\"{}\" method=\"post\">",
+        html_escape(action)
+    );
+    for (k, v) in pairs {
+        html.push_str(&format!(
+            "<input type=\"hidden\" name=\"{}\" value=\"{}\" />",
+            html_escape(k),
+            html_escape(v)
+        ));
+    }
+    html.push_str(
+        "<script type=\"text/javascript\">document.getElementById(\"data_set\").submit();</script>",
+    );
+    html.push_str("</form>");
+    html
+}
+
 /// Go `url.Values.Encode()`: keys sorted alphabetically, each key and value
 /// QueryEscape'd, pairs joined by &.
 pub(crate) fn encode_query(pairs: &[(String, String)]) -> String {

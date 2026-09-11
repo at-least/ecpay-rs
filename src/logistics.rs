@@ -33,7 +33,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::client::{html_escape, post_form};
+use crate::client::{post_form, render_auto_submit_form};
 use crate::crypto::{check_mac_value, constant_time_eq, unix_now};
 use crate::error::{Error, Result};
 use crate::Ecpay;
@@ -63,22 +63,7 @@ impl LogisticsForm {
 
     /// Auto-submitting HTML form, same contract as the checkout form.
     pub fn html_form(&self) -> String {
-        let mut html = format!(
-            "<form id=\"data_set\" action=\"{}\" method=\"post\">",
-            html_escape(self.action())
-        );
-        for (k, v) in &self.pairs {
-            html.push_str(&format!(
-                "<input type=\"hidden\" name=\"{}\" value=\"{}\" />",
-                html_escape(k),
-                html_escape(v)
-            ));
-        }
-        html.push_str(
-            "<script type=\"text/javascript\">document.getElementById(\"data_set\").submit();</script>",
-        );
-        html.push_str("</form>");
-        html
+        render_auto_submit_form(self.action(), &self.pairs)
     }
 
     /// Consume into the raw key/value pairs (for your own form rendering).

@@ -13,7 +13,7 @@
 //! without lowercasing (the SDK's `.lower()` corrupts ASCII letter case in
 //! customer data; ECPay url-decodes the value either way).
 
-use crate::client::html_escape;
+use crate::client::render_auto_submit_form;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::crypto::query_escape;
@@ -275,20 +275,7 @@ impl AioCheckOut {
     /// are HTML-escaped (the official SDK does not, which breaks on `"` and
     /// is an injection vector).
     pub fn html_form(&self) -> String {
-        let mut html = format!(
-            "<form id=\"data_set\" action=\"{}\" method=\"post\">",
-            html_escape(self.action())
-        );
-        for (k, v) in &self.params {
-            html.push_str(&format!(
-                "<input type=\"hidden\" name=\"{}\" value=\"{}\" />",
-                html_escape(k),
-                html_escape(v)
-            ));
-        }
-        html.push_str("<script type=\"text/javascript\">document.getElementById(\"data_set\").submit();</script>");
-        html.push_str("</form>");
-        html
+        render_auto_submit_form(self.action(), &self.params)
     }
 
     /// Consume into the raw key/value pairs.
