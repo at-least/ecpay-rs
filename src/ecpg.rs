@@ -698,3 +698,31 @@ impl Ecpay {
         .await
     }
 }
+
+impl Ecpay {
+    /// 解密站內付 2.0 的 `ReturnURL` 付款結果回呼（JSON POST）。
+    ///
+    /// 官方處理順序（guides/21 引官方規格 9058.md）：
+    /// 1. 解析 JSON body（`{TransCode, TransMsg, Data}`）；
+    /// 2. 檢查外層 `TransCode == 1`（傳輸層；否則回 [`crate::Error::Transport`]）；
+    /// 3. 用 **PAYMENT 組** HashKey/HashIV AES 解密 `Data`；
+    /// 4. 內層 `RtnCode`（業務層，1 = 付款成功）由呼叫端自行檢查 —— 本方法
+    ///    刻意不做業務層判斷；
+    /// 5. 回應**純文字** `1|OK`（精確格式，含引號/小寫/換行都會觸發重送）。
+    ///
+    /// 與物流側的 [`Ecpay::decrypt_logistics_callback`] 對稱：差別只在金鑰
+    /// （ECPG 用 PAYMENT 組、物流用 LOGISTICS 組）。
+    pub fn decrypt_ecpg_callback<T: serde::de::DeserializeOwned>(
+        &self,
+        posted_json: &str,
+    ) -> Result<T> {
+        let res: crate::client::Response = crate::crypto::unmarshal(posted_json)?;
+        if res.trans_code != 1 {
+            return Err(Error::Transport {
+                code: res.trans_code,
+                msg: res.trans_msg,
+            });
+        }
+        crate::crypto::decrypt_data(&res.data, self.hash_key.as_bytes(), self.hash_iv.as_bytes())
+    }
+}
