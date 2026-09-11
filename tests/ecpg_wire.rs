@@ -396,6 +396,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
         .await
         .unwrap(),
         ec.ecpg_credit_card_period_action(&EcpgPeriodActionInput {
+            merchant_id: Some(MERCHANT.to_owned()), // Data MerchantID required (stage 10200051 otherwise)
             merchant_trade_no: "order1234567890".to_owned(),
             action: "ReAuth".to_owned(),
             ..Default::default()
@@ -403,6 +404,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
         .await
         .unwrap(),
         ec.ecpg_do_action(&EcpgDoActionInput {
+            merchant_id: Some(MERCHANT.to_owned()), // Data MerchantID required (stage 10200051 otherwise)
             merchant_trade_no: "order1234567890".to_owned(),
             trade_no: "ecpay-trade-no".to_owned(),
             action: "R".to_owned(),
@@ -486,10 +488,17 @@ async fn every_method_hits_its_exact_dual_domain_path() {
             "EndDate",
             "PaymentType",
         ]),
-        // CreditCardPeriodAction.
-        BTreeSet::from(["MerchantTradeNo", "Action"]),
-        // DoAction.
-        BTreeSet::from(["MerchantTradeNo", "TradeNo", "Action", "TotalAmount"]),
+        // CreditCardPeriodAction (Data MerchantID is REQUIRED on stage —
+        // 10200051 MerchantID Error otherwise, live-captured 2026-09).
+        BTreeSet::from(["MerchantID", "MerchantTradeNo", "Action"]),
+        // DoAction (Data MerchantID required, same reason).
+        BTreeSet::from([
+            "MerchantID",
+            "MerchantTradeNo",
+            "TradeNo",
+            "Action",
+            "TotalAmount",
+        ]),
         // QueryCreditTrade.
         BTreeSet::from(["MerchantTradeNo"]),
     ];
@@ -537,6 +546,7 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
 
     // 3) DoAction required fields ride verbatim.
     ec.ecpg_do_action(&EcpgDoActionInput {
+        merchant_id: Some(MERCHANT.to_owned()),
         merchant_trade_no: "no-3".to_owned(),
         trade_no: "ecpay-trade-no".to_owned(),
         action: "R".to_owned(),
