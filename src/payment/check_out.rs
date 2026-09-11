@@ -16,6 +16,10 @@
 use crate::client::render_auto_submit_form;
 use std::collections::{BTreeMap, HashMap};
 
+use super::params::{
+    insert_optional_int, insert_optional_int_seq, insert_optional_str, insert_optional_str_seq,
+    optional_str, py_len, required_str,
+};
 use crate::crypto::query_escape;
 use crate::error::{Error, Result};
 use crate::payment::ChoosePayment;
@@ -281,48 +285,6 @@ impl AioCheckOut {
     /// Consume into the raw key/value pairs.
     pub fn into_pairs(self) -> Vec<(String, String)> {
         self.params
-    }
-}
-
-/// Python `len()` on a `str` counts Unicode scalar values.
-fn py_len(s: &str) -> usize {
-    s.chars().count()
-}
-
-fn required_str(name: &str, v: &str, max: usize) -> Result<()> {
-    if v.is_empty() {
-        return Err(Error::Validation(format!("{name} content is required.")));
-    }
-    if py_len(v) > max {
-        return Err(Error::Validation(format!("{name} max langth is {max}.")));
-    }
-    Ok(())
-}
-
-fn optional_str(name: &str, v: &Option<String>, max: usize) -> Result<()> {
-    if let Some(v) = v {
-        if py_len(v) > max {
-            return Err(Error::Validation(format!("{name} max langth is {max}.")));
-        }
-    }
-    Ok(())
-}
-
-fn insert_optional_str(m: &mut HashMap<String, String>, key: &str, v: &Option<String>) {
-    // filter_parameter: non-required strings are dropped when empty.
-    if let Some(v) = v {
-        if !v.is_empty() {
-            m.insert(key.to_owned(), v.clone());
-        }
-    }
-}
-
-fn insert_optional_int(m: &mut HashMap<String, String>, key: &str, v: &Option<i64>) {
-    // filter_parameter: non-required ints are dropped when negative; 0 stays.
-    if let Some(n) = v {
-        if *n >= 0 {
-            m.insert(key.to_owned(), n.to_string());
-        }
     }
 }
 
@@ -592,8 +554,8 @@ impl Ecpay {
 fn credit_plan_pairs(p: &AioCheckOutParams) -> Option<Vec<(String, String)>> {
     if p.redeem.is_some() || p.union_pay.is_some() {
         let mut v = Vec::new();
-        insert_optional_str_map(&mut v, "Redeem", &p.redeem);
-        insert_optional_int_map(&mut v, "UnionPay", &p.union_pay);
+        insert_optional_str_seq(&mut v, "Redeem", &p.redeem);
+        insert_optional_int_seq(&mut v, "UnionPay", &p.union_pay);
         return Some(v);
     }
     if let Some(installment) = &p.credit_installment {
@@ -606,30 +568,14 @@ fn credit_plan_pairs(p: &AioCheckOutParams) -> Option<Vec<(String, String)>> {
         || p.period_return_url.is_some()
     {
         let mut v = Vec::new();
-        insert_optional_int_map(&mut v, "PeriodAmount", &p.period_amount);
-        insert_optional_str_map(&mut v, "PeriodType", &p.period_type);
-        insert_optional_int_map(&mut v, "Frequency", &p.frequency);
-        insert_optional_int_map(&mut v, "ExecTimes", &p.exec_times);
-        insert_optional_str_map(&mut v, "PeriodReturnURL", &p.period_return_url);
+        insert_optional_int_seq(&mut v, "PeriodAmount", &p.period_amount);
+        insert_optional_str_seq(&mut v, "PeriodType", &p.period_type);
+        insert_optional_int_seq(&mut v, "Frequency", &p.frequency);
+        insert_optional_int_seq(&mut v, "ExecTimes", &p.exec_times);
+        insert_optional_str_seq(&mut v, "PeriodReturnURL", &p.period_return_url);
         return Some(v);
     }
     None
-}
-
-fn insert_optional_str_map(v: &mut Vec<(String, String)>, key: &str, value: &Option<String>) {
-    if let Some(s) = value {
-        if !s.is_empty() {
-            v.push((key.to_owned(), s.clone()));
-        }
-    }
-}
-
-fn insert_optional_int_map(v: &mut Vec<(String, String)>, key: &str, value: &Option<i64>) {
-    if let Some(n) = value {
-        if *n >= 0 {
-            v.push((key.to_owned(), n.to_string()));
-        }
-    }
 }
 
 /// Free-text invoice fields: urlencoded (Python `quote_plus` semantics via

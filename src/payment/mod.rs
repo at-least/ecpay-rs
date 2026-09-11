@@ -7,6 +7,7 @@
 //! [`aio_check_out`]: crate::Ecpay::aio_check_out
 
 pub mod check_out;
+mod params;
 
 pub use check_out::{AioCheckOut, AioCheckOutParams, InvoiceExtend};
 
@@ -15,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::client::parse_qsl;
 use crate::error::{Error, Result};
 use crate::Ecpay;
+use params::{insert_optional_str, optional_str, required_str};
 
 /// 付款方式 (`ChoosePayment`)。`as_str()` 為送給 ECPay 的 wire 值。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -346,35 +348,6 @@ pub struct CreditCardPeriodActionParams {
     pub platform_id: Option<String>,
 }
 
-fn required_str(name: &str, v: &str, max: usize) -> Result<()> {
-    if v.is_empty() {
-        return Err(Error::Validation(format!("{name} content is required.")));
-    }
-    if v.chars().count() > max {
-        // "langth" preserves the official SDK's exception message verbatim.
-        return Err(Error::Validation(format!("{name} max langth is {max}.")));
-    }
-    Ok(())
-}
-
-fn optional_str(name: &str, v: &Option<String>, max: usize) -> Result<()> {
-    if let Some(v) = v {
-        if v.chars().count() > max {
-            // "langth" preserves the official SDK's exception message verbatim.
-            return Err(Error::Validation(format!("{name} max langth is {max}.")));
-        }
-    }
-    Ok(())
-}
-
-fn push_optional_str(m: &mut HashMap<String, String>, key: &str, v: &Option<String>) {
-    if let Some(v) = v {
-        if !v.is_empty() {
-            m.insert(key.to_owned(), v.clone());
-        }
-    }
-}
-
 impl Ecpay {
     /// Signs `m` with `CheckMacValue`, POSTs it to `endpoint`, verifies the
     /// response's own `CheckMacValue` (raising [`Error::CheckMacValueMismatch`]
@@ -434,7 +407,7 @@ impl Ecpay {
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
-        push_optional_str(&mut m, "PlatformID", &p.platform_id);
+        insert_optional_str(&mut m, "PlatformID", &p.platform_id);
         Ok(m)
     }
 
@@ -502,7 +475,7 @@ impl Ecpay {
         m.insert("TradeNo".to_owned(), p.trade_no.clone());
         m.insert("Action".to_owned(), p.action.clone());
         m.insert("TotalAmount".to_owned(), p.total_amount.to_string());
-        push_optional_str(&mut m, "PlatformID", &p.platform_id);
+        insert_optional_str(&mut m, "PlatformID", &p.platform_id);
         let mac = self.generate_check_value(&m)?;
         m.insert("CheckMacValue".to_owned(), mac);
 
@@ -533,10 +506,10 @@ impl Ecpay {
         m.insert("DateType".to_owned(), p.date_type.clone());
         m.insert("BeginDate".to_owned(), p.begin_date.clone());
         m.insert("EndDate".to_owned(), p.end_date.clone());
-        push_optional_str(&mut m, "PaymentType", &p.payment_type);
-        push_optional_str(&mut m, "PlatformStatus", &p.platform_status);
-        push_optional_str(&mut m, "PaymentStatus", &p.payment_status);
-        push_optional_str(&mut m, "AllocateStatus", &p.allocate_status);
+        insert_optional_str(&mut m, "PaymentType", &p.payment_type);
+        insert_optional_str(&mut m, "PlatformStatus", &p.platform_status);
+        insert_optional_str(&mut m, "PaymentStatus", &p.payment_status);
+        insert_optional_str(&mut m, "AllocateStatus", &p.allocate_status);
         m.insert("MediaFormated".to_owned(), p.media_formated.clone());
         let mac = self.generate_check_value(&m)?;
         m.insert("CheckMacValue".to_owned(), mac);
@@ -610,7 +583,7 @@ impl Ecpay {
         m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
         m.insert("Action".to_owned(), p.action.clone());
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
-        push_optional_str(&mut m, "PlatformID", &p.platform_id);
+        insert_optional_str(&mut m, "PlatformID", &p.platform_id);
         let mac = self.generate_check_value(&m)?;
         m.insert("CheckMacValue".to_owned(), mac);
 
