@@ -41,7 +41,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{api_error, Error, Result};
+use crate::error::{api_error, Result};
 use crate::Ecpay;
 
 impl Ecpay {
@@ -50,14 +50,7 @@ impl Ecpay {
     /// `RtnCode != 1`，故在出網前就地擋下（與 ecpg 模組的
     /// `require_data_merchant_id` 同一防呆，名稱不同以免重複定義）。
     fn b2b_require_data_merchant_id(&self, data_merchant_id: &str) -> Result<()> {
-        if data_merchant_id.is_empty() || data_merchant_id != self.merchant_id {
-            return Err(Error::Message(format!(
-                "ecpay: Data MerchantID must be set and equal the client's MerchantID \
-                 (got {data_merchant_id:?}, client has {:?})",
-                self.merchant_id
-            )));
-        }
-        Ok(())
+        self.require_data_merchant_id_with(data_merchant_id, "")
     }
 
     /// 每個 B2B 端點共用的出網路徑：`Data` 層 `MerchantID` 防呆 → 組

@@ -70,6 +70,28 @@ pub struct RqHeaderResponse {
     pub timestamp: i64,
 }
 
+impl Ecpay {
+    /// Shared by the ECPG (站內付 2.0) and B2B invoice modules: ECPay wants
+    /// the MerchantID in BOTH the AES envelope and inside the encrypted
+    /// `Data`, and rejects a mismatch opaquely (RtnCode != 1, no message) —
+    /// so both modules check before any bytes go out. `tail` appends
+    /// module-specific wording to the error message.
+    pub(crate) fn require_data_merchant_id_with(
+        &self,
+        data_merchant_id: &str,
+        tail: &str,
+    ) -> Result<()> {
+        if data_merchant_id.is_empty() || data_merchant_id != self.merchant_id {
+            return Err(Error::Message(format!(
+                "ecpay: Data MerchantID must be set and equal the client's MerchantID \
+                 (got {data_merchant_id:?}, client has {:?}){tail}",
+                self.merchant_id
+            )));
+        }
+        Ok(())
+    }
+}
+
 /// Shared HTML attribute escaper for every auto-submitting form this crate
 /// builds (AIO checkout, logistics map/print/create forms). Escapes
 /// `& < > " '` so a `"` in any value cannot break out of the attribute (the

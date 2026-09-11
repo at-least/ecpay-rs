@@ -482,15 +482,10 @@ impl Ecpay {
     /// （`EcpgTradeRefInput`/`EcpgPeriodActionInput`/`EcpgDoActionInput`）
     /// 的 `MerchantID` 是 `Option`，省略時以信封為準，**不經此檢查**。
     fn require_data_merchant_id(&self, data_merchant_id: &str) -> Result<()> {
-        if data_merchant_id.is_empty() || data_merchant_id != self.merchant_id {
-            return Err(Error::Message(format!(
-                "ecpay: Data MerchantID must be set and equal the client's MerchantID \
-                 (got {data_merchant_id:?}, client has {:?}); ECPay rejects a mismatch \
-                 opaquely with RtnCode != 1 and no message",
-                self.merchant_id
-            )));
-        }
-        Ok(())
+        self.require_data_merchant_id_with(
+            data_merchant_id,
+            "; ECPay rejects a mismatch opaquely with RtnCode != 1 and no message",
+        )
     }
 
     /// `GetTokenbyTrade`（站內付 2.0 取號）。
@@ -612,7 +607,7 @@ impl Ecpay {
     /// `Cashier/QueryTrade`（查詢站內付訂單狀態）。
     ///
     /// ⚠️ 端點在 **ecpayment 網域**（查詢不走 ecpg，打錯會 404）：
-    /// `{ecpayment_base_url}Cashier/QueryTrade`。///
+    /// `{ecpayment_base_url}Cashier/QueryTrade`。
     /// stage 實測(2026-09,查無訂單):`Data` 解密後為
     /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
     /// (RtnCode 為整數)。
@@ -627,7 +622,7 @@ impl Ecpay {
     /// `Cashier/QueryPaymentInfo`（查詢 ATM/CVS/條碼取號結果）。
     ///
     /// ⚠️ 端點在 **ecpayment 網域**：
-    /// `{ecpayment_base_url}Cashier/QueryPaymentInfo`。///
+    /// `{ecpayment_base_url}Cashier/QueryPaymentInfo`。
     /// stage 實測(2026-09,查無訂單):`Data` 解密後為
     /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
     /// (RtnCode 為整數)。
@@ -717,7 +712,7 @@ impl Ecpay {
     /// `CreditDetail/QueryTrade`（查詢信用卡交易明細）。
     ///
     /// ⚠️ 端點在 **ecpayment 網域**：
-    /// `{ecpayment_base_url}CreditDetail/QueryTrade`。///
+    /// `{ecpayment_base_url}CreditDetail/QueryTrade`。
     /// stage 實測(2026-09,查無訂單):`Data` 解密後為
     /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
     /// (RtnCode 為整數)。
