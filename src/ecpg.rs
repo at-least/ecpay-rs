@@ -612,7 +612,10 @@ impl Ecpay {
     /// `Cashier/QueryTrade`（查詢站內付訂單狀態）。
     ///
     /// ⚠️ 端點在 **ecpayment 網域**（查詢不走 ecpg，打錯會 404）：
-    /// `{ecpayment_base_url}Cashier/QueryTrade`。
+    /// `{ecpayment_base_url}Cashier/QueryTrade`。///
+    /// stage 實測(2026-09,查無訂單):`Data` 解密後為
+    /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
+    /// (RtnCode 為整數)。
     pub async fn ecpg_query_trade(&self, input: &EcpgTradeRefInput) -> Result<serde_json::Value> {
         self.ecpg_post(
             format!("{}Cashier/QueryTrade", self.ecpayment_base_url()),
@@ -624,7 +627,10 @@ impl Ecpay {
     /// `Cashier/QueryPaymentInfo`（查詢 ATM/CVS/條碼取號結果）。
     ///
     /// ⚠️ 端點在 **ecpayment 網域**：
-    /// `{ecpayment_base_url}Cashier/QueryPaymentInfo`。
+    /// `{ecpayment_base_url}Cashier/QueryPaymentInfo`。///
+    /// stage 實測(2026-09,查無訂單):`Data` 解密後為
+    /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
+    /// (RtnCode 為整數)。
     pub async fn ecpg_query_payment_info(
         &self,
         input: &EcpgTradeRefInput,
@@ -656,10 +662,23 @@ impl Ecpay {
     ///
     /// ⚠️ 端點在 **ecpayment 網域**：
     /// `{ecpayment_base_url}Cashier/CreditCardPeriodAction`。
+    ///
+    /// ⚠️ Data 內的 `MerchantID` 為**必要**（stage 實測 2026-09：省略時回
+    /// `10200051 MerchantID Error.`；帶了則正確回業務錯誤，例如查無訂單
+    /// `90100150 不存在的訂單` 並原樣回響 MerchantID/MerchantTradeNo）。
+    /// 官方 PHP 範例另帶 `PlatformID`，實測可省略。
     pub async fn ecpg_credit_card_period_action(
         &self,
         input: &EcpgPeriodActionInput,
     ) -> Result<serde_json::Value> {
+        let Some(mid) = input.merchant_id.as_deref() else {
+            return Err(Error::Message(
+                "ecpay: CreditCardPeriodAction requires Data MerchantID — stage answers \
+                 10200051 MerchantID Error without it (live-captured 2026-09)"
+                    .into(),
+            ));
+        };
+        self.require_data_merchant_id(mid)?;
         self.ecpg_post(
             format!(
                 "{}Cashier/CreditCardPeriodAction",
@@ -675,7 +694,19 @@ impl Ecpay {
     ///
     /// ⚠️ 端點在 **ecpayment 網域**：
     /// `{ecpayment_base_url}Credit/DoAction`。
+    ///
+    /// ⚠️ Data 內的 `MerchantID` 為**必要**（stage 實測 2026-09：省略時回
+    /// `10200051 MerchantID Error.`；帶了則查無訂單回
+    /// `RtnCode 10000185 "Cant not find the trade data"`）。
     pub async fn ecpg_do_action(&self, input: &EcpgDoActionInput) -> Result<serde_json::Value> {
+        let Some(mid) = input.merchant_id.as_deref() else {
+            return Err(Error::Message(
+                "ecpay: DoAction requires Data MerchantID — stage answers \
+                 10200051 MerchantID Error without it (live-captured 2026-09)"
+                    .into(),
+            ));
+        };
+        self.require_data_merchant_id(mid)?;
         self.ecpg_post(
             format!("{}Credit/DoAction", self.ecpayment_base_url()),
             input,
@@ -686,7 +717,10 @@ impl Ecpay {
     /// `CreditDetail/QueryTrade`（查詢信用卡交易明細）。
     ///
     /// ⚠️ 端點在 **ecpayment 網域**：
-    /// `{ecpayment_base_url}CreditDetail/QueryTrade`。
+    /// `{ecpayment_base_url}CreditDetail/QueryTrade`。///
+    /// stage 實測(2026-09,查無訂單):`Data` 解密後為
+    /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
+    /// (RtnCode 為整數)。
     pub async fn ecpg_query_credit_trade(
         &self,
         input: &EcpgTradeRefInput,

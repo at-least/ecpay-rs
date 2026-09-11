@@ -137,6 +137,25 @@ impl Ecpay {
         let text = String::from_utf8_lossy(&body);
         let (status, query) = split_status_prefix(&text);
         let mut fields = crate::client::parse_qsl(query);
+        // Server-truth (2026-09): business errors can arrive as a SHORT
+        // UNSIGNED string after the status prefix (e.g. `0|ReceiverStoreID
+        // Is Null`) — no '=' anywhere, so it never parses as a query. Surface
+        // it verbatim instead of a misleading CheckMacValueMismatch.
+        if !query.contains('=') {
+            // Short unsigned message (UTF-8): e.g. `0|資料處理中，無法更新貨資訊`.
+            let text = String::from_utf8_lossy(&body);
+            let text = text.trim_start_matches(|c: char| c.is_ascii_digit() || c == '|');
+            return Err(Error::Message(format!(
+                "ecpay logistics: stage answered {status:?}: {text}"
+            )));
+        }
+        // An HTML/text error page parses to NOTHING — surface the raw body
+        // instead of a misleading CheckMacValueMismatch.
+        if fields.is_empty() {
+            return Err(Error::Message(format!(
+                "ecpay logistics: response is not a signed query: {body:?}"
+            )));
+        }
         // Business errors still come back as a signed query (RtnCode inside);
         // a body with no CheckMacValue at all is an HTML/text error page.
         let got = fields
@@ -176,6 +195,23 @@ impl Ecpay {
         });
         let (key, iv) = self.logistics_keys();
         self.post_aes_json(&endpoint, rq_header, &self.merchant_id, input, key, iv)
+            .await
+    }
+
+    /// The two v2 BROWSER-flow endpoints answer raw text/html (live-captured
+    /// 2026-09), not an AES envelope — see [`Self::post_aes_json_raw`].
+    pub(crate) async fn post_logistics_aes_raw(
+        &self,
+        path: &str,
+        input: &impl Serialize,
+    ) -> Result<String> {
+        let endpoint = format!("{}{}", self.logistics_base_url(), path);
+        let rq_header = serde_json::json!({
+            "Timestamp": unix_now(),
+            "Revision": "1.0.0",
+        });
+        let (key, iv) = self.logistics_keys();
+        self.post_aes_json_raw(&endpoint, rq_header, &self.merchant_id, input, key, iv)
             .await
     }
 }
@@ -292,6 +328,10 @@ pub struct UpdateShipmentInfoInput {
     /// 出貨(交託宅配)日期 yyyy/MM/dd
     #[serde(rename = "ShipmentDate")]
     pub shipment_date: String,
+    /// 收件門市代號 — CVS 訂單**必填**(stage 實測 2026-09:CVS 訂單省略時
+    /// 回 `0|ReceiverStoreID Is Null`);宅配(HOME)可省略。
+    #[serde(skip_serializing_if = "Option::is_none", rename = "ReceiverStoreID")]
+    pub receiver_store_id: Option<String>,
 }
 
 /// `Express/UpdateStoreInfo`(C2C 更新門市資訊)的輸入。
@@ -465,6 +505,9 @@ impl Ecpay {
             input.all_pay_logistics_id.clone(),
         );
         m.insert("ShipmentDate".to_owned(), input.shipment_date.clone());
+        if let Some(store) = &input.receiver_store_id {
+            m.insert("ReceiverStoreID".to_owned(), store.clone());
+        }
         let endpoint = format!("{}Helper/UpdateShipmentInfo", self.logistics_base_url());
         self.post_logistics_form(endpoint, m).await
     }
@@ -1069,23 +1112,31 @@ impl Ecpay {
             .await
     }
 
-    /// 列印紙本出貨單 (`Express/v2/PrintTradeDocument`)。回應 Data 為
-    /// `{"body": "<html..."}` 形式(官方 AesStrResponse),自行取出 HTML。
+    /// 列印紙本出貨單 (`Express/v2/PrintTradeDocument`)。⚠ server 真相
+    /// (stage 實測 2026-09):回應是 **text/html 的自動提交表單**,內含整筆
+    /// 交易記錄(MD5 CheckMacValue)並自動 POST 到
+    /// `Helper/PrintTradeDocument` 顯示列印頁 —— 不是 AES 信封。把回傳的
+    /// HTML 原文輸出給瀏覽器即可(官方 PHP `echo $response['body']`)。
     pub async fn allinone_print_trade_document(
         &self,
         input: &AllInOnePrintTradeDocumentInput,
-    ) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/PrintTradeDocument", input)
+    ) -> Result<String> {
+        self.post_logistics_aes_raw("Express/v2/PrintTradeDocument", input)
             .await
     }
 
-    /// 物流選擇頁 (`Express/v2/RedirectToLogisticsSelection`)。回應 Data
-    /// 為導轉頁內容(官方 AesStrResponse),需輸出給瀏覽器。
+    /// 物流選擇頁 (`Express/v2/RedirectToLogisticsSelection`)。⚠ server
+    /// 真相(stage 實測 2026-09):回應是 **text/html 的自動提交表單**,
+    /// 把整個 AES 選店請求包在隱藏欄位 `d` 內自動 POST 到
+    /// `Express/v2/LogisticsSelection` —— 不是 AES 信封。把回傳的 HTML
+    /// 原文輸出給瀏覽器;消費者選完門市後,結果以 `TempTradeEstablished`
+    /// 形式 POST 到 `ClientReplyURL`(見
+    /// [`Self::decrypt_temp_trade_established`])。
     pub async fn allinone_redirect_to_logistics_selection(
         &self,
         input: &AllInOneRedirectInput,
-    ) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/RedirectToLogisticsSelection", input)
+    ) -> Result<String> {
+        self.post_logistics_aes_raw("Express/v2/RedirectToLogisticsSelection", input)
             .await
     }
 }

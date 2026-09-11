@@ -285,6 +285,15 @@ staging 實測(2026-09)確立的 server 真相,全部寫進了各模組文件:
   v2 `CreateTestData` 開出測試單成功;跨境在該帳號回 `TransCode=128`
   (服務未開通,信封本身已驗)。v2 對「查無訂單」回 **HTTP 500 + 有效
   信封**,AES 核心會解出業務錯誤而非丟 HTTP 錯誤。
+- **補充實測(2026-09 同日)**:v2 `PrintTradeDocument` 與
+  `RedirectToLogisticsSelection` 回的是 **text/html 自動提交表單**(不是
+  AES 信封)— 本 crate 以 `String` 回傳原文供輸出給瀏覽器;ECPG
+  `DoAction`/`CreditCardPeriodAction` 的 Data 內 **`MerchantID` 必填**
+  (省略回 `10200051 MerchantID Error.`,本 crate 已本地防呆);ECPG 三支
+  查詢查無訂單回 `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade
+  data"}`;國內物流的業務拒絕可能是**未簽章短字串**(如
+  `0|資料處理中,無法異動`),本 crate 以可讀訊息回報而非誤導的 MAC 錯誤;
+  `UpdateShipmentInfo` 對 CVS 訂單需帶 `ReceiverStoreID`。
 
 ### Staging probes: how the three missing services were pinned
 

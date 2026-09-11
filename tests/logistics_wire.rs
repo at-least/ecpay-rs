@@ -153,10 +153,12 @@ async fn response_without_mac_is_rejected_not_swallowed() {
         .logistics_create(&sample_create())
         .await
         .expect_err("HTML error page must fail");
-    assert!(
-        matches!(err, ecpay::Error::CheckMacValueMismatch),
-        "{err:?}"
-    );
+    // The raw body must be surfaced for diagnosis, not swallowed into a
+    // generic MAC mismatch.
+    match err {
+        ecpay::Error::Message(m) => assert!(m.contains("Server Error"), "{m}"),
+        other => panic!("expected Message with the raw body, got {other:?}"),
+    }
 }
 
 #[tokio::test]

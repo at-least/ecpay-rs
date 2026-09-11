@@ -450,22 +450,13 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
                 let temp = format!("T{}", state.next + 1);
                 state.temps.insert(temp, false);
                 state.next += 1;
-                // AesStr-style response: decrypted Data is an HTML body
-                // (shape convention — not yet live-pinned).
-                let data = ecpay::crypto::encrypt_data(
-                    &serde_json::json!({"body": "<html>選擇門市</html>"}),
-                    LOG_KEY.as_bytes(),
-                    LOG_IV.as_bytes(),
-                )
-                .unwrap();
+                // Server-truth (live-captured 2026-09): the redirect answers
+                // raw text/html — an auto-submitting form, not an envelope.
                 (
                     200,
-                    "application/json".into(),
-                    serde_json::json!({
-                        "MerchantID": MERCHANT_ID, "TransCode": 1, "TransMsg": "", "Data": data,
-                    })
-                    .to_string()
-                    .into_bytes(),
+                    "text/html".into(),
+                    b"<html><head><title>AutoSubmitFormToLogisticsSelection</title></head><body><form id=\"PostForm\" action=\"LogisticsSelection\" method=\"POST\"></form></body></html>"
+                        .to_vec(),
                 )
             } else if path.ends_with("/Express/v2/CreateByTempTrade") {
                 let payload: serde_json::Value = ecpay::crypto::decrypt_data(
@@ -549,8 +540,11 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
             ..Default::default()
         })
         .await
-        .expect("redirect decodes");
-    assert_eq!(redirect["body"], "<html>選擇門市</html>");
+        .expect("redirect answers the HTML form");
+    assert!(
+        redirect.contains("AutoSubmitFormToLogisticsSelection"),
+        "raw HTML form must be returned verbatim for the browser"
+    );
 
     // ECPay delivers TempTradeEstablished as urlencoded ResultData.
     let established = serde_json::json!({

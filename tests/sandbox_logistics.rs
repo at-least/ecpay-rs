@@ -79,6 +79,64 @@ async fn domestic_create_then_query_roundtrip() {
 }
 
 #[tokio::test]
+async fn domestic_create_update_shipment_query_chain() {
+    // One live order taken through create → UpdateShipmentInfo → query:
+    // three signed round-trips against stage on the same order.
+    let client = sdk();
+    let created = client
+        .logistics_create(&LogisticsCreateInput {
+            merchant_trade_no: unique_no("SBXU"),
+            merchant_trade_date: taipei_now(),
+            logistics_type: "CVS".into(),
+            logistics_sub_type: "FAMI".into(),
+            goods_amount: 500,
+            goods_name: "綠界 SDK 範例商品".into(),
+            sender_name: "陳大明".into(),
+            sender_cell_phone: "0911222333".into(),
+            receiver_name: "王小美".into(),
+            receiver_cell_phone: "0933222111".into(),
+            receiver_store_id: Some("006598".into()),
+            server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("create");
+    assert_eq!(created["RtnCode"], "300");
+    let logistics_id = created["AllPayLogisticsID"].clone();
+
+    let update = client
+        .logistics_update_shipment_info(&ecpay::logistics::UpdateShipmentInfoInput {
+            all_pay_logistics_id: logistics_id.clone(),
+            shipment_date: taipei_today(),
+            receiver_store_id: Some("006598".into()), // CVS 必填 (0|ReceiverStoreID Is Null otherwise)
+        })
+        .await;
+    // Server-truth (2026-09): an OTP order still at RtnCode=300 (消費者尚未
+    // 完成門市確認) answers a SHORT UNSIGNED rejection `0|資料處理中，無法
+    // 更新貨資訊` — surfaced as Error::Message, not a misleading MAC error.
+    match update {
+        Ok(v) => println!("update accepted = {v:?}"),
+        Err(ecpay::Error::Message(m)) => {
+            println!("update rejected while 資料處理中: {m}");
+            assert!(
+                m.contains("無法更新") || m.contains("處理中"),
+                "documented OTP-flow rejection, got: {m}"
+            );
+        }
+        Err(e) => panic!("unexpected error: {e:?}"),
+    }
+
+    let info = client
+        .logistics_query_logistics_trade_info(&DomesticQueryInput {
+            all_pay_logistics_id: logistics_id,
+            time_stamp: None,
+        })
+        .await
+        .expect("query after update");
+    println!("query after update = {info:?}");
+}
+
+#[tokio::test]
 async fn get_store_list_answers_json() {
     let out = sdk()
         .logistics_get_store_list(&GetStoreListInput {
@@ -147,6 +205,16 @@ async fn crossborder_create_test_data_answers_with_the_aes_envelope() {
         }
         Err(e) => panic!("unexpected error: {e:?}"),
     }
+}
+
+fn taipei_today() -> String {
+    // yyyy-MM-dd for UpdateShipmentInfo.
+    taipei_now()
+        .replace('/', "-")
+        .split(' ')
+        .next()
+        .unwrap()
+        .into()
 }
 
 fn taipei_now() -> String {

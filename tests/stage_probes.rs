@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ecpay::Ecpay;
 use serde_json::{json, Value};
 
 // Official public stage test accounts (developers.ecpay.com.tw / SDK_PHP examples).
@@ -322,6 +323,147 @@ async fn b2b_invoice_issue_reaches_the_service() {
             .is_some_and(|s| !s.is_empty()),
         "an invoice number was issued"
     );
+}
+
+#[tokio::test]
+#[ignore = "hits the real stage server"]
+async fn allinone_v2_print_and_redirect_response_shapes() {
+    // Captures the two AesStr-style v2 responses whose decrypted shape is
+    // not yet pinned (PHP echoes `$response['body']`): print a REAL test
+    // order (minted via CreateTestData) and run the store-selection redirect
+    // (TempLogisticsID "0" mints a temp trade). Creates real stage-side
+    // records, like the other logistics probes.
+    let client = Ecpay {
+        merchant_id: "2000132".into(),
+        hash_key: "pwFHCqoQZGmho4w6".into(),
+        hash_iv: "EkRm7iFT261dpevs".into(),
+        logistics_api_url: "https://logistics-stage.ecpay.com.tw/".into(),
+        logistics_hash_key: b"5294y06JbISpM5x9".to_vec(),
+        logistics_hash_iv: b"v77hoKGq4kWxNNIS".to_vec(),
+        ..Default::default()
+    };
+
+    let created = client
+        .allinone_create_test_data(&ecpay::logistics::AllInOneCreateTestDataInput {
+            merchant_id: "2000132".into(),
+            logistics_sub_type: "FAMI".into(),
+        })
+        .await
+        .expect("create test data");
+    let logistics_id = created["LogisticsID"].as_str().unwrap().to_string();
+    println!("create_test_data LogisticsID = {logistics_id}");
+
+    match client
+        .allinone_print_trade_document(&ecpay::logistics::AllInOnePrintTradeDocumentInput {
+            merchant_id: "2000132".into(),
+            logistics_ids: vec![logistics_id],
+            logistics_sub_type: "FAMI".into(),
+        })
+        .await
+    {
+        Ok(html) => {
+            println!("PrintTradeDocument HTML len = {}", html.len());
+            assert!(
+                html.contains("<form"),
+                "browser form expected: {}",
+                &html[..html.len().min(300)]
+            );
+        }
+        Err(e) => panic!("PrintTradeDocument should answer the HTML form: {e:?}"),
+    }
+
+    match client
+        .allinone_redirect_to_logistics_selection(&ecpay::logistics::AllInOneRedirectInput {
+            temp_logistics_id: "0".into(),
+            goods_amount: 100,
+            goods_name: "範例商品".into(),
+            sender_name: "陳大明".into(),
+            sender_zip_code: "11560".into(),
+            sender_address: "台北市南港區三重路19-2號6樓".into(),
+            server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
+            client_reply_url: "https://www.ecpay.com.tw/example/client-reply".into(),
+            temperature: None,
+        })
+        .await
+    {
+        Ok(html) => {
+            println!("Redirect HTML len = {}", html.len());
+            assert!(
+                html.contains("LogisticsSelection"),
+                "selection form expected: {}",
+                &html[..html.len().min(300)]
+            );
+        }
+        Err(e) => panic!("RedirectToLogisticsSelection should answer the HTML form: {e:?}"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "hits the real stage server"]
+async fn ecpg_query_family_error_shapes() {
+    // The ecpayment-domain queries can only be captured on error paths
+    // without a browser-completed payment; pin what stage answers for an
+    // unknown MerchantTradeNo (TransCode gate + Data field sets).
+    let client = Ecpay {
+        merchant_id: "3002607".into(),
+        hash_key: "pwFHCqoQZGmho4w6".into(),
+        hash_iv: "EkRm7iFT261dpevs".into(),
+        ecpg_api_url: "https://ecpg-stage.ecpay.com.tw/Merchant/".into(),
+        ecpayment_api_url: "https://ecpayment-stage.ecpay.com.tw/1.0.0/".into(),
+        ..Default::default()
+    };
+    let unknown = format!("NOSUCH{}", unix_now());
+    let trade_ref = ecpay::ecpg::EcpgTradeRefInput {
+        merchant_id: Some("3002607".into()),
+        merchant_trade_no: unknown.clone(),
+        ..Default::default()
+    };
+
+    for name in ["QueryTrade", "QueryPaymentInfo", "CreditDetail/QueryTrade"] {
+        let r: Result<Value, _> = match name {
+            "QueryTrade" => client.ecpg_query_trade(&trade_ref).await,
+            "QueryPaymentInfo" => client.ecpg_query_payment_info(&trade_ref).await,
+            _ => client.ecpg_query_credit_trade(&trade_ref).await,
+        };
+        match r {
+            Ok(v) => println!("{name} (unknown trade) = {v}"),
+            Err(e) => println!("{name} (unknown trade) error = {e:?}"),
+        }
+    }
+
+    let media = client
+        .ecpg_query_trade_media(&ecpay::ecpg::QueryTradeMediaInput {
+            merchant_id: "3002607".into(),
+            date_type: "2".into(),
+            begin_date: "2026-09-01".into(),
+            end_date: "2026-09-11".into(),
+            payment_type: Some("01".into()),
+        })
+        .await;
+    println!("QueryTradeMedia (empty range) = {media:?}");
+
+    let period = client
+        .ecpg_credit_card_period_action(&ecpay::ecpg::EcpgPeriodActionInput {
+            // 釐清必要性:只帶 MerchantID、不帶 PlatformID。
+            platform_id: None,
+            merchant_id: Some("3002607".into()),
+            merchant_trade_no: unknown.clone(),
+            action: "ReAuth".into(),
+        })
+        .await;
+    println!("CreditCardPeriodAction (merchant_id only) = {period:?}");
+
+    let do_action = client
+        .ecpg_do_action(&ecpay::ecpg::EcpgDoActionInput {
+            platform_id: None,
+            merchant_id: Some("3002607".into()),
+            merchant_trade_no: unknown,
+            trade_no: "NOSUCHTREADNO0001".into(),
+            action: "R".into(),
+            total_amount: 100,
+        })
+        .await;
+    println!("DoAction (merchant_id only) = {do_action:?}");
 }
 
 // --- helpers (kept local so the probe file survives on its own) ---

@@ -317,6 +317,40 @@ impl Ecpay {
         decrypt_data(&res.data, key, iv)
     }
 
+    /// The two v2 browser-flow endpoints (`PrintTradeDocument`,
+    /// `RedirectToLogisticsSelection`) answer with a raw **text/html**
+    /// auto-submitting form instead of an AES envelope (live-captured
+    /// 2026-09: the form POSTs the print record / the AES selection request
+    /// to the browser page). Sends the same envelope, returns the raw HTML.
+    pub(crate) async fn post_aes_json_raw<I: Serialize>(
+        &self,
+        endpoint: &str,
+        rq_header: serde_json::Value,
+        merchant_id: &str,
+        input: &I,
+        key: &[u8],
+        iv: &[u8],
+    ) -> Result<String> {
+        let data = encrypt_data(input, key, iv)?;
+        let envelope = serde_json::json!({
+            "MerchantID": merchant_id,
+            "RqHeader": rq_header,
+            "Data": data,
+        });
+        let mut resp = http_client()
+            .post(endpoint)
+            .header("Content-Type", "application/json; charset=utf-8")
+            .body(envelope.to_string())
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        let body = body_string(&mut resp).await?;
+        if !(200..300).contains(&status) {
+            return Err(Error::InvoiceStatus { status, body });
+        }
+        Ok(body)
+    }
+
     /// The AES-JSON envelope core for every NON-B2C service (ECPG 站內付,
     /// logistics v2, CrossBorder, B2B invoice): builds
     /// `{MerchantID, RqHeader, Data}` — deliberately without PlatformID, the
