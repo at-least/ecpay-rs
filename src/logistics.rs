@@ -1123,6 +1123,11 @@ impl Ecpay {
 /// UNIMARTCBHOME 宅配;宅配不需 receiver_store_id,超商必需)。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct CrossBorderCreateInput {
+    /// 特店編號。官方 PHP 範例(`example/Logistics/CrossBorder/
+    /// CreateUnimartCvsOrder.php`)把它放在 `Data` 的第一個欄位(信封也帶),
+    /// 本結構照做。
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
     /// 特店交易時間 yyyy/MM/dd HH:mm:ss (UTC+8)
     #[serde(rename = "MerchantTradeDate")]
     pub merchant_trade_date: String,

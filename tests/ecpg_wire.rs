@@ -639,3 +639,233 @@ async fn stage_probe_get_token_by_trade_with_the_typed_method() {
         "a token was issued through the typed path"
     );
 }
+
+// --- The token/browser-flow endpoints that only had live/e2e coverage:
+// each now pins the ecpg-domain path, the decrypted Data key set, and the
+// omission of unset Option pieces. ---
+
+/// Asserts the request path hit the ecpg domain with the expected action,
+/// on top of the shared envelope checks.
+fn assert_ecpg_path_and_decrypt(p: &str, body: &[u8], expected: &str) -> Value {
+    assert_eq!(p, expected, "ecpg-domain path");
+    assert_envelope_and_decrypt(body)
+}
+
+#[tokio::test]
+async fn create_payment_posts_the_token_field_set() {
+    let srv = spawn_http_server(move |p, body| {
+        let data = assert_ecpg_path_and_decrypt(p, body, "/Merchant/CreatePayment");
+        let keys: BTreeSet<&str> = data
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        assert_eq!(
+            keys,
+            BTreeSet::from(["MerchantID", "MerchantTradeNo", "PayToken"]),
+            "exact Data key set"
+        );
+        assert_eq!(data["MerchantID"], MERCHANT);
+        assert_eq!(data["PayToken"], "tok-1234");
+        envelope_reply(json!({"MerchantID": MERCHANT, "RtnCode": 1, "RtnMsg": ""}))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+    let out = ec
+        .create_payment(&CreatePaymentInput {
+            merchant_id: MERCHANT.into(),
+            pay_token: "tok-1234".into(),
+            merchant_trade_no: "order1234567890".into(),
+        })
+        .await
+        .expect("create_payment");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn create_payment_with_card_id_omits_unset_pieces() {
+    let srv = spawn_http_server(move |p, body| {
+        let data = assert_ecpg_path_and_decrypt(p, body, "/Merchant/CreatePaymentWithCardID");
+        assert_eq!(
+            data.as_object()
+                .unwrap()
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["BindCardID", "MerchantID"]),
+            "OrderInfo/ConsumerInfo/CustomField absent when None"
+        );
+        assert_eq!(data["BindCardID"], "bc-777");
+        envelope_reply(json!({"MerchantID": MERCHANT, "RtnCode": 1, "RtnMsg": ""}))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+    let out = ec
+        .create_payment_with_card_id(&CreatePaymentWithCardIdInput {
+            merchant_id: MERCHANT.into(),
+            bind_card_id: "bc-777".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("create_payment_with_card_id");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn create_bind_card_posts_the_member_field_set() {
+    let srv = spawn_http_server(move |p, body| {
+        let data = assert_ecpg_path_and_decrypt(p, body, "/Merchant/CreateBindCard");
+        assert_eq!(
+            data.as_object()
+                .unwrap()
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["BindCardPayToken", "MerchantID", "MerchantMemberID"]),
+        );
+        assert_eq!(data["MerchantMemberID"], "member000001");
+        envelope_reply(json!({"MerchantID": MERCHANT, "RtnCode": 1, "RtnMsg": ""}))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+    let out = ec
+        .create_bind_card(&CreateBindCardInput {
+            merchant_id: MERCHANT.into(),
+            bind_card_pay_token: "bcpt-1".into(),
+            merchant_member_id: "member000001".into(),
+        })
+        .await
+        .expect("create_bind_card");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn get_token_by_user_carries_only_consumer_info() {
+    let srv = spawn_http_server(move |p, body| {
+        let data = assert_ecpg_path_and_decrypt(p, body, "/Merchant/GetTokenbyUser");
+        assert_eq!(
+            data.as_object()
+                .unwrap()
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["ConsumerInfo", "MerchantID"]),
+        );
+        assert_eq!(data["ConsumerInfo"]["MerchantMemberID"], "member000001");
+        envelope_reply(json!({
+            "MerchantID": MERCHANT, "RtnCode": 1, "RtnMsg": "",
+            "Token": "user-token", "TokenExpireDate": "2026/09/12 00:00:00",
+        }))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+    let out = ec
+        .get_token_by_user(&GetTokenbyUserInput {
+            merchant_id: MERCHANT.into(),
+            consumer_info: Some(ConsumerInfo {
+                merchant_member_id: Some("member000001".into()),
+                email: "customer@email.com".into(),
+                phone: "0912345678".into(),
+                ..Default::default()
+            }),
+        })
+        .await
+        .expect("get_token_by_user");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn get_token_by_binding_card_posts_the_binding_field_set() {
+    let srv = spawn_http_server(move |p, body| {
+        let data = assert_ecpg_path_and_decrypt(p, body, "/Merchant/GetTokenbyBindingCard");
+        assert_eq!(
+            data.as_object()
+                .unwrap()
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["ConsumerInfo", "MerchantID", "OrderInfo"]),
+            "OrderResultURL/CustomField absent when None"
+        );
+        assert_eq!(data["OrderInfo"]["MerchantTradeNo"], "order1234567890");
+        envelope_reply(json!({
+            "MerchantID": MERCHANT, "RtnCode": 1, "RtnMsg": "",
+            "Token": "bind-token", "TokenExpireDate": "2026/09/12 00:00:00",
+        }))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+    let out = ec
+        .get_token_by_binding_card(&GetTokenbyBindingCardInput {
+            merchant_id: MERCHANT.into(),
+            consumer_info: Some(ConsumerInfo {
+                merchant_member_id: Some("member000001".into()),
+                email: "customer@email.com".into(),
+                phone: "0912345678".into(),
+                ..Default::default()
+            }),
+            order_info: Some(OrderInfo {
+                merchant_trade_date: "2026/09/12 06:57:06".into(),
+                merchant_trade_no: "order1234567890".into(),
+                total_amount: 100,
+                return_url: "https://example.com/return".into(),
+                trade_desc: "wire test".into(),
+                item_name: "商品 x1".into(),
+            }),
+            ..Default::default()
+        })
+        .await
+        .expect("get_token_by_binding_card");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn get_member_bind_card_posts_the_query_field_set() {
+    let srv = spawn_http_server(move |p, body| {
+        let data = assert_ecpg_path_and_decrypt(p, body, "/Merchant/GetMemberBindCard");
+        assert_eq!(
+            data.as_object()
+                .unwrap()
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["MerchantID", "MerchantMemberID", "MerchantTradeNo"]),
+        );
+        envelope_reply(json!({
+            "MerchantID": MERCHANT, "RtnCode": 1, "RtnMsg": "",
+            "BindCards": [],
+        }))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+    let out = ec
+        .get_member_bind_card(&GetMemberBindCardInput {
+            merchant_id: MERCHANT.into(),
+            merchant_member_id: "member000001".into(),
+            merchant_trade_no: "order1234567890".into(),
+        })
+        .await
+        .expect("get_member_bind_card");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn delete_member_bind_card_posts_the_bind_card_id() {
+    let srv = spawn_http_server(move |p, body| {
+        let data = assert_ecpg_path_and_decrypt(p, body, "/Merchant/DeleteMemberBindCard");
+        assert_eq!(
+            data.as_object()
+                .unwrap()
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["BindCardID", "MerchantID"]),
+        );
+        assert_eq!(data["BindCardID"], "bc-777");
+        envelope_reply(json!({"MerchantID": MERCHANT, "RtnCode": 1, "RtnMsg": ""}))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+    let out = ec
+        .delete_member_bind_card(&DeleteMemberBindCardInput {
+            merchant_id: MERCHANT.into(),
+            bind_card_id: "bc-777".into(),
+        })
+        .await
+        .expect("delete_member_bind_card");
+    assert_eq!(out["RtnCode"], 1);
+}

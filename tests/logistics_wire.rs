@@ -6,9 +6,13 @@ use std::collections::HashMap;
 
 use ecpay::crypto::check_mac_value;
 use ecpay::logistics::{
-    AllInOneCreateTestDataInput, AllInOneQueryInput, CancelC2cInput, CrossBorderMapInput,
-    DomesticQueryInput, GetStoreListInput, LogisticsCreateInput, MapInput, PrintC2c,
-    ReturnCvsInput,
+    AllInOneCancelC2cInput, AllInOneCreateTestDataInput, AllInOnePrintTradeDocumentInput,
+    AllInOneQueryInput, AllInOneRedirectInput, AllInOneReturnCvsInput, AllInOneReturnHomeInput,
+    AllInOneUpdateShipmentInfoInput, AllInOneUpdateStoreInfoInput, CancelC2cInput,
+    CrossBorderCreateInput, CrossBorderCreateTestDataInput, CrossBorderMapInput,
+    CrossBorderRefInput, DomesticQueryInput, GetStoreListInput, LogisticsCreateInput, MapInput,
+    PrintC2c, ReturnCvsInput, ReturnHomeInput, UpdateShipmentInfoInput, UpdateStoreInfoInput,
+    UpdateTempTradeInput,
 };
 use ecpay::Ecpay;
 
@@ -562,4 +566,660 @@ fn urldecode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+// --- Untested-endpoint sweep, part 1: domestic MD5-form family. Each test
+// pins the exact posted key set (a serde rename typo or a stray field breaks
+// the set), the MD5 signature, and the `1|`-prefixed response parsing. ---
+
+fn pipe_reply(fields: &[(&str, &str)]) -> (u16, String, Vec<u8>) {
+    let map: HashMap<String, String> = fields
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let mac = md5(&map);
+    let query: Vec<String> = fields
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .chain(std::iter::once(format!("CheckMacValue={mac}")))
+        .collect();
+    (
+        200,
+        "text/plain".into(),
+        format!("1|{}", query.join("&")).into_bytes(),
+    )
+}
+
+#[tokio::test]
+async fn update_shipment_info_posts_the_exact_field_set() {
+    let server = spawn_http_server(|path, body| {
+        assert!(path.ends_with("/Helper/UpdateShipmentInfo"), "{path}");
+        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let mut keys: Vec<_> = sent.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys.remove(keys.iter().position(|k| k == "CheckMacValue").unwrap()),
+            "CheckMacValue"
+        );
+        assert_eq!(
+            keys,
+            [
+                "AllPayLogisticsID",
+                "MerchantID",
+                "ReceiverStoreID",
+                "ShipmentDate"
+            ],
+            "exact field set"
+        );
+        assert_eq!(md5(&sent), sent["CheckMacValue"]);
+        pipe_reply(&[("RtnCode", "1"), ("RtnMsg", "OK")])
+    });
+    let out = logistics_sdk(server)
+        .logistics_update_shipment_info(&UpdateShipmentInfoInput {
+            all_pay_logistics_id: "1718552".into(),
+            shipment_date: "2026/09/12".into(),
+            receiver_store_id: Some("991182".into()),
+        })
+        .await
+        .expect("update shipment info");
+    assert_eq!(out["RtnCode"], "1");
+}
+
+#[tokio::test]
+async fn update_store_info_posts_the_c2c_field_set() {
+    let server = spawn_http_server(|path, body| {
+        assert!(path.ends_with("/Express/UpdateStoreInfo"), "{path}");
+        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let mut keys: Vec<_> = sent.keys().cloned().collect();
+        keys.sort();
+        let mac = keys.remove(keys.iter().position(|k| k == "CheckMacValue").unwrap());
+        assert_eq!(mac, "CheckMacValue");
+        assert_eq!(
+            keys,
+            [
+                "AllPayLogisticsID",
+                "CVSPaymentNo",
+                "CVSValidationNo",
+                "MerchantID",
+                "ReceiverStoreID",
+                "StoreType",
+            ],
+            "exact C2C field set"
+        );
+        assert_eq!(md5(&sent), sent["CheckMacValue"]);
+        pipe_reply(&[("RtnCode", "1"), ("RtnMsg", "OK")])
+    });
+    let out = logistics_sdk(server)
+        .logistics_update_store_info(&UpdateStoreInfoInput {
+            all_pay_logistics_id: "1718552".into(),
+            cvs_payment_no: "C9681067".into(),
+            cvs_validation_no: "2448".into(),
+            store_type: "01".into(),
+            receiver_store_id: "006598".into(),
+        })
+        .await
+        .expect("update store info");
+    assert_eq!(out["RtnCode"], "1");
+}
+
+#[tokio::test]
+async fn return_unimart_cvs_keeps_the_official_lowercase_path() {
+    let server = spawn_http_server(|path, body| {
+        assert!(
+            path.ends_with("/express/ReturnUniMartCVS"),
+            "official lowercase `express`: {path}"
+        );
+        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let mut keys: Vec<_> = sent.keys().cloned().collect();
+        keys.sort();
+        keys.retain(|k| k != "CheckMacValue");
+        assert_eq!(
+            keys,
+            [
+                "GoodsAmount",
+                "MerchantID",
+                "SenderName",
+                "ServerReplyURL",
+                "ServiceType"
+            ],
+            "SenderCellPhone absent when None"
+        );
+        assert_eq!(md5(&sent), sent["CheckMacValue"]);
+        pipe_reply(&[("RtnCode", "300"), ("AllPayLogisticsID", "1718601")])
+    });
+    let out = logistics_sdk(server)
+        .logistics_return_unimart_cvs(&ReturnCvsInput {
+            goods_amount: 550,
+            service_type: "4".into(),
+            sender_name: "陳大明".into(),
+            sender_cell_phone: None,
+            server_reply_url: "https://example.com/reply".into(),
+        })
+        .await
+        .expect("return unimart cvs");
+    assert_eq!(out["AllPayLogisticsID"], "1718601");
+}
+
+#[tokio::test]
+async fn return_home_posts_the_home_return_field_set() {
+    let server = spawn_http_server(|path, body| {
+        assert!(path.ends_with("/Express/ReturnHome"), "{path}");
+        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let mut keys: Vec<_> = sent.keys().cloned().collect();
+        keys.sort();
+        keys.retain(|k| k != "CheckMacValue");
+        assert_eq!(
+            keys,
+            [
+                "AllPayLogisticsID",
+                "Distance",
+                "GoodsAmount",
+                "MerchantID",
+                "ServerReplyURL",
+                "Temperature",
+            ],
+            "Specification absent when None"
+        );
+        assert_eq!(md5(&sent), sent["CheckMacValue"]);
+        pipe_reply(&[("RtnCode", "300"), ("AllPayLogisticsID", "1718602")])
+    });
+    let out = logistics_sdk(server)
+        .logistics_return_home(&ReturnHomeInput {
+            all_pay_logistics_id: "1718552".into(),
+            goods_amount: 1200,
+            temperature: "0001".into(),
+            distance: "00".into(),
+            specification: None,
+            server_reply_url: "https://example.com/reply".into(),
+        })
+        .await
+        .expect("return home");
+    assert_eq!(out["AllPayLogisticsID"], "1718602");
+}
+
+// --- Part 2: the AllInOne v2 AES-JSON family. Every request must ride the
+// {MerchantID, RqHeader{Timestamp, Revision}, Data} envelope, carry
+// MerchantID inside Data too, and hit the exact Express/v2/... action path.
+// Key-set pins catch serde-rename drift on the ten endpoints that never had
+// any coverage. ---
+
+fn assert_v2_envelope_and_decrypt(
+    path: &str,
+    body: &[u8],
+    expected_suffix: &str,
+) -> serde_json::Value {
+    assert!(
+        path.ends_with(expected_suffix),
+        "{path} must end with {expected_suffix}"
+    );
+    let env: serde_json::Value = serde_json::from_slice(body).expect("v2 envelope is JSON");
+    assert_eq!(env["MerchantID"], MERCHANT_ID, "envelope MerchantID");
+    let rq = env["RqHeader"].as_object().expect("RqHeader object");
+    let mut rq_keys: Vec<_> = rq.keys().map(|k| k.as_str()).collect();
+    rq_keys.sort();
+    assert_eq!(rq_keys, ["Revision", "Timestamp"], "v2 RqHeader keys");
+    assert_eq!(env["RqHeader"]["Revision"], "1.0.0");
+    ecpay::crypto::decrypt_data(
+        env["Data"].as_str().expect("Data is a string"),
+        LOGISTICS_KEY.as_bytes(),
+        LOGISTICS_IV.as_bytes(),
+    )
+    .expect("Data decrypts with the logistics keys")
+}
+
+fn v2_ok_reply(data: &serde_json::Value) -> (u16, String, Vec<u8>) {
+    (
+        200,
+        "application/json".into(),
+        serde_json::json!({
+            "MerchantID": MERCHANT_ID,
+            "RpHeader": {"Timestamp": 1},
+            "TransCode": 1,
+            "TransMsg": "Success",
+            "Data": ecpay::crypto::encrypt_data(data, LOGISTICS_KEY.as_bytes(), LOGISTICS_IV.as_bytes()).unwrap(),
+        })
+        .to_string()
+        .into_bytes(),
+    )
+}
+
+fn assert_data_key_set(data: &serde_json::Value, want: &[&str]) {
+    let mut got: Vec<String> = data
+        .as_object()
+        .expect("Data is an object")
+        .keys()
+        .cloned()
+        .collect();
+    got.sort();
+    assert_eq!(got, want, "exact Data key set");
+    assert_eq!(data["MerchantID"], MERCHANT_ID, "Data MerchantID rides too");
+}
+
+/// Same pin for the two inputs that intentionally carry NO Data-level
+/// MerchantID (UpdateTempTrade, CrossBorder Create) — the envelope alone
+/// identifies the merchant.
+fn assert_data_key_set_without_merchant_id(data: &serde_json::Value, want: &[&str]) {
+    let mut got: Vec<String> = data
+        .as_object()
+        .expect("Data is an object")
+        .keys()
+        .cloned()
+        .collect();
+    got.sort();
+    assert_eq!(got, want, "exact Data key set");
+    assert!(
+        !data.as_object().unwrap().contains_key("MerchantID"),
+        "no Data-level MerchantID on this endpoint"
+    );
+}
+
+#[tokio::test]
+async fn allinone_cancel_c2c_order_rides_the_v2_envelope() {
+    let server = spawn_http_server(|path, body| {
+        let data = assert_v2_envelope_and_decrypt(path, body, "/Express/v2/CancelC2COrder");
+        assert_data_key_set(
+            &data,
+            &[
+                "CVSPaymentNo",
+                "CVSValidationNo",
+                "LogisticsID",
+                "MerchantID",
+            ],
+        );
+        assert_eq!(data["CVSPaymentNo"], "C9681067");
+        v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+    });
+    let out = logistics_sdk(server)
+        .allinone_cancel_c2c_order(&AllInOneCancelC2cInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_id: "1769853".into(),
+            cvs_payment_no: "C9681067".into(),
+            cvs_validation_no: "2448".into(),
+        })
+        .await
+        .expect("allinone cancel c2c");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn allinone_return_cvs_family_hits_each_sub_type_path() {
+    // One shared input, three sub-type paths: CVS / HILIFE / UNIMART. The
+    // per-path split lives in the ACTION, not in extra fields — pin all
+    // three.
+    for expected in [
+        "/Express/v2/ReturnCVS",
+        "/Express/v2/ReturnHilifeCVS",
+        "/Express/v2/ReturnUniMartCVS",
+    ] {
+        let expected = expected.to_owned();
+        let want = expected.clone();
+        let hit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hit2 = hit.clone();
+        let server = spawn_http_server(move |path, body| {
+            let data = assert_v2_envelope_and_decrypt(path, body, &want);
+            assert_data_key_set(
+                &data,
+                &[
+                    "GoodsAmount",
+                    "LogisticsID",
+                    "MerchantID",
+                    "SenderName",
+                    "SenderPhone",
+                    "ServerReplyURL",
+                    "ServiceType",
+                ],
+            );
+            assert_eq!(data["ServiceType"], "4");
+            hit2.store(true, std::sync::atomic::Ordering::SeqCst);
+            v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+        });
+        let input = AllInOneReturnCvsInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_id: "1769853".into(),
+            goods_amount: 550,
+            service_type: "4".into(),
+            sender_name: "陳大明".into(),
+            sender_phone: Some("0911222333".into()),
+            server_reply_url: "https://example.com/reply".into(),
+        };
+        let sdk = logistics_sdk(server);
+        let out = match expected.as_str() {
+            "/Express/v2/ReturnCVS" => sdk.allinone_return_cvs(&input).await,
+            "/Express/v2/ReturnHilifeCVS" => sdk.allinone_return_hilife_cvs(&input).await,
+            _ => sdk.allinone_return_unimart_cvs(&input).await,
+        }
+        .unwrap_or_else(|e| panic!("{expected} failed: {e:?}"));
+        assert_eq!(out["RtnCode"], 1);
+        assert!(hit.load(std::sync::atomic::Ordering::SeqCst));
+    }
+}
+
+#[tokio::test]
+async fn allinone_return_home_omits_unset_specification() {
+    let server = spawn_http_server(|path, body| {
+        let data = assert_v2_envelope_and_decrypt(path, body, "/Express/v2/ReturnHome");
+        assert_data_key_set(
+            &data,
+            &[
+                "Distance",
+                "GoodsAmount",
+                "LogisticsID",
+                "MerchantID",
+                "ServerReplyURL",
+                "Temperature",
+            ],
+        );
+        v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+    });
+    let out = logistics_sdk(server)
+        .allinone_return_home(&AllInOneReturnHomeInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_id: "1769853".into(),
+            goods_amount: 1200,
+            temperature: "0001".into(),
+            distance: "00".into(),
+            specification: None,
+            server_reply_url: "https://example.com/reply".into(),
+        })
+        .await
+        .expect("allinone return home");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn allinone_update_temp_trade_posts_the_temp_field_set() {
+    let server = spawn_http_server(|path, body| {
+        let data = assert_v2_envelope_and_decrypt(path, body, "/Express/v2/UpdateTempTrade");
+        // Unlike the other AllInOne inputs, UpdateTempTradeInput carries NO
+        // Data-level MerchantID (only the envelope does) — pinned as-is.
+        assert_data_key_set_without_merchant_id(
+            &data,
+            &[
+                "Distance",
+                "GoodsAmount",
+                "ReceiverCellPhone",
+                "ReceiverName",
+                "SenderCellPhone",
+                "SenderName",
+                "Specification",
+                "TempLogisticsID",
+                "Temperature",
+            ],
+        );
+        assert_eq!(data["TempLogisticsID"], "2264");
+        v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+    });
+    let out = logistics_sdk(server)
+        .allinone_update_temp_trade(&UpdateTempTradeInput {
+            temp_logistics_id: "2264".into(),
+            sender_name: Some("陳大明".into()),
+            sender_cell_phone: Some("0911222333".into()),
+            receiver_name: Some("王小美".into()),
+            receiver_cell_phone: Some("0933222111".into()),
+            goods_amount: Some(1000),
+            temperature: Some("0001".into()),
+            distance: Some("00".into()),
+            specification: Some("A".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("allinone update temp trade");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn allinone_update_shipment_info_rides_the_v2_envelope() {
+    let server = spawn_http_server(|path, body| {
+        let data = assert_v2_envelope_and_decrypt(path, body, "/Express/v2/UpdateShipmentInfo");
+        assert_data_key_set(&data, &["LogisticsID", "MerchantID", "ShipmentDate"]);
+        assert_eq!(data["ShipmentDate"], "2026/09/12");
+        v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+    });
+    let out = logistics_sdk(server)
+        .allinone_update_shipment_info(&AllInOneUpdateShipmentInfoInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_id: "1769853".into(),
+            shipment_date: "2026/09/12".into(),
+        })
+        .await
+        .expect("allinone update shipment info");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn allinone_update_store_info_rides_the_v2_envelope() {
+    let server = spawn_http_server(|path, body| {
+        let data = assert_v2_envelope_and_decrypt(path, body, "/Express/v2/UpdateStoreInfo");
+        assert_data_key_set(
+            &data,
+            &[
+                "CVSPaymentNo",
+                "CVSValidationNo",
+                "LogisticsID",
+                "MerchantID",
+                "ReceiverStoreID",
+                "StoreType",
+            ],
+        );
+        v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+    });
+    let out = logistics_sdk(server)
+        .allinone_update_store_info(&AllInOneUpdateStoreInfoInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_id: "1769853".into(),
+            cvs_payment_no: "C9681067".into(),
+            cvs_validation_no: "2448".into(),
+            store_type: "01".into(),
+            receiver_store_id: "006598".into(),
+        })
+        .await
+        .expect("allinone update store info");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn allinone_create_test_data_rides_the_v2_envelope() {
+    let server = spawn_http_server(|path, body| {
+        let data = assert_v2_envelope_and_decrypt(path, body, "/Express/v2/CreateTestData");
+        assert_data_key_set(&data, &["LogisticsSubType", "MerchantID"]);
+        assert_eq!(data["LogisticsSubType"], "FAMI");
+        v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+    });
+    let out = logistics_sdk(server)
+        .allinone_create_test_data(&AllInOneCreateTestDataInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_sub_type: "FAMI".into(),
+        })
+        .await
+        .expect("allinone create test data");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+/// The two raw-response v2 endpoints (stage-truth: they answer text/html
+/// auto-submit forms, NOT an AES envelope) must surface the body verbatim —
+/// while the REQUEST is still a proper AES envelope with the right Data.
+#[tokio::test]
+async fn raw_html_v2_endpoints_surface_the_html_verbatim() {
+    for expected in [
+        "/Express/v2/PrintTradeDocument",
+        "/Express/v2/RedirectToLogisticsSelection",
+    ] {
+        let expected = expected.to_owned();
+        let want = expected.clone();
+        let is_print = expected == "/Express/v2/PrintTradeDocument";
+        let server = spawn_http_server(move |path, body| {
+            let data = assert_v2_envelope_and_decrypt(path, body, &want);
+            if is_print {
+                assert_data_key_set(&data, &["LogisticsID", "LogisticsSubType", "MerchantID"]);
+                assert_eq!(
+                    data["LogisticsID"],
+                    serde_json::json!(["1717876", "1717877"]),
+                    "LogisticsID rides as a JSON array"
+                );
+            } else {
+                // Official PHP example: NO Data-level MerchantID on this
+                // endpoint (it rides the envelope only).
+                assert_data_key_set_without_merchant_id(
+                    &data,
+                    &[
+                        "ClientReplyURL",
+                        "GoodsAmount",
+                        "GoodsName",
+                        "SenderAddress",
+                        "SenderName",
+                        "SenderZipCode",
+                        "ServerReplyURL",
+                        "TempLogisticsID",
+                        "Temperature",
+                    ],
+                );
+                assert_eq!(data["TempLogisticsID"], "2264");
+            }
+            (
+                200,
+                "text/html".into(),
+                b"<html><body>print page</body></html>".to_vec(),
+            )
+        });
+        let sdk = logistics_sdk(server);
+        let out = if is_print {
+            sdk.allinone_print_trade_document(&AllInOnePrintTradeDocumentInput {
+                merchant_id: MERCHANT_ID.into(),
+                logistics_ids: vec!["1717876".into(), "1717877".into()],
+                logistics_sub_type: "FAMI".into(),
+            })
+            .await
+        } else {
+            sdk.allinone_redirect_to_logistics_selection(&AllInOneRedirectInput {
+                temp_logistics_id: "2264".into(),
+                goods_amount: 100,
+                goods_name: "範例商品".into(),
+                sender_name: "陳大明".into(),
+                sender_zip_code: "11560".into(),
+                sender_address: "台北市南港區三重路19-2號6樓".into(),
+                temperature: Some("0001".into()),
+                server_reply_url: "https://example.com/reply".into(),
+                client_reply_url: "https://example.com/client".into(),
+            })
+            .await
+        }
+        .unwrap_or_else(|e| panic!("{expected} failed: {e:?}"));
+        assert_eq!(
+            out, "<html><body>print page</body></html>",
+            "raw HTML verbatim"
+        );
+    }
+}
+
+// --- Part 3: CrossBorder — never covered at all (the stage account lacks
+// the service, TransCode 128), so hermetic pins are the only coverage these
+// three get. ---
+
+#[tokio::test]
+async fn crossborder_create_posts_the_full_field_set_with_go_float_weight() {
+    let server = spawn_http_server(|path, body| {
+        let data = assert_v2_envelope_and_decrypt(path, body, "/CrossBorder/Create");
+        // Official PHP example (CreateUnimartCvsOrder.php): MerchantID rides
+        // as the FIRST field of Data, not only the envelope.
+        assert_data_key_set(
+            &data,
+            &[
+                "GoodsAmount",
+                "GoodsEnglishName",
+                "GoodsWeight",
+                "LogisticsSubType",
+                "LogisticsType",
+                "MerchantID",
+                "MerchantTradeDate",
+                "MerchantTradeNo",
+                "ReceiverCellPhone",
+                "ReceiverCountry",
+                "ReceiverEmail",
+                "ReceiverName",
+                "ReceiverStoreID",
+                "SenderAddress",
+                "SenderCellPhone",
+                "SenderEmail",
+                "SenderName",
+                "ServerReplyURL",
+            ],
+        );
+        assert_eq!(data["GoodsWeight"], 1.5, "go_float shortest round-trip");
+        assert_eq!(data["ReceiverCountry"], "SG");
+        v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+    });
+    let out = logistics_sdk(server)
+        .crossborder_create(&CrossBorderCreateInput {
+            merchant_id: MERCHANT_ID.into(),
+            merchant_trade_date: "2026/09/12 12:00:00".into(),
+            merchant_trade_no: "CBWIRE000001".into(),
+            logistics_type: "CB".into(),
+            logistics_sub_type: "UNIMARTCBCVS".into(),
+            goods_amount: 2000,
+            goods_weight: 1.5,
+            goods_english_name: "Test Goods".into(),
+            receiver_country: "SG".into(),
+            receiver_name: "Tan Mei Mei".into(),
+            receiver_cell_phone: "+6591234567".into(),
+            receiver_store_id: Some("711_1".into()),
+            receiver_email: "receiver@email.com".into(),
+            sender_name: "Chen Ta Ming".into(),
+            sender_cell_phone: "+886911222333".into(),
+            sender_address: "Taipei".into(),
+            sender_email: "sender@email.com".into(),
+            server_reply_url: "https://example.com/reply".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("crossborder create");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn crossborder_create_test_data_rides_the_v2_envelope() {
+    let server = spawn_http_server(|path, body| {
+        let data = assert_v2_envelope_and_decrypt(path, body, "/CrossBorder/CreateTestData");
+        assert_data_key_set(
+            &data,
+            &["Country", "LogisticsSubType", "LogisticsType", "MerchantID"],
+        );
+        assert_eq!(data["Country"], "SG");
+        v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+    });
+    let out = logistics_sdk(server)
+        .crossborder_create_test_data(&CrossBorderCreateTestDataInput {
+            merchant_id: MERCHANT_ID.into(),
+            country: "SG".into(),
+            logistics_type: "CB".into(),
+            logistics_sub_type: "UNIMARTCBCVS".into(),
+        })
+        .await
+        .expect("crossborder create test data");
+    assert_eq!(out["RtnCode"], 1);
+}
+
+#[tokio::test]
+async fn crossborder_query_and_print_share_the_ref_input_shape() {
+    for expected in ["/CrossBorder/QueryLogisticsTradeInfo", "/CrossBorder/Print"] {
+        let expected = expected.to_owned();
+        let want = expected.clone();
+        let server = spawn_http_server(move |path, body| {
+            let data = assert_v2_envelope_and_decrypt(path, body, &want);
+            assert_data_key_set(&data, &["LogisticsID", "MerchantID"]);
+            assert_eq!(data["LogisticsID"], "1769853");
+            v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
+        });
+        let sdk = logistics_sdk(server);
+        let input = CrossBorderRefInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_id: "1769853".into(),
+        };
+        let out = if expected == "/CrossBorder/QueryLogisticsTradeInfo" {
+            sdk.crossborder_query_logistics_trade_info(&input).await
+        } else {
+            sdk.crossborder_print(&input).await
+        }
+        .unwrap_or_else(|e| panic!("{expected} failed: {e:?}"));
+        assert_eq!(out["RtnCode"], 1);
+    }
 }
