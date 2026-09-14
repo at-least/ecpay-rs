@@ -42,7 +42,36 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{api_error, Result};
+use crate::wire::wire_enum;
 use crate::Ecpay;
+
+// --- B2B 發票的代碼欄位 enum(per-service;B2B 規格頁的值域) ---
+
+wire_enum! {
+    /// B2B 發票的課稅類別 (`TaxType`,1/2/3/4——**沒有** B2C 的混合 `'9'`,
+    /// 與 [`crate::payment::TaxType`]、[`crate::invoice::TaxType`] 值域
+    /// 不同,型別刻意分開)。
+    TaxType {
+        /// 應稅 (1)
+        Dutiable => "1",
+        /// 零稅率 (2)
+        ZeroRate => "2",
+        /// 免稅 (3)
+        Free => "3",
+        /// 應稅(特種稅率) (4)
+        SpecialTaxable => "4",
+    }
+}
+
+wire_enum! {
+    /// B2B 發票的字軌類別 (`InvType`,07/08)。
+    InvType {
+        /// 一般稅額 (07)
+        General => "07",
+        /// 特種稅額 (08)
+        Special => "08",
+    }
+}
 
 impl Ecpay {
     /// B2B 的 `MerchantID` 要同時出現在信封與 `Data` 內（見模組文件）。
@@ -101,9 +130,9 @@ pub struct IssueB2bInput {
     #[serde(rename = "CustomerEmail")]
     pub customer_email: String, // 買方電子信箱 多組以半形分號區隔
     #[serde(rename = "InvType")]
-    pub inv_type: String, // 字軌類別 '07' 一般稅額 '08' 特種稅額
+    pub inv_type: InvType, // 字軌類別(見 enum 文件)
     #[serde(rename = "TaxType")]
-    pub tax_type: String, // 課稅類別 '1' 應稅 '2' 零稅率 '3' 免稅 '4' 應稅(特種稅率)
+    pub tax_type: TaxType, // 課稅類別(見 enum 文件)
     #[serde(rename = "Items")]
     pub items: Vec<B2bItem>, // 商品明細
     /// 銷售額合計 ＝ `Items[].ItemAmount` 加總，且

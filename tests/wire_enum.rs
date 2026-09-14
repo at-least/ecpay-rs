@@ -58,6 +58,14 @@ fn as_str_tables_are_pinned() {
     assert_eq!(invoice::CarrierType::Cellphone.as_str(), "3");
     assert_eq!(invoice::InvType::General.as_str(), "07");
     assert_eq!(invoice::InvType::Special.as_str(), "08");
+
+    // B2B:值域是 B2C 減去混合 '9'(獨立型別,送 '9' 需刻意 Other)。
+    assert_eq!(ecpay::invoice_b2b::TaxType::Dutiable.as_str(), "1");
+    assert_eq!(ecpay::invoice_b2b::TaxType::ZeroRate.as_str(), "2");
+    assert_eq!(ecpay::invoice_b2b::TaxType::Free.as_str(), "3");
+    assert_eq!(ecpay::invoice_b2b::TaxType::SpecialTaxable.as_str(), "4");
+    assert_eq!(ecpay::invoice_b2b::InvType::General.as_str(), "07");
+    assert_eq!(ecpay::invoice_b2b::InvType::Special.as_str(), "08");
 }
 
 /// Display → From 的往返:每個已建模 variant 的字串都映射回自己。
