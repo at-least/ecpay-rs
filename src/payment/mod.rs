@@ -630,7 +630,7 @@ impl Ecpay {
             ("MerchantTradeNo".to_owned(), order_id.to_owned()),
             (
                 "TimeStamp".to_owned(),
-                crate::crypto::unix_now().to_string(),
+                crate::client::unix_now().to_string(),
             ), // note ECPay's spelling
         ]
         .into_iter()

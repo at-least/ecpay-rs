@@ -33,8 +33,9 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::client::{post_form, render_auto_submit_form};
-use crate::crypto::{check_mac_value, unix_now, verify_mac};
+use crate::client::render_auto_submit_form;
+use crate::client::unix_now;
+use crate::crypto::{check_mac_value, verify_mac};
 use crate::error::{Error, Result};
 use crate::Ecpay;
 
@@ -118,7 +119,7 @@ impl Ecpay {
         mut params: HashMap<String, String>,
     ) -> Result<BTreeMap<String, String>> {
         self.sign_logistics(&mut params)?;
-        let body = post_form(&endpoint, &params).await?;
+        let body = self.post_form(&endpoint, &params).await?;
         let text = String::from_utf8_lossy(&body);
         let (status, query) = split_status_prefix(&text);
         let mut fields = crate::client::parse_qsl(query);
@@ -473,7 +474,7 @@ impl Ecpay {
         m.insert("CvsType".to_owned(), input.cvs_type.clone());
         self.sign_logistics(&mut m)?;
         let endpoint = format!("{}Helper/GetStoreList", self.logistics_base_url());
-        let body = post_form(&endpoint, &m).await?;
+        let body = self.post_form(&endpoint, &m).await?;
         Ok(serde_json::from_slice(&body)?)
     }
 

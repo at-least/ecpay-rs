@@ -462,7 +462,7 @@ impl Ecpay {
     ) -> Result<O> {
         self.post_aes_json(
             &endpoint,
-            serde_json::json!({ "Timestamp": crate::crypto::unix_now() }),
+            serde_json::json!({ "Timestamp": crate::client::unix_now() }),
             &self.merchant_id,
             input,
             self.hash_key.as_bytes(),

@@ -248,3 +248,40 @@ fn aio_check_out_is_deterministic() {
     assert_eq!(a.params(), b.params());
     assert_eq!(a.html_form(), b.html_form());
 }
+
+/// The injected `http` client is the one that actually sends the request: a
+/// client carrying a distinctive User-Agent must show up verbatim in the
+/// request head at the server (with `http: None` the shared hardened client
+/// is used instead — covered by every other test in this crate).
+#[tokio::test]
+async fn injected_http_client_is_used() {
+    use common::spawn_http_server_with_head;
+
+    let injected = reqwest::Client::builder()
+        .user_agent("ecpay-test-injected-client")
+        .build()
+        .expect("build injected client");
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let seen2 = seen.clone();
+    let srv = spawn_http_server_with_head(move |_path, head, _body| {
+        *seen2.lock().unwrap() = head.to_owned();
+        (
+            200,
+            "text/html; charset=utf-8".to_owned(),
+            b"MerchantID=3002607&TradeStatus=1".to_vec(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        http: Some(injected),
+        ..sdk()
+    };
+    // query_trade_info does not verify a response CheckMacValue, so the
+    // 2-field body decodes cleanly; the header assertion is the point.
+    client.query_trade_info("x").await.expect("decodes");
+    let head = seen.lock().unwrap().clone();
+    assert!(
+        head.contains("ecpay-test-injected-client"),
+        "the injected client's User-Agent must reach the server, head: {head}"
+    );
+}

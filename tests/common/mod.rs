@@ -8,6 +8,16 @@ pub fn spawn_http_server<F>(handler: F) -> String
 where
     F: Fn(&str, &[u8]) -> (u16, String, Vec<u8>) + Send + 'static,
 {
+    spawn_http_server_with_head(move |path, _head, body| handler(path, body))
+}
+
+/// Like [`spawn_http_server`], but the handler also receives the raw
+/// request head (request line + headers) — for asserting which HTTP client
+/// sent the request.
+pub fn spawn_http_server_with_head<F>(handler: F) -> String
+where
+    F: Fn(&str, &str, &[u8]) -> (u16, String, Vec<u8>) + Send + 'static,
+{
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
     let addr = listener.local_addr().unwrap();
     std::thread::spawn(move || {
@@ -53,7 +63,7 @@ where
                     Err(_) => break,
                 }
             }
-            let (status, content_type, resp_body) = handler(&path, &body);
+            let (status, content_type, resp_body) = handler(&path, &head, &body);
             let response = format!(
                 "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 resp_body.len()

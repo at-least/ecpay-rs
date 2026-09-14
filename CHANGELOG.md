@@ -51,3 +51,14 @@ _金鑰型別統一：_
   `logistics_hash_iv` 從 `Vec<u8>` 改為 `String`，與 `hash_key`/`hash_iv`
   一致（呼叫端從 `b"...".to_vec()` 變成 `"...".into()`）；`as_bytes()`
   收斂到單一私有存取點 `invoice_keys()` / `logistics_keys()`。
+
+## Unreleased（續）
+
+_HTTP client 注入：_
+
+- `Ecpay` 新增 `http: Option<reqwest::Client>` 欄位：注入自訂 client
+  （連線池/逾時政策、測試 mock）；`None`（預設）沿用共用的 hardened
+  client（不跟隨重導、10s 連線/30s 總逾時、不池化閒置連線）。注入的
+  client 原樣使用——hardening 不會（也無法）套用到它。
+- 內部：`http_client()` / `unix_now()` 從 `crypto.rs` 搬到 `client.rs`
+  （運輸層關注點歸位；均為 crate 私有）。

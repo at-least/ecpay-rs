@@ -208,6 +208,12 @@ pub struct Ecpay {
     /// two distinct invoices), but production integrations should still make
     /// it unique per request for their own auditing.
     pub b2b_rq_id: String,
+    /// Optional injected HTTP client (your own pooling/timeout policy, or a
+    /// mock in tests). `None` (the default) uses the crate's shared hardened
+    /// client: no redirect following, 10s connect / 30s overall timeouts, no
+    /// idle-connection pooling. An injected client is used **as-is** — the
+    /// hardening is not (and cannot be) applied to it.
+    pub http: Option<reqwest::Client>,
 }
 
 impl std::fmt::Debug for Ecpay {
@@ -232,7 +238,9 @@ impl std::fmt::Debug for Ecpay {
             .field("ecpg_api_url", &self.ecpg_api_url)
             .field("ecpayment_api_url", &self.ecpayment_api_url)
             .field("b2b_invoice_api_url", &self.b2b_invoice_api_url)
-            .field("b2b_rq_id", &self.b2b_rq_id);
+            .field("b2b_rq_id", &self.b2b_rq_id)
+            // The client carries no secrets but also nothing worth dumping.
+            .field("http", &self.http.as_ref().map(|_| "client"));
         s.finish()
     }
 }

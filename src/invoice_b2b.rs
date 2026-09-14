@@ -65,7 +65,7 @@ impl Ecpay {
         self.b2b_require_data_merchant_id(data_merchant_id)?;
         let endpoint = format!("{}{}", self.b2b_base_url(), action);
         let rq_header = serde_json::json!({
-            "Timestamp": crate::crypto::unix_now(),
+            "Timestamp": crate::client::unix_now(),
             "RqID": self.b2b_rq_id.clone(),
             "Revision": "1.0.0",
         });

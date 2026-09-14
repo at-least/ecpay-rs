@@ -12,7 +12,6 @@
 //! `%7e` behavior; see `url_encode` and the README's compatibility notes.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use aes::cipher::{Block, BlockCipherDecrypt, BlockCipherEncrypt, BlockSizeUser, KeyInit};
 use base64::Engine;
@@ -406,47 +405,6 @@ fn unpad_pkcs7(ciphertext: &[u8]) -> Result<&[u8]> {
         }
     }
     Ok(&ciphertext[..length - unpadding as usize])
-}
-
-/// Go `int(time.Now().Unix())`.
-pub(crate) fn unix_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-/// The package-level HTTP client. Hardened for payment traffic: no redirect
-/// following (a 30x on a signed API POST is either misconfiguration or an
-/// attempt to replay the payload elsewhere — ECPay's API endpoints answer
-/// directly, never redirect), a 10s connect timeout, and a 30s overall
-/// timeout (ECPay's stage endpoints have been observed to hang).
-///
-/// `pool_max_idle_per_host(0)`: this client is a process-wide `OnceLock`,
-/// but every `#[tokio::test]` spins up and tears down its own Tokio
-/// runtime. A default reqwest client keeps idle keep-alive connections (and
-/// the hyper task driving them) alive across calls; if that task was
-/// spawned on one test's runtime and a later test — on a different runtime —
-/// reuses the pooled connection, the driving task is already gone and the
-/// request fails with `hyper::Error(SendRequest, ... DispatchGone,
-/// "runtime dropped the dispatch task")`. Confirmed live (2026-09) once
-/// `tests/sandbox.rs` grew past ~5 concurrently-running live tests, at
-/// which point the race went from theoretical to reliably reproducible.
-/// Disabling idle-connection reuse trades a little latency (one fresh
-/// connection per call instead of reuse) for eliminating that whole class
-/// of failure — an acceptable trade for a payment/invoice SDK's low-QPS,
-/// call-then-wait usage pattern.
-pub(crate) fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(30))
-            .pool_max_idle_per_host(0)
-            .build()
-            .expect("ecpay http client")
-    })
 }
 
 /// serde helper for the AES-JSON money fields (ItemCount/ItemPrice/

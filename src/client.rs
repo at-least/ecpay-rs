@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{check_mac_value, decrypt_data, encrypt_data, http_client, query_unescape};
+use crate::crypto::{check_mac_value, decrypt_data, encrypt_data, query_unescape};
 use crate::error::{Error, Result};
 use crate::Ecpay;
 
@@ -279,40 +279,47 @@ async fn body_string(resp: &mut reqwest::Response) -> Result<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-/// POST the params as a urlencoded form (Python `requests.post(url,
-/// data=params)`): keys sorted for deterministic wire bytes, values
-/// QueryEscape'd. Returns the raw body bytes for the Big5 endpoints.
-pub(crate) async fn post_form(endpoint: &str, params: &HashMap<String, String>) -> Result<Vec<u8>> {
-    let mut pairs: Vec<(String, String)> =
-        params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    pairs.sort_by(|a, b| a.0.cmp(&b.0));
-    let encoded = pairs
-        .iter()
-        .map(|(k, v)| {
-            format!(
-                "{}={}",
-                crate::crypto::query_escape(k),
-                crate::crypto::query_escape(v)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("&");
-    let resp = http_client()
-        .post(endpoint)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(encoded)
-        .send()
-        .await?;
-    let status = resp.status().as_u16();
-    let mut resp = resp;
-    let body = read_body_limited(&mut resp).await?;
-    if !(200..300).contains(&status) {
-        return Err(Error::PaymentStatus {
-            status,
-            body: String::from_utf8_lossy(&body).into_owned(),
-        });
+impl Ecpay {
+    /// POST the params as a urlencoded form (Python `requests.post(url,
+    /// data=params)`): keys sorted for deterministic wire bytes, values
+    /// QueryEscape'd. Returns the raw body bytes for the Big5 endpoints.
+    pub(crate) async fn post_form(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<Vec<u8>> {
+        let mut pairs: Vec<(String, String)> =
+            params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        let encoded = pairs
+            .iter()
+            .map(|(k, v)| {
+                format!(
+                    "{}={}",
+                    crate::crypto::query_escape(k),
+                    crate::crypto::query_escape(v)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("&");
+        let resp = self
+            .http()
+            .post(endpoint)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(encoded)
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        let mut resp = resp;
+        let body = read_body_limited(&mut resp).await?;
+        if !(200..300).contains(&status) {
+            return Err(Error::PaymentStatus {
+                status,
+                body: String::from_utf8_lossy(&body).into_owned(),
+            });
+        }
+        Ok(body)
     }
-    Ok(body)
 }
 
 impl Ecpay {
@@ -331,7 +338,8 @@ impl Ecpay {
             params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         pairs.push(("CheckMacValue".to_owned(), mac));
         let encoded = encode_query(&pairs);
-        let mut resp = http_client()
+        let mut resp = self
+            .http()
             .post(endpoint)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .body(encoded)
@@ -382,7 +390,8 @@ impl Ecpay {
             "RqHeader": rq_header,
             "Data": data,
         });
-        let mut resp = http_client()
+        let mut resp = self
+            .http()
             .post(endpoint)
             .header("Content-Type", "application/json; charset=utf-8")
             .body(envelope.to_string())
@@ -418,7 +427,8 @@ impl Ecpay {
             "RqHeader": rq_header,
             "Data": data,
         });
-        let mut resp = http_client()
+        let mut resp = self
+            .http()
             .post(endpoint)
             .header("Content-Type", "application/json; charset=utf-8")
             .body(envelope.to_string())
@@ -470,12 +480,13 @@ impl Ecpay {
             data,
             rq_header: RqHeader {
                 revision: "3.0.0".to_owned(),
-                timestamp: crate::crypto::unix_now(),
+                timestamp: crate::client::unix_now(),
                 rq_id: String::new(),
             },
         };
         let j = serde_json::to_string(&req)?;
-        let mut resp = http_client()
+        let mut resp = self
+            .http()
             .post(endpoint)
             .header("Content-Type", "application/json; charset=utf-8")
             .body(j)
@@ -511,7 +522,15 @@ impl Ecpay {
         endpoint: &str,
         params: &HashMap<String, String>,
     ) -> Result<Vec<u8>> {
-        post_form(endpoint, params).await
+        self.post_form(endpoint, params).await
+    }
+
+    /// The HTTP client requests are sent with: an injected
+    /// [`Ecpay::http`] client as-is, or the shared hardened default below.
+    pub(crate) fn http(&self) -> reqwest::Client {
+        self.http
+            .clone()
+            .unwrap_or_else(|| shared_http_client().clone())
     }
 
     /// Recompute the CheckMacValue for the params of an outbound request with
@@ -525,6 +544,49 @@ impl Ecpay {
         with_id.insert("MerchantID".to_owned(), self.merchant_id.clone());
         check_mac_value(&with_id, &self.hash_key, &self.hash_iv, encrypt_type)
     }
+}
+
+/// Go `int(time.Now().Unix())`.
+pub(crate) fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// The shared fallback HTTP client, used when [`Ecpay::http`] is not set.
+/// Hardened for payment traffic: no redirect following (a 30x on a signed
+/// API POST is either misconfiguration or an attempt to replay the payload
+/// elsewhere — ECPay's API endpoints answer directly, never redirect), a
+/// 10s connect timeout, and a 30s overall timeout (ECPay's stage endpoints
+/// have been observed to hang).
+///
+/// `pool_max_idle_per_host(0)`: this client is a process-wide `OnceLock`,
+/// but every `#[tokio::test]` spins up and tears down its own Tokio
+/// runtime. A default reqwest client keeps idle keep-alive connections (and
+/// the hyper task driving them) alive across calls; if that task was
+/// spawned on one test's runtime and a later test — on a different runtime —
+/// reuses the pooled connection, the driving task is already gone and the
+/// request fails with `hyper::Error(SendRequest, ... DispatchGone,
+/// "runtime dropped the dispatch task")`. Confirmed live (2026-09) once
+/// `tests/sandbox.rs` grew past ~5 concurrently-running live tests, at
+/// which point the race went from theoretical to reliably reproducible.
+/// Disabling idle-connection reuse trades a little latency (one fresh
+/// connection per call instead of reuse) for eliminating that whole class
+/// of failure — an acceptable trade for a payment/invoice SDK's low-QPS,
+/// call-then-wait usage pattern. Callers that need pooling inject their own
+/// client via [`Ecpay::http`].
+fn shared_http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(0)
+            .build()
+            .expect("ecpay http client")
+    })
 }
 
 #[cfg(test)]
