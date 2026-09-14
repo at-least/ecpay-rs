@@ -71,6 +71,28 @@ _審查跟進：_
 - README 補上自訂 HTTP client 段落；英文版「compile-time」過度陳述一併
   修正；`Ecpay` 的 Debug 文件列出全部六個遮蔽的金鑰欄位。
 
+_選擇性 enumify(監管級穩定代碼欄位;advisor 裁決 per-service + Other 穿隧):_
+
+- 新增 `wire_enum!` 生成的 `#[non_exhaustive]` enum(`Other(String)`
+  原樣穿隧未知代碼;`Default`=`Other("")` 維持 wire zero-value 語意;
+  `From<&str>` 讓 `"1".into()` 建構點續用):
+  - `ecpay::payment`:`TaxType`(1/2/3/9)、`Donation`(AIO 語彙 1/2)、
+    `PrintMark`、`CarruerType`、`ClearanceMark`、`InvType`、`PeriodType`、
+    `CreditAction`——取代同名的 String 常數 module(已移除)。
+    `AioCheckOutParams.period_type`、`InvoiceExtend` 的對應欄位、
+    `CreditDoActionParams.action`/`CreditCardPeriodActionParams.action`
+    改為 enum 型別。
+  - `ecpay::invoice`:`TaxType`(1/2/3/4/9)、`Donation`(0/1)、`PrintMark`、
+    `CarrierType`、`ClearanceMark`(1=非經海關——與 AIO 相反)、`InvType`。
+    `IssueInput`/`IssueModel`/`DelayIssueInput` 與字軌查詢結構的對應欄位
+    改為 enum。
+  - `ecpay::invoice_b2b`:`TaxType`(1/2/3/4,無混合 9)、`InvType`。
+  - 同名欄位跨服務值域/語意不同(Donation、TaxType、ClearanceMark)——
+    per-service 型別讓互抄無法編譯;`payment::ClearanceMark` 的
+    `Yes`/`No` 變體改名 `ViaCustoms`/`NotViaCustoms`(語意明確)。
+  - enum 欄位的本地「max langth」長度檢查隨 String 欄位移除;必填檢查
+    保留官方訊息(`content is required.`),值(含未知代碼)由綠界裁定。
+
 _新增：_
 
 - `ecpay::MERCHANT_TRADE_DATE_FORMAT`（chrono 格式 `"%Y/%m/%d %H:%M:%S"`）：

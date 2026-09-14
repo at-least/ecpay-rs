@@ -70,7 +70,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ### 產生訂單(超商代碼 + 發票)
 
 ```rust
-use ecpay::payment::{donation, inv_type, print_mark, tax_type, AioCheckOutParams, ChoosePayment, InvoiceExtend};
+use ecpay::payment::{Donation, InvType, PrintMark, TaxType, AioCheckOutParams, ChoosePayment, InvoiceExtend};
 use ecpay::Ecpay;
 
 let client = Ecpay {
@@ -96,15 +96,15 @@ let checkout = client.aio_check_out(&AioCheckOutParams {
         customer_name: Some("客戶名稱".into()),
         customer_addr: Some("台北市中正區100號".into()),
         customer_phone: Some("0912345678".into()),
-        tax_type: tax_type::DUTIABLE.into(),
-        donation: donation::NO.into(),
-        print: print_mark::NO.into(),
+        tax_type: TaxType::Dutiable,
+        donation: Donation::No,
+        print: PrintMark::No,
         invoice_item_name: "測試商品1#測試商品2".into(),
         invoice_item_count: "2#3".into(),
         invoice_item_word: "個#包".into(),
         invoice_item_price: "350#100".into(),
         delay_day: 0,
-        inv_type: inv_type::GENERAL.into(),
+        inv_type: InvType::General,
         ..Default::default()
     }),
     ..Default::default()                                     // PaymentType=aio、EncryptType=1
@@ -153,7 +153,7 @@ println!("TradeStatus = {}", info["TradeStatus"]);
 let result = client.credit_do_action(&CreditDoActionParams {
     merchant_trade_no: "NO20240101120000".into(),
     trade_no: "2308150001".into(),
-    action: ecpay::payment::action::CLOSE.into(),
+    action: ecpay::payment::CreditAction::Close,
     total_amount: 100,
     platform_id: None,
 }).await?;
