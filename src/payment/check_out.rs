@@ -692,21 +692,21 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
         ));
     }
     // 統一編號 CustomerIdentifier 有值時，一定要列印
-    if !customer_identifier.is_empty() && inv.print == PrintMark::No {
+    if !customer_identifier.is_empty() && inv.print.as_str() == PrintMark::No.as_str() {
         return Err(Error::Validation(
             "Print have to fill \"1\", when CustomerIdentifier have value.".into(),
         ));
     }
     // 統一編號 CustomerIdentifier 有值時，Donation 要為不捐贈(SDK 訊息寫 "0"，
     // 判斷為 AIO 語彙的不可捐贈 '1')
-    if !customer_identifier.is_empty() && inv.donation == Donation::Yes {
+    if !customer_identifier.is_empty() && inv.donation.as_str() == Donation::Yes.as_str() {
         return Err(Error::Validation(
             "Donation have to fill \"0\", when CustomerIdentifier have value.".into(),
         ));
     }
 
     // 當列印註記 Print 為 1 (列印)時，CustomerName 與 CustomerAddr 必須有值
-    if inv.print == PrintMark::Yes {
+    if inv.print.as_str() == PrintMark::Yes.as_str() {
         if inv.customer_name.as_deref().unwrap_or("").is_empty() {
             return Err(Error::Validation("CustomerName have to fill value.".into()));
         }
@@ -731,8 +731,8 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
     }
 
     // 當 Donation 為捐贈時，Print 要為不列印，且 LoveCode 須有值
-    if inv.donation == Donation::Yes {
-        if inv.print == PrintMark::Yes {
+    if inv.donation.as_str() == Donation::Yes.as_str() {
+        if inv.print.as_str() == PrintMark::Yes.as_str() {
             return Err(Error::Validation(
                 "Print have to fill \"0\", when Donation is \"1\".".into(),
             ));
