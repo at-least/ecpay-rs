@@ -200,7 +200,7 @@ async fn http_500_with_a_valid_envelope_surfaces_the_business_error() {
 async fn gateway_json_without_transcode_is_not_mistaken_for_an_envelope() {
     // A proxy/gateway JSON body on a non-2xx carries no TransCode — the
     // client must keep the HTTP status and body instead of decoding it into
-    // a meaningless Transport{code:0}.
+    // a meaningless TransCode{code:0}.
     let server = spawn_http_server(|_path, _body| {
         (
             502,

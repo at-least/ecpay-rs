@@ -3,9 +3,9 @@
 //! The official SDK takes a free-form dict, merges in the parameter groups
 //! selected by `ChoosePayment`/invoice, validates, and signs. Here the groups
 //! are typed [`Option`] fields: `None` is the "absent" that the SDK's filter
-//! stage deletes, and required fields are plain `String`/`i64` enforced at
-//! compile time and re-checked for emptiness/length at runtime (same messages
-//! as the SDK).
+//! stage deletes, and required fields are non-`Option` `String`/`i64`/enum
+//! values checked for emptiness/length at runtime (same messages as the
+//! SDK).
 //!
 //! Two intentional deviations, both documented in the README: fields set for
 //! a payment method they do not belong to are a validation error (the SDK
@@ -16,12 +16,22 @@
 use crate::client::render_auto_submit_form;
 use std::collections::{BTreeMap, HashMap};
 
+use super::params::{
+    insert_optional_int, insert_optional_int_seq, insert_optional_str, insert_optional_str_seq,
+    optional_str, py_len, required_code, required_str,
+};
+use super::{CarruerType, ClearanceMark, Donation, InvType, PeriodType, PrintMark, TaxType};
+use crate::crypto::query_escape;
+use crate::error::{Error, Result};
+use crate::payment::ChoosePayment;
+use crate::Ecpay;
+
 /// ECPay `MerchantTradeDate` 的日期時間格式（chrono 格式字串）：
 /// `yyyy/MM/dd HH:mm:ss`。付款查詢回應的 `PaymentDate`/`TradeDate`
 /// 也是同一樣式。⚠️ ECPay 要求 **UTC+8（台灣時間）** — 海外或 UTC 伺服器
 /// 必須先轉換，超過允許時差的訂單會被拒絕。
 ///
-/// 注意：這是本 crate 唯一「文件性」常數 — crate 本身不格式化日期
+/// 注意：這是「文件性」常數 — crate 本身不格式化日期
 /// （`merchant_trade_date` 由呼叫端自備），提供它是為了讓 chrono 使用者
 /// 不必重抄樣式。`time` crate 的使用者請自行對應
 /// （`[year]/[month]/[day] [hour]:[minute]:[second]`）。
@@ -39,17 +49,6 @@ use std::collections::{BTreeMap, HashMap};
 /// );
 /// ```
 pub const MERCHANT_TRADE_DATE_FORMAT: &str = "%Y/%m/%d %H:%M:%S";
-
-use super::params::{
-    insert_optional_code, insert_optional_code_seq, insert_optional_int, insert_optional_int_seq,
-    insert_optional_str, insert_optional_str_seq, optional_str, py_len, required_code,
-    required_str,
-};
-use super::{CarruerType, ClearanceMark, Donation, InvType, PeriodType, PrintMark, TaxType};
-use crate::crypto::query_escape;
-use crate::error::{Error, Result};
-use crate::payment::ChoosePayment;
-use crate::Ecpay;
 
 /// The All-in-One checkout parameters (`AioCheckOutParam`). Required fields
 /// are non-`Option`; optional fields are `None`-absent and only sent when
@@ -569,9 +568,9 @@ fn add_invoice_fields(
         insert_escaped(m, "CustomerAddr", &inv.customer_addr);
         insert_optional_str(m, "CustomerPhone", &inv.customer_phone);
         insert_escaped(m, "CustomerEmail", &inv.customer_email);
-        insert_optional_code(m, "ClearanceMark", &inv.clearance_mark);
+        insert_optional_str(m, "ClearanceMark", &inv.clearance_mark);
         m.insert("TaxType".to_owned(), inv.tax_type.as_str().to_owned());
-        insert_optional_code(m, "CarruerType", &inv.carruer_type);
+        insert_optional_str(m, "CarruerType", &inv.carruer_type);
         insert_optional_str(m, "CarruerNum", &inv.carruer_num);
         m.insert("Donation".to_owned(), inv.donation.as_str().to_owned());
         insert_optional_str(m, "LoveCode", &inv.love_code);
@@ -634,7 +633,7 @@ fn credit_plan_pairs(p: &AioCheckOutParams) -> Option<Vec<(String, String)>> {
     {
         let mut v = Vec::new();
         insert_optional_int_seq(&mut v, "PeriodAmount", &p.period_amount);
-        insert_optional_code_seq(&mut v, "PeriodType", &p.period_type);
+        insert_optional_str_seq(&mut v, "PeriodType", &p.period_type);
         insert_optional_int_seq(&mut v, "Frequency", &p.frequency);
         insert_optional_int_seq(&mut v, "ExecTimes", &p.exec_times);
         insert_optional_str_seq(&mut v, "PeriodReturnURL", &p.period_return_url);
@@ -692,21 +691,21 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
         ));
     }
     // 統一編號 CustomerIdentifier 有值時，一定要列印
-    if !customer_identifier.is_empty() && inv.print.as_str() == PrintMark::No.as_str() {
+    if !customer_identifier.is_empty() && inv.print == PrintMark::No {
         return Err(Error::Validation(
             "Print have to fill \"1\", when CustomerIdentifier have value.".into(),
         ));
     }
     // 統一編號 CustomerIdentifier 有值時，Donation 要為不捐贈(SDK 訊息寫 "0"，
     // 判斷為 AIO 語彙的不可捐贈 '1')
-    if !customer_identifier.is_empty() && inv.donation.as_str() == Donation::Yes.as_str() {
+    if !customer_identifier.is_empty() && inv.donation == Donation::Yes {
         return Err(Error::Validation(
             "Donation have to fill \"0\", when CustomerIdentifier have value.".into(),
         ));
     }
 
     // 當列印註記 Print 為 1 (列印)時，CustomerName 與 CustomerAddr 必須有值
-    if inv.print.as_str() == PrintMark::Yes.as_str() {
+    if inv.print == PrintMark::Yes {
         if inv.customer_name.as_deref().unwrap_or("").is_empty() {
             return Err(Error::Validation("CustomerName have to fill value.".into()));
         }
@@ -731,8 +730,8 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
     }
 
     // 當 Donation 為捐贈時，Print 要為不列印，且 LoveCode 須有值
-    if inv.donation.as_str() == Donation::Yes.as_str() {
-        if inv.print.as_str() == PrintMark::Yes.as_str() {
+    if inv.donation == Donation::Yes {
+        if inv.print == PrintMark::Yes {
             return Err(Error::Validation(
                 "Print have to fill \"0\", when Donation is \"1\".".into(),
             ));

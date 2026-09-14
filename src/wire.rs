@@ -12,15 +12,9 @@
 //!   完全一致（conformance 測試逐位元組釘死）。
 //! - 反序列化先取 `String` 再 `From`：未知值 → `Other`，往返透明。
 //! - `From<&str>`/`From<String>` 讓 `"1".into()` 建構點繼續可用。
-
-/// 巨集產生之 enum 的共用介面（crate 私有；讓插入 helper 可泛型化）。
-pub(crate) trait WireCode {
-    /// The exact wire string.
-    fn as_str(&self) -> &str;
-    /// `true` when the field carries no value (`Other("")`) — the zero
-    /// value of the official SDK's empty-string semantics.
-    fn is_unset(&self) -> bool;
-}
+//! - `PartialEq`/`Hash` 以 wire 字串為準：手工建構的 `Other("0")` 與建模的
+//!   `No` 相等（`==`）；只有 `match`/`matches!` 仍是結構比對。
+//! - `AsRef<str>` 讓 `String` 與 enum 欄位共用同一組插入 helper。
 
 /// Generate a `#[non_exhaustive]` wire-code enum with `Other(String)`
 /// passthrough. See the [module](self) docs for the semantics contract.
@@ -35,7 +29,7 @@ macro_rules! wire_enum {
         }
     ) => {
         $(#[$outer])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, Eq)]
         #[non_exhaustive]
         pub enum $name {
             $(
@@ -62,12 +56,23 @@ macro_rules! wire_enum {
             }
         }
 
-        impl crate::wire::WireCode for $name {
-            fn as_str(&self) -> &str {
-                self.as_str()
+        // Identity is the wire string, not the variant: `Other("0")` and the
+        // modeled `No` are the same field value to ECPay.
+        impl PartialEq for $name {
+            fn eq(&self, other: &Self) -> bool {
+                self.as_str() == other.as_str()
             }
-            fn is_unset(&self) -> bool {
-                self.is_unset()
+        }
+
+        impl std::hash::Hash for $name {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                self.as_str().hash(state)
+            }
+        }
+
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                self.as_str()
             }
         }
 

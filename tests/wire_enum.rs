@@ -1,6 +1,6 @@
 //! `wire_enum!` 生成的代碼 enum:as_str 值表逐一釘死(抓 macro/值表筆誤)、
 //! Display→From 往返、未知值 serde 往返透明、Default/is_unset 的空字串
-//! zero-value 語意。
+//! zero-value 語意、以 wire 值(非 variant 身分)為準的 `==`/`Hash`。
 
 use ecpay::invoice;
 use ecpay::payment::{
@@ -73,10 +73,18 @@ fn as_str_tables_are_pinned() {
 fn every_modeled_variant_round_trips_through_from() {
     fn rt<T>(v: T)
     where
-        T: for<'a> From<&'a str> + PartialEq + std::fmt::Debug + Clone + std::fmt::Display,
+        T: for<'a> From<&'a str> + PartialEq + std::fmt::Debug + std::fmt::Display,
     {
         let s = v.to_string();
-        assert_eq!(T::from(s.as_str()), v.clone(), "round-trip failed: {s:?}");
+        let back = T::from(s.as_str());
+        assert_eq!(back, v, "round-trip failed: {s:?}");
+        // `==` is by wire value, so also pin that `From` canonicalizes to the
+        // modeled variant rather than tunnelling the value through `Other`.
+        assert_eq!(
+            std::mem::discriminant(&back),
+            std::mem::discriminant(&v),
+            "From did not canonicalize {s:?} to its modeled variant"
+        );
     }
     for v in [
         TaxType::Dutiable,
@@ -128,6 +136,22 @@ fn default_is_the_empty_zero_value() {
     let unset: TaxType = serde_json::from_str(r#""""#).unwrap();
     assert!(unset.is_unset());
     assert_eq!(serde_json::to_string(&TaxType::default()).unwrap(), r#""""#);
+}
+
+/// 手工建構的 `Other("0")` 與建模的 `No` 是同一個 wire 值:`==` 與 `Hash`
+/// 都以 `as_str()` 為準,`validate_invoice` 之類的分支才不會漏掉它
+/// (`From`/serde 會正規化,一般建構點不受影響)。
+#[test]
+fn equality_and_hash_follow_the_wire_value() {
+    use std::collections::HashSet;
+
+    let hand_built = PrintMark::Other("0".to_owned());
+    assert_eq!(hand_built, PrintMark::No);
+    assert_ne!(hand_built, PrintMark::Yes);
+    assert_ne!(PrintMark::Other("x".to_owned()), PrintMark::No);
+
+    let set: HashSet<PrintMark> = [PrintMark::No, hand_built].into_iter().collect();
+    assert_eq!(set.len(), 1, "equal values must hash alike");
 }
 
 #[test]

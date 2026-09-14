@@ -281,16 +281,15 @@ async fn body_string(resp: &mut reqwest::Response) -> Result<String> {
 
 impl Ecpay {
     /// POST the params as a urlencoded form (Python `requests.post(url,
-    /// data=params)`): keys sorted for deterministic wire bytes, values
-    /// QueryEscape'd. Returns the raw body bytes for the Big5 endpoints.
+    /// data=params)` / BasePayment.send_post): plain POST, no envelope, keys
+    /// sorted for deterministic wire bytes, values QueryEscape'd. Returns the
+    /// raw body bytes; the caller decodes (query string, JSON, or Big5 text).
     pub(crate) async fn post_form(
         &self,
         endpoint: &str,
         params: &HashMap<String, String>,
     ) -> Result<Vec<u8>> {
-        let mut pairs: Vec<(String, String)> =
-            params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        let pairs: std::collections::BTreeMap<&String, &String> = params.iter().collect();
         let encoded = pairs
             .iter()
             .map(|(k, v)| {
@@ -320,9 +319,7 @@ impl Ecpay {
         }
         Ok(body)
     }
-}
 
-impl Ecpay {
     /// Go `CallPaymentAPI`: POST the form params plus CheckMacValue (keys
     /// sorted like url.Values.Encode) and parse the response as a query
     /// string, first value winning.
@@ -504,33 +501,16 @@ impl Ecpay {
         }
         let body = body_string(&mut resp).await?;
         let res: Response = crate::crypto::unmarshal(&body)?;
-        if res.trans_code != 1 {
-            return Err(Error::TransCode {
-                code: res.trans_code,
-                msg: res.trans_msg,
-            });
-        }
-        let (key, iv) = self.invoice_keys();
-        decrypt_data(&res.data, key, iv)
-    }
-
-    /// The Python-flavored payment form call (BasePayment.send_post): plain
-    /// POST, no envelope, response decoded by the caller (query string, JSON,
-    /// or Big5 text). `endpoint` is used verbatim.
-    pub(crate) async fn send_post_form(
-        &self,
-        endpoint: &str,
-        params: &HashMap<String, String>,
-    ) -> Result<Vec<u8>> {
-        self.post_form(endpoint, params).await
+        Self::decode_aes_response(res, key, iv)
     }
 
     /// The HTTP client requests are sent with: an injected
     /// [`Ecpay::http`] client as-is, or the shared hardened default below.
-    pub(crate) fn http(&self) -> reqwest::Client {
-        self.http
-            .clone()
-            .unwrap_or_else(|| shared_http_client().clone())
+    pub(crate) fn http(&self) -> &reqwest::Client {
+        match &self.http {
+            Some(client) => client,
+            None => shared_http_client(),
+        }
     }
 
     /// Recompute the CheckMacValue for the params of an outbound request with

@@ -35,11 +35,18 @@ pub(crate) fn optional_str(name: &str, v: &Option<String>, max: usize) -> Result
     Ok(())
 }
 
-/// filter_parameter: non-required strings are dropped when empty.
-pub(crate) fn insert_optional_str(m: &mut HashMap<String, String>, key: &str, v: &Option<String>) {
+/// filter_parameter: non-required strings are dropped when empty. Serves
+/// both `String` fields and the wire-code enums (`Other("")` is the empty
+/// string).
+pub(crate) fn insert_optional_str<S: AsRef<str>>(
+    m: &mut HashMap<String, String>,
+    key: &str,
+    v: &Option<S>,
+) {
     if let Some(v) = v {
+        let v = v.as_ref();
         if !v.is_empty() {
-            m.insert(key.to_owned(), v.clone());
+            m.insert(key.to_owned(), v.to_owned());
         }
     }
 }
@@ -55,53 +62,24 @@ pub(crate) fn insert_optional_int(m: &mut HashMap<String, String>, key: &str, v:
 
 /// Ordered-pairs variant of [`insert_optional_str`] (AIO's grouped params
 /// keep insertion order).
-pub(crate) fn insert_optional_str_seq(
+pub(crate) fn insert_optional_str_seq<S: AsRef<str>>(
     v: &mut Vec<(String, String)>,
     key: &str,
-    value: &Option<String>,
+    value: &Option<S>,
 ) {
     if let Some(s) = value {
+        let s = s.as_ref();
         if !s.is_empty() {
-            v.push((key.to_owned(), s.clone()));
+            v.push((key.to_owned(), s.to_owned()));
         }
     }
 }
 
-/// Enum-code variant of [`insert_optional_str`]: drops `None` and unset
-/// (`Other("")`), sends the wire string otherwise.
-pub(crate) fn insert_optional_code<T: crate::wire::WireCode>(
-    m: &mut HashMap<String, String>,
-    key: &str,
-    v: &Option<T>,
-) {
-    if let Some(v) = v {
-        if !v.is_unset() {
-            m.insert(key.to_owned(), v.as_str().to_owned());
-        }
-    }
-}
-
-/// Required-enum check: keeps the official SDK's message for a missing
+/// Required wire-code check: keeps the official SDK's message for a missing
 /// value; the VALUE itself is adjudicated by ECPay (unknown codes pass
-/// through as `Other`).
-pub(crate) fn required_code<T: crate::wire::WireCode>(name: &str, v: &T) -> Result<(), Error> {
-    if v.is_unset() {
-        return Err(Error::Validation(format!("{name} content is required.")));
-    }
-    Ok(())
-}
-
-/// Ordered-pairs variant of [`insert_optional_code`].
-pub(crate) fn insert_optional_code_seq<T: crate::wire::WireCode>(
-    v: &mut Vec<(String, String)>,
-    key: &str,
-    value: &Option<T>,
-) {
-    if let Some(c) = value {
-        if !c.is_unset() {
-            v.push((key.to_owned(), c.as_str().to_owned()));
-        }
-    }
+/// through as `Other`), so there is no length cap.
+pub(crate) fn required_code<S: AsRef<str>>(name: &str, v: &S) -> Result<(), Error> {
+    required_str(name, v.as_ref(), usize::MAX)
 }
 
 /// Ordered-pairs variant of [`insert_optional_int`].
@@ -149,12 +127,12 @@ mod tests {
     #[test]
     fn insert_optional_skips_none_and_empty() {
         let mut m = HashMap::new();
-        insert_optional_str(&mut m, "A", &None);
+        insert_optional_str::<String>(&mut m, "A", &None);
         insert_optional_str(&mut m, "B", &Some(String::new()));
         insert_optional_int(&mut m, "C", &None);
         insert_optional_int(&mut m, "D", &Some(-1));
         assert!(m.is_empty());
-        insert_optional_str(&mut m, "E", &Some("v".into()));
+        insert_optional_str(&mut m, "E", &Some("v"));
         insert_optional_int(&mut m, "F", &Some(0)); // 0 stays
         assert_eq!(m["E"], "v");
         assert_eq!(m["F"], "0");
@@ -163,8 +141,8 @@ mod tests {
     #[test]
     fn seq_variants_keep_insertion_order_and_same_filter() {
         let mut v = Vec::new();
-        insert_optional_str_seq(&mut v, "A", &None);
-        insert_optional_str_seq(&mut v, "B", &Some("b".into()));
+        insert_optional_str_seq::<String>(&mut v, "A", &None);
+        insert_optional_str_seq(&mut v, "B", &Some("b"));
         insert_optional_int_seq(&mut v, "C", &Some(-5));
         insert_optional_int_seq(&mut v, "D", &Some(7));
         assert_eq!(v, vec![("B".into(), "b".into()), ("D".into(), "7".into())]);

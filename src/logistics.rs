@@ -33,8 +33,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::client::render_auto_submit_form;
-use crate::client::unix_now;
+use crate::client::{render_auto_submit_form, unix_now};
 use crate::crypto::{check_mac_value, verify_mac};
 use crate::error::{Error, Result};
 use crate::Ecpay;

@@ -721,7 +721,7 @@ async fn test_query_trade_info_request_params() {
 
 // --- Transport contract errors (from Go transport_test.go's core cases) ---
 
-/// TestCallInvoiceAPITransCodeGate: TransCode != 1 is a transport-level
+/// TestCallInvoiceAPITransCodeGate: TransCode != 1 is an envelope-level
 /// failure — the client must error before attempting to decrypt Data.
 #[tokio::test]
 async fn test_call_invoice_api_trans_code_gate() {
@@ -747,7 +747,7 @@ async fn test_call_invoice_api_trans_code_gate() {
     let err = ec
         .get_issue(&input)
         .await
-        .expect_err("expected a transport error when TransCode != 1");
+        .expect_err("expected a TransCode error when TransCode != 1");
     match &err {
         ecpay::Error::TransCode { code, msg } => {
             assert_eq!(*code, 0);

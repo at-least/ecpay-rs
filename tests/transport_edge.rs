@@ -273,7 +273,7 @@ async fn injected_http_client_is_used() {
     });
     let client = Ecpay {
         payment_api_url: srv,
-        http: Some(injected),
+        http: Some(injected.clone()),
         ..sdk()
     };
     // query_trade_info does not verify a response CheckMacValue, so the
@@ -310,12 +310,7 @@ async fn injected_http_client_is_used() {
         invoice_api_url: srv,
         invoice_hash_key: "ejCk326UnaZWKisg".into(),
         invoice_hash_iv: "q9jcZX8Ib9LM8wYk".into(),
-        http: Some(
-            reqwest::Client::builder()
-                .user_agent("ecpay-test-injected-client")
-                .build()
-                .unwrap(),
-        ),
+        http: Some(injected),
         ..sdk()
     };
     client

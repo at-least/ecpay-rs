@@ -57,8 +57,8 @@ pub enum Error {
         body: String,
     },
     /// The AES-JSON envelope's TransCode gate failed: the envelope arrived
-    /// but TransCode != 1, so `Data` was never sent/decrypted (Go's message
-    /// called this a "transport error", hence the historical name).
+    /// but TransCode != 1, so `Data` was never sent/decrypted (renamed from
+    /// `Transport` in 0.3; Go's message called this a "transport error").
     TransCode {
         code: i64,
         msg: String,

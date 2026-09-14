@@ -75,7 +75,8 @@ _選擇性 enumify(監管級穩定代碼欄位;advisor 裁決 per-service + Othe
 
 - 新增 `wire_enum!` 生成的 `#[non_exhaustive]` enum(`Other(String)`
   原樣穿隧未知代碼;`Default`=`Other("")` 維持 wire zero-value 語意;
-  `From<&str>` 讓 `"1".into()` 建構點續用):
+  `From<&str>` 讓 `"1".into()` 建構點續用;`PartialEq`/`Hash` 以 wire
+  字串為準——手工建構的 `Other("0")` 與 `No` 相等;實作 `AsRef<str>`):
   - `ecpay::payment`:`TaxType`(1/2/3/9)、`Donation`(AIO 語彙 1/2)、
     `PrintMark`、`CarruerType`、`ClearanceMark`、`InvType`、`PeriodType`、
     `CreditAction`——取代同名的 String 常數 module(已移除)。

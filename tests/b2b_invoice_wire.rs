@@ -369,7 +369,7 @@ async fn maintain_merchant_customer_data_keeps_the_lowercase_type_wire_name() {
 /// A TransCode ≠ 1 envelope must surface as `Error::TransCode` (the crate's
 /// AES gate), never as a decoded payload or a panic.
 #[tokio::test]
-async fn transcode_not_one_surfaces_as_a_transport_error() {
+async fn transcode_not_one_surfaces_as_a_transcode_error() {
     let srv = spawn_http_server(move |_path, _body| {
         let body = r#"{"TransCode":7,"TransMsg":"驗證失敗","Data":""}"#.to_owned();
         (

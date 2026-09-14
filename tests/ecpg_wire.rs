@@ -253,7 +253,7 @@ async fn unset_optional_pieces_are_omitted_from_the_wire() {
 /// TransCode != 1 (the transport layer) surfaces as `Error::TransCode`
 /// before any Data decoding is attempted.
 #[tokio::test]
-async fn transcode_rejection_surfaces_as_a_transport_error() {
+async fn transcode_rejection_surfaces_as_a_transcode_error() {
     let srv = spawn_http_server(|_p, _body| {
         let res = json!({"TransCode": 110, "TransMsg": "Data decrypt failed", "Data": ""});
         (
