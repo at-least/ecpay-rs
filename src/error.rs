@@ -32,8 +32,10 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
-/// Everything this crate can return as `error`.
+/// Everything this crate can return as `error`. `#[non_exhaustive]`: new
+/// variants may be added in any minor release.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// A non-success RtnCode on a command call (Go `*APIError`).
     Api(ApiError),
@@ -54,9 +56,10 @@ pub enum Error {
         status: u16,
         body: String,
     },
-    /// Go: `fmt.Errorf("ecpay transport error: code=%d msg=%s", ...)` — the
-    /// invoice envelope arrived but TransCode != 1.
-    Transport {
+    /// The AES-JSON envelope's TransCode gate failed: the envelope arrived
+    /// but TransCode != 1, so `Data` was never sent/decrypted (Go's message
+    /// called this a "transport error", hence the historical name).
+    TransCode {
         code: i64,
         msg: String,
     },
@@ -102,8 +105,8 @@ impl fmt::Display for Error {
             Error::InvoiceStatus { status, body } => {
                 write!(f, "ecpay invoice API error: status={status} body={body}")
             }
-            Error::Transport { code, msg } => {
-                write!(f, "ecpay transport error: code={code} msg={msg}")
+            Error::TransCode { code, msg } => {
+                write!(f, "ecpay TransCode error: code={code} msg={msg}")
             }
             Error::Http(e) => write!(f, "{e}"),
             Error::Base64(e) => write!(f, "{e}"),

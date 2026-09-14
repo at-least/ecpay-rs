@@ -37,8 +37,6 @@ pub struct AioCheckOutParams {
     pub store_id: Option<String>,
     /// 特店交易時間,格式為 yyyy/MM/dd HH:mm:ss(最大 20 字元)。
     pub merchant_trade_date: String,
-    /// 交易類型,固定填 `aio`(預設)。
-    pub payment_type: String,
     /// 交易金額,僅限新台幣(整數)。
     pub total_amount: i64,
     /// 交易描述(最大 200 字元)。
@@ -138,15 +136,15 @@ pub struct AioCheckOutParams {
 }
 
 impl Default for AioCheckOutParams {
-    /// The official SDK's defaults: PaymentType=aio and EncryptType=1 are
-    /// always present (`create_default_dict` + schema defaults); everything
-    /// else starts absent.
+    /// The official SDK's defaults: EncryptType=1 is always present
+    /// (`create_default_dict` + schema defaults; PaymentType is likewise
+    /// always `aio` but is no longer a field — it is fixed on the wire);
+    /// everything else starts absent.
     fn default() -> Self {
         Self {
             merchant_trade_no: Default::default(),
             store_id: Default::default(),
             merchant_trade_date: Default::default(),
-            payment_type: "aio".to_owned(),
             total_amount: Default::default(),
             trade_desc: Default::default(),
             item_name: Default::default(),
@@ -302,7 +300,6 @@ impl Ecpay {
         required_str("TradeDesc", &p.trade_desc, 200)?;
         required_str("ItemName", &p.item_name, 400)?;
         required_str("ReturnURL", &p.return_url, 200)?;
-        required_str("PaymentType", &p.payment_type, 20)?;
         optional_str("StoreID", &p.store_id, 10)?;
         optional_str("ClientBackURL", &p.client_back_url, 200)?;
         optional_str("ItemURL", &p.item_url, 200)?;
@@ -458,7 +455,8 @@ fn build_base_map(p: &AioCheckOutParams, merchant_id: &str) -> HashMap<String, S
         "MerchantTradeDate".to_owned(),
         p.merchant_trade_date.clone(),
     );
-    m.insert("PaymentType".to_owned(), p.payment_type.clone());
+    // The AIO cashier only ever accepts PaymentType=aio; fixed, not a field.
+    m.insert("PaymentType".to_owned(), "aio".to_owned());
     m.insert("TotalAmount".to_owned(), p.total_amount.to_string());
     m.insert("TradeDesc".to_owned(), p.trade_desc.clone());
     m.insert("ItemName".to_owned(), p.item_name.clone());

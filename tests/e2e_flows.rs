@@ -1022,7 +1022,7 @@ fn ecpg_callback_helper_gates_on_transcode() {
         .decrypt_ecpg_callback::<serde_json::Value>(&body.to_string())
         .expect_err("TransCode ≠ 1 must fail");
     assert!(
-        matches!(err, ecpay::Error::Transport { code: 110, .. }),
+        matches!(err, ecpay::Error::TransCode { code: 110, .. }),
         "{err:?}"
     );
 }

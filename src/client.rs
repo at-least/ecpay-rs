@@ -354,7 +354,7 @@ impl Ecpay {
     /// Gates on TransCode and decrypts `Data` into the typed output.
     fn decode_aes_response<O: DeserializeOwned>(res: Response, key: &[u8], iv: &[u8]) -> Result<O> {
         if res.trans_code != 1 {
-            return Err(Error::Transport {
+            return Err(Error::TransCode {
                 code: res.trans_code,
                 msg: res.trans_msg,
             });
@@ -493,7 +493,7 @@ impl Ecpay {
         let body = body_string(&mut resp).await?;
         let res: Response = crate::crypto::unmarshal(&body)?;
         if res.trans_code != 1 {
-            return Err(Error::Transport {
+            return Err(Error::TransCode {
                 code: res.trans_code,
                 msg: res.trans_msg,
             });

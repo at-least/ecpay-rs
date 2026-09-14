@@ -19,7 +19,14 @@ use crate::Ecpay;
 use params::{insert_optional_str, optional_str, required_str};
 
 /// 付款方式 (`ChoosePayment`)。`as_str()` 為送給 ECPay 的 wire 值。
+///
+/// 這是唯一以 enum 呈現的代碼欄位,因為它決定 `aio_check_out` 啟用哪組
+/// 延伸參數(SDK 內部邏輯分支);其餘代碼欄位(`TaxType`、`CarruerType`
+/// 等)刻意維持 `String` + 常數 module — ECPay 會不預警地新增值,封閉
+/// enum 會把「官方新增一個子付款方式」變成每個使用者的 semver 破壞。
+/// `#[non_exhaustive]`:本 crate 日後可能新增變體。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
 pub enum ChoosePayment {
     /// 信用卡及 GooglePay
     Credit,

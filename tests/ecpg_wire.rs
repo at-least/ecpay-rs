@@ -250,7 +250,7 @@ async fn unset_optional_pieces_are_omitted_from_the_wire() {
     assert_eq!(full["ATMInfo"]["ExpireDate"], 3);
 }
 
-/// TransCode != 1 (the transport layer) surfaces as `Error::Transport`
+/// TransCode != 1 (the transport layer) surfaces as `Error::TransCode`
 /// before any Data decoding is attempted.
 #[tokio::test]
 async fn transcode_rejection_surfaces_as_a_transport_error() {
@@ -268,11 +268,11 @@ async fn transcode_rejection_surfaces_as_a_transport_error() {
         .await
         .expect_err("TransCode != 1 must be an error");
     match err {
-        Error::Transport { code, msg } => {
+        Error::TransCode { code, msg } => {
             assert_eq!(code, 110);
             assert_eq!(msg, "Data decrypt failed");
         }
-        other => panic!("expected Error::Transport, got {other:?}"),
+        other => panic!("expected Error::TransCode, got {other:?}"),
     }
 }
 

@@ -7,9 +7,10 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
+use ecpay::client::Response;
 use ecpay::{
     decrypt, decrypt_data, encrypt, encrypt_data, hash_mac, url_encode, GetIssueInput,
-    GetIssueOutput, IssueOutput, Response, INVOICE_API_URL_PRODUCTION, INVOICE_API_URL_STAGE,
+    GetIssueOutput, IssueOutput, INVOICE_API_URL_PRODUCTION, INVOICE_API_URL_STAGE,
 };
 
 fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {

@@ -773,7 +773,7 @@ impl Ecpay {
     ) -> Result<T> {
         let res: crate::client::Response = crate::crypto::unmarshal(posted_json)?;
         if res.trans_code != 1 {
-            return Err(Error::Transport {
+            return Err(Error::TransCode {
                 code: res.trans_code,
                 msg: res.trans_msg,
             });

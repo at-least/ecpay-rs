@@ -365,7 +365,7 @@ async fn maintain_merchant_customer_data_keeps_the_lowercase_type_wire_name() {
     assert_eq!(out["RtnMsg"], "新增成功");
 }
 
-/// A TransCode ≠ 1 envelope must surface as `Error::Transport` (the crate's
+/// A TransCode ≠ 1 envelope must surface as `Error::TransCode` (the crate's
 /// AES gate), never as a decoded payload or a panic.
 #[tokio::test]
 async fn transcode_not_one_surfaces_as_a_transport_error() {
@@ -386,8 +386,8 @@ async fn transcode_not_one_surfaces_as_a_transport_error() {
         .await
         .expect_err("TransCode=7 must be an error");
     assert!(
-        matches!(err, ecpay::Error::Transport { code: 7, .. }),
-        "expected Error::Transport(7), got {err:?}"
+        matches!(err, ecpay::Error::TransCode { code: 7, .. }),
+        "expected Error::TransCode(7), got {err:?}"
     );
 }
 

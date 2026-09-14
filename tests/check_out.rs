@@ -180,13 +180,6 @@ fn required_fields_and_lengths_are_enforced_with_the_sdk_messages() {
         ),
         (
             AioCheckOutParams {
-                payment_type: String::new(),
-                ..base(ChoosePayment::Credit)
-            },
-            "PaymentType content is required.",
-        ),
-        (
-            AioCheckOutParams {
                 trade_desc: "x".repeat(201),
                 ..base(ChoosePayment::Credit)
             },

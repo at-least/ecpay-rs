@@ -1,6 +1,6 @@
 //! The typed B2C invoice methods against a hermetic mock: the
 //! command-vs-query contract on a non-1 RtnCode, the wire action names
-//! (only the sandbox pinned them before), `issue()`'s tuple semantics, and
+//! (only the sandbox pinned them before), `issue()`'s error contract, and
 //! the Data-decode failure paths of `call_invoice_api`.
 
 use std::sync::{Arc, Mutex};
@@ -24,7 +24,7 @@ fn client(base_url: String) -> Ecpay {
 }
 
 fn envelope(data: String) -> (u16, String, Vec<u8>) {
-    let res = ecpay::Response {
+    let res = ecpay::client::Response {
         trans_code: 1,
         data,
         ..Default::default()
@@ -43,7 +43,7 @@ fn mock(data: serde_json::Value) -> (Ecpay, Arc<Mutex<Vec<String>>>) {
     let seen = paths.clone();
     let srv = spawn_http_server(move |path, body| {
         // Every request must be a well-formed envelope from this merchant.
-        let req: ecpay::Request = serde_json::from_slice(body).expect("decode envelope");
+        let req: ecpay::client::Request = serde_json::from_slice(body).expect("decode envelope");
         assert_eq!(req.merchant_id, "2000132");
         assert_eq!(req.rq_header.revision, "3.0.0");
         seen.lock().unwrap().push(path.to_owned());
@@ -79,7 +79,7 @@ async fn commands_raise_api_errors_and_hit_their_action_names() {
         }};
     }
 
-    command!(ec.try_issue(&Default::default()), "Issue");
+    command!(ec.issue(&Default::default()), "Issue");
     command!(ec.void_with_reissue(&Default::default()), "VoidWithReIssue");
     command!(ec.invalid(&Default::default()), "Invalid");
     command!(ec.invoice_notify(&Default::default()), "InvoiceNotify");
@@ -160,37 +160,31 @@ async fn commands_return_the_decoded_output_on_success() {
         "RtnCode": 1, "RtnMsg": "開立發票成功",
         "InvoiceNo": "AB12345678", "InvoiceDate": "2024-01-02 15:04:05", "RandomNumber": "1234"
     }));
-    let out = ec.try_issue(&IssueInput::default()).await.expect("Issue");
+    let out = ec.issue(&IssueInput::default()).await.expect("Issue");
     assert_eq!(out.rtn_code, 1);
     assert_eq!(out.invoice_no, "AB12345678");
     assert_eq!(out.invoice_date, "2024-01-02 15:04:05");
     assert_eq!(out.random_number, "1234");
-
-    let (output, err) = ec.issue(&IssueInput::default()).await;
-    assert!(err.is_none(), "{err:?}");
-    assert_eq!(output.invoice_no, "AB12345678");
 }
 
-/// `issue()` keeps Go's named-return shape: a business rejection comes back
-/// WITH ECPay's real fields (callers persist RtnMsg before surfacing the
-/// error), a transport failure with the zero output.
+/// `issue()` surfaces failures as plain `Result` errors: a business
+/// rejection as `Error::Api` (code + RtnMsg carried in the error — ECPay
+/// returns empty InvoiceNo/InvoiceDate on failure, so no partial output is
+/// needed), a TransCode gate failure as `Error::TransCode`.
 #[tokio::test]
-async fn issue_returns_the_output_alongside_the_error() {
+async fn issue_surfaces_api_and_transcode_failures_as_errors() {
     let (ec, _) = mock(serde_json::json!({
         "RtnCode": 2, "RtnMsg": "mock rejection", "InvoiceDate": "2024-01-02 15:04:05"
     }));
-    let (output, err) = ec.issue(&IssueInput::default()).await;
-    assert_eq!(output.rtn_code, 2);
-    assert_eq!(output.rtn_msg, "mock rejection");
-    assert_eq!(
-        output.invoice_date, "2024-01-02 15:04:05",
-        "the partial output survives the rejection"
-    );
-    assert_api_rejection(err.expect("RtnCode 2 is an error"), "issue");
+    let err = ec
+        .issue(&IssueInput::default())
+        .await
+        .expect_err("RtnCode 2 is a business rejection");
+    assert_api_rejection(err, "issue");
 
-    // Transport failure: TransCode != 1 → zero output + Error::Transport.
+    // TransCode gate failure: TransCode != 1 → Error::TransCode, no output.
     let srv = spawn_http_server(|_path, _body| {
-        let res = ecpay::Response {
+        let res = ecpay::client::Response {
             trans_code: 128,
             trans_msg: "System exception".to_owned(),
             ..Default::default()
@@ -201,16 +195,16 @@ async fn issue_returns_the_output_alongside_the_error() {
             serde_json::to_vec(&res).unwrap(),
         )
     });
-    let (output, err) = client(srv).issue(&IssueInput::default()).await;
-    assert_eq!(output.rtn_code, 0);
-    assert_eq!(output.rtn_msg, "");
-    assert_eq!(output.invoice_no, "");
-    match err.expect("TransCode 128 is an error") {
-        Error::Transport { code, msg } => {
+    match client(srv)
+        .issue(&IssueInput::default())
+        .await
+        .expect_err("TransCode 128 is an error")
+    {
+        Error::TransCode { code, msg } => {
             assert_eq!(code, 128);
             assert_eq!(msg, "System exception");
         }
-        other => panic!("expected Error::Transport, got {other:?}"),
+        other => panic!("expected Error::TransCode, got {other:?}"),
     }
 }
 
@@ -268,7 +262,7 @@ async fn envelope_carries_the_platform_id() {
     let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let seen = captured.clone();
     let srv = spawn_http_server(move |_path, body| {
-        let req: ecpay::Request = serde_json::from_slice(body).unwrap();
+        let req: ecpay::client::Request = serde_json::from_slice(body).unwrap();
         seen.lock().unwrap().push(req.platform_id);
         envelope(
             encrypt_data(

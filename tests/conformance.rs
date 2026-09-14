@@ -613,7 +613,7 @@ async fn test_invoice_request_envelope() {
         let got = got.clone();
         spawn_http_server(move |path, body| {
             let _ = path; // /GetIssue
-            let req: ecpay::Request = serde_json::from_slice(body).expect("decode envelope");
+            let req: ecpay::client::Request = serde_json::from_slice(body).expect("decode envelope");
             *got.lock().unwrap() =
                 Some(serde_json::to_value(&req).expect("encode captured envelope"));
             let data = encrypt_data(
@@ -625,7 +625,7 @@ async fn test_invoice_request_envelope() {
                 TEST_INVOICE_HASH_IV,
             )
             .expect("encrypt reply");
-            let res = ecpay::Response {
+            let res = ecpay::client::Response {
                 trans_code: 1,
                 data,
                 ..Default::default()
@@ -725,7 +725,7 @@ async fn test_query_trade_info_request_params() {
 #[tokio::test]
 async fn test_call_invoice_api_trans_code_gate() {
     let srv = spawn_http_server(move |_path, _body| {
-        let res = ecpay::Response {
+        let res = ecpay::client::Response {
             merchant_id: serde_json::json!(TEST_MERCHANT_ID),
             trans_code: 0, // TransCode 0
             trans_msg: "查無資料".to_owned(),
@@ -748,15 +748,15 @@ async fn test_call_invoice_api_trans_code_gate() {
         .await
         .expect_err("expected a transport error when TransCode != 1");
     match &err {
-        ecpay::Error::Transport { code, msg } => {
+        ecpay::Error::TransCode { code, msg } => {
             assert_eq!(*code, 0);
             assert_eq!(msg, "查無資料");
         }
-        other => panic!("expected Error::Transport, got {other:?}"),
+        other => panic!("expected Error::TransCode, got {other:?}"),
     }
     assert!(
-        err.to_string().contains("ecpay transport error: code=0"),
-        "transport error message mismatch: {err}"
+        err.to_string().contains("ecpay TransCode error: code=0"),
+        "TransCode error message mismatch: {err}"
     );
 }
 

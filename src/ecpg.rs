@@ -32,7 +32,7 @@
 //! # 回應與雙層錯誤檢查
 //!
 //! 回應為 `{TransCode, TransMsg, Data}`。TransCode != 1（傳輸層）會以
-//! [`crate::Error::Transport`] 回報；Data 解密後的業務層 `RtnCode` 由呼叫端
+//! [`crate::Error::TransCode`] 回報；Data 解密後的業務層 `RtnCode` 由呼叫端
 //! 自行檢查（1 = 成功）。雙層都要查：先 TransCode 後 RtnCode。
 //!
 //! 僅 [`GetTokenbyTradeOutput`] 有 stage 實測過的完整欄位型別；其餘 13 個
@@ -733,7 +733,7 @@ impl Ecpay {
     ///
     /// 官方處理順序（guides/21 引官方規格 9058.md）：
     /// 1. 解析 JSON body（`{TransCode, TransMsg, Data}`）；
-    /// 2. 檢查外層 `TransCode == 1`（傳輸層；否則回 [`crate::Error::Transport`]）；
+    /// 2. 檢查外層 `TransCode == 1`（傳輸層；否則回 [`crate::Error::TransCode`]）；
     /// 3. 用 **PAYMENT 組** HashKey/HashIV AES 解密 `Data`；
     /// 4. 內層 `RtnCode`（業務層，1 = 付款成功）由呼叫端自行檢查 —— 本方法
     ///    刻意不做業務層判斷；
@@ -747,7 +747,7 @@ impl Ecpay {
     ) -> Result<T> {
         let res: crate::client::Response = crate::crypto::unmarshal(posted_json)?;
         if res.trans_code != 1 {
-            return Err(Error::Transport {
+            return Err(Error::TransCode {
                 code: res.trans_code,
                 msg: res.trans_msg,
             });

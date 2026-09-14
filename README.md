@@ -52,15 +52,16 @@ B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
 - **以官方實作為測試基準**:測試向量由「真的」官方 Python SDK 執行產生
   (17 種 `create_order` 情境逐欄位比對、11 條驗證錯誤訊息原樣比對、
   CheckMacValue SHA-256/MD5、AES-CBC 官方向量、.NET UrlEncode 契約)。
-- **typed API + 逃生口**: `AioCheckOutParams` 型別化參數(必填欄位編譯期
-  檢查),另有 `extra: BTreeMap<String, String>` 收容未模型化的新參數;
+- **typed API + 逃生口**: `AioCheckOutParams` 型別化參數(必填欄位為
+  非 `Option` 型別;空值/長度以官方 SDK 同款訊息在執行期驗證),另有
+  `extra: BTreeMap<String, String>` 收容未模型化的新參數;
   低階的 `hash_mac` / `check_mac_value` / `call_payment_api` 也直接公開。
 
 ## 安裝
 
 ```toml
 [dependencies]
-ecpay = "0.2"
+ecpay = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -178,7 +179,7 @@ println!("RtnMsg = {}", result["RtnMsg"]);
 | `credit_card_period_action` | `Ecpay::credit_card_period_action` |
 | `gen_html_post_form` | `AioCheckOut::html_form`(屬性值已做 HTML escape) |
 | `generate_check_value` | `Ecpay::generate_check_value` / 自由函式 `check_mac_value` |
-| —(Go 版移植) | 發票:`issue`/`try_issue`、`void_with_reissue`、`invalid`、`get_issue`、`get_invalid`、`invoice_notify`、`check_barcode`、`check_love_code`、`get_company_name_by_tax_id`、`get_gov_invoice_word_setting`、`get_invoice_word_setting` |
+| —(Go 版移植) | 發票:`issue`、`void_with_reissue`、`invalid`、`get_issue`、`get_invalid`、`invoice_notify`、`check_barcode`、`check_love_code`、`get_company_name_by_tax_id`、`get_gov_invoice_word_setting`、`get_invoice_word_setting` |
 | —(比對 `ECPay/SDK_PHP` 官方範例/規格頁後新增) | 發票延遲開立:`delay_issue`、`trigger_issue`、`cancel_delay_issue`;折讓:`allowance`、`allowance_invalid`、`allowance_by_collegiate`、`allowance_invalid_by_collegiate`、`get_allowance`、`get_allowance_invalid` |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **ECPG 站內付 2.0**(`ecpay::ecpg`):`get_token_by_trade`、`create_payment`、綁卡 6 支、查詢/請款動作 6 支,共 14 支 |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **物流**(`ecpay::logistics`):國內 9 支 MD5 form API + 6 種瀏覽器表單、全方位物流 v2 13 支、跨境 4 支 + 表單,含 MD5 回呼驗證與 AES 回呼解密 |

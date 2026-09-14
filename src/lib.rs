@@ -80,7 +80,6 @@ pub mod invoice_b2b;
 pub mod logistics;
 pub mod payment;
 
-pub use client::{Request, Response, RqHeader, RqHeaderResponse};
 pub use crypto::{
     check_mac_value, decrypt, decrypt_data, encrypt, encrypt_data, hash_mac, unmarshal, url_encode,
 };
@@ -121,10 +120,6 @@ pub use payment::{
     OrderSearchParams, OrderSearchPeriodParams, QueryTradeInfoOutput,
     SearchSingleTransactionParams,
 };
-
-/// Go: `const DateTimeFormat = "2006/01/02 15:04:05"` (the Go reference layout
-/// is kept verbatim; expand as "%Y/%m/%d %H:%M:%S" if ever formatted).
-pub const DATE_TIME_FORMAT: &str = "2006/01/02 15:04:05";
 
 pub const PAYMENT_API_URL_PRODUCTION: &str = "https://payment.ecpay.com.tw/Cashier/";
 pub const PAYMENT_API_URL_STAGE: &str = "https://payment-stage.ecpay.com.tw/Cashier/";

@@ -127,18 +127,14 @@ pub struct IssueOutput {
 }
 
 impl Ecpay {
-    /// Go `Issue`'s named-return shape: the decoded output ALWAYS comes back
-    /// alongside the optional error — the zero output for a transport
-    /// failure, but ECPay's real fields (RtnMsg, InvoiceDate) even on a
-    /// business-level rejection, which callers persist before surfacing the
-    /// error.
-    pub async fn issue(&self, input: &IssueInput) -> (IssueOutput, Option<crate::Error>) {
-        let output: IssueOutput = match self.call_invoice_api("Issue", input).await {
-            Ok(o) => o,
-            Err(e) => return (IssueOutput::default(), Some(e)),
-        };
-        let err = api_error(output.rtn_code, &output.rtn_msg).err();
-        (output, err)
+    /// 開立發票。業務層失敗（RtnCode ≠ 1，如欄位驗證或重複開立）回
+    /// [`crate::Error::Api`]（code 與 RtnMsg 都在 [`crate::ApiError`] 內），
+    /// 傳輸/解密失敗回各自的錯誤。ECPay 規格：開立失敗時 InvoiceNo/
+    /// InvoiceDate 為空值，故失敗路徑不需要、也不回傳部分輸出。
+    pub async fn issue(&self, input: &IssueInput) -> Result<IssueOutput> {
+        let output: IssueOutput = self.call_invoice_api("Issue", input).await?;
+        api_error(output.rtn_code, &output.rtn_msg)?;
+        Ok(output)
     }
 }
 
@@ -648,19 +644,6 @@ impl Ecpay {
     /// [`crate::ApiError`] — the caller inspects RtnCode directly.
     pub async fn get_issue(&self, input: &GetIssueInput) -> Result<GetIssueOutput> {
         self.call_invoice_api("GetIssue", input).await
-    }
-}
-
-impl Ecpay {
-    /// [`Self::issue`] with the idiomatic signature: a business-level
-    /// rejection surfaces as [`crate::Error::Api`], transport/decode failures
-    /// as their own error. The tuple-returning [`Self::issue`] exists for the
-    /// reference caller, which persists ECPay's partial output even on
-    /// failure.
-    pub async fn try_issue(&self, input: &IssueInput) -> Result<IssueOutput> {
-        let output: IssueOutput = self.call_invoice_api("Issue", input).await?;
-        api_error(output.rtn_code, &output.rtn_msg)?;
-        Ok(output)
     }
 }
 

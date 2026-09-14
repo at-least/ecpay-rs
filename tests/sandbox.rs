@@ -115,7 +115,7 @@ async fn issue_then_get_then_invalid_roundtrip() {
     input.customer_name = TRICKY_TEXT.to_owned();
     input.invoice_remark = TRICKY_TEXT.to_owned();
     input.items.as_mut().unwrap()[0].item_name = TRICKY_TEXT.to_owned();
-    let issued = client.try_issue(&input).await.expect("stage issue 應成功");
+    let issued = client.issue(&input).await.expect("stage issue 應成功");
     assert_eq!(issued.rtn_code, 1, "issue rtn_msg={}", issued.rtn_msg);
     assert!(!issued.invoice_no.is_empty());
 
@@ -295,7 +295,7 @@ async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
     assert!(
         matches!(
             err,
-            ecpay::Error::InvoiceStatus { .. } | ecpay::Error::Transport { .. }
+            ecpay::Error::InvoiceStatus { .. } | ecpay::Error::TransCode { .. }
         ) && text.contains("decrypt"),
         "expected stage to reject the wrong-key payload at decrypt, got {err:?}"
     );
@@ -318,7 +318,7 @@ async fn allowance_lifecycle_roundtrip() {
     let relate = unique_relate_number();
 
     let issued = client
-        .try_issue(&sample_issue_input(relate, merchant_id.clone()))
+        .issue(&sample_issue_input(relate, merchant_id.clone()))
         .await
         .expect("stage issue 應成功");
     let invoice_date10: String = issued.invoice_date.chars().take(10).collect();
@@ -406,7 +406,7 @@ async fn allowance_by_collegiate_roundtrip() {
     let relate = unique_relate_number();
 
     let issued = client
-        .try_issue(&sample_issue_input(relate, merchant_id.clone()))
+        .issue(&sample_issue_input(relate, merchant_id.clone()))
         .await
         .expect("stage issue 應成功");
     let invoice_date10: String = issued.invoice_date.chars().take(10).collect();
@@ -582,7 +582,7 @@ async fn issue_then_void_with_reissue_roundtrip() {
 
     let relate = unique_relate_number();
     let issued = client
-        .try_issue(&sample_issue_input(relate, merchant_id.clone()))
+        .issue(&sample_issue_input(relate, merchant_id.clone()))
         .await
         .expect("stage issue 應成功");
     assert_eq!(issued.rtn_code, 1, "issue rtn_msg={}", issued.rtn_msg);
