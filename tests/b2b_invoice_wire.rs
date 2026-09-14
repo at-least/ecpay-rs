@@ -18,16 +18,16 @@ use common::spawn_http_server;
 
 const MERCHANT_ID: &str = "2000132";
 // B2B uses the SAME keys as the B2C invoice API (official PHP B2B examples).
-const B2B_KEY: &[u8] = b"ejCk326UnaZWKisg";
-const B2B_IV: &[u8] = b"q9jcZX8Ib9LM8wYk";
+const B2B_KEY: &str = "ejCk326UnaZWKisg";
+const B2B_IV: &str = "q9jcZX8Ib9LM8wYk";
 // The fixed GUID from the official PHP examples / stage probe.
 const B2B_RQ_ID: &str = "701b3264-a538-437e-ad45-2505eb7dde39";
 
 fn b2b_client(b2b_invoice_api_url: String) -> Ecpay {
     Ecpay {
         merchant_id: MERCHANT_ID.into(),
-        invoice_hash_key: B2B_KEY.to_vec(),
-        invoice_hash_iv: B2B_IV.to_vec(),
+        invoice_hash_key: B2B_KEY.to_owned(),
+        invoice_hash_iv: B2B_IV.to_owned(),
         b2b_invoice_api_url,
         b2b_rq_id: B2B_RQ_ID.into(),
         ..Default::default()
@@ -52,7 +52,8 @@ fn issue_success_data() -> serde_json::Value {
 /// decode is indifferent to them. `Data` = AES-encrypted url-encoded JSON,
 /// as a raw body.
 fn aes_reply(data: &serde_json::Value) -> (u16, String, Vec<u8>) {
-    let encrypted = ecpay::crypto::encrypt_data(data, B2B_KEY, B2B_IV).expect("encrypt reply Data");
+    let encrypted = ecpay::crypto::encrypt_data(data, B2B_KEY.as_bytes(), B2B_IV.as_bytes())
+        .expect("encrypt reply Data");
     let body = format!(
         r#"{{"MerchantID":2000132,"RpHeader":{{"Timestamp":1789079520,"RqID":"701b3264-a538-437e-ad45-2505eb7dde39","Reversion":"1.0.0"}},"TransCode":1,"TransMsg":"Success","Data":"{encrypted}"}}"#
     );
@@ -104,8 +105,8 @@ fn assert_envelope_and_decrypt(path: &str, body: &[u8], action: &str) -> serde_j
 
     ecpay::crypto::decrypt_data::<serde_json::Value>(
         envelope["Data"].as_str().expect("Data is a string"),
-        B2B_KEY,
-        B2B_IV,
+        B2B_KEY.as_bytes(),
+        B2B_IV.as_bytes(),
     )
     .expect("Data decrypts with the B2C invoice keys")
 }

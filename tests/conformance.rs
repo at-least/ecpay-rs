@@ -24,8 +24,8 @@ use common::spawn_http_server;
 
 // --- Go mock_test.go constants and helpers ---
 
-const TEST_INVOICE_HASH_KEY: &[u8] = b"ejCk326UnaZWKisg";
-const TEST_INVOICE_HASH_IV: &[u8] = b"q9jcZX8Ib9LM8wYk";
+const TEST_INVOICE_HASH_KEY: &str = "ejCk326UnaZWKisg";
+const TEST_INVOICE_HASH_IV: &str = "q9jcZX8Ib9LM8wYk";
 const TEST_PAYMENT_HASH_KEY: &str = "5294y06JbISpM5x9";
 const TEST_PAYMENT_HASH_IV: &str = "v77hoKGq4kWxNNIS";
 const TEST_MERCHANT_ID: &str = "2000132";
@@ -33,8 +33,8 @@ const TEST_MERCHANT_ID: &str = "2000132";
 fn test_invoice_ecpay(base_url: &str) -> Ecpay {
     Ecpay {
         merchant_id: TEST_MERCHANT_ID.to_owned(),
-        invoice_hash_key: TEST_INVOICE_HASH_KEY.to_vec(),
-        invoice_hash_iv: TEST_INVOICE_HASH_IV.to_vec(),
+        invoice_hash_key: TEST_INVOICE_HASH_KEY.to_owned(),
+        invoice_hash_iv: TEST_INVOICE_HASH_IV.to_owned(),
         invoice_api_url: base_url.to_owned(),
         ..Default::default()
     }
@@ -613,7 +613,8 @@ async fn test_invoice_request_envelope() {
         let got = got.clone();
         spawn_http_server(move |path, body| {
             let _ = path; // /GetIssue
-            let req: ecpay::client::Request = serde_json::from_slice(body).expect("decode envelope");
+            let req: ecpay::client::Request =
+                serde_json::from_slice(body).expect("decode envelope");
             *got.lock().unwrap() =
                 Some(serde_json::to_value(&req).expect("encode captured envelope"));
             let data = encrypt_data(
@@ -621,8 +622,8 @@ async fn test_invoice_request_envelope() {
                     rtn_code: 0,
                     ..Default::default()
                 },
-                TEST_INVOICE_HASH_KEY,
-                TEST_INVOICE_HASH_IV,
+                TEST_INVOICE_HASH_KEY.as_bytes(),
+                TEST_INVOICE_HASH_IV.as_bytes(),
             )
             .expect("encrypt reply");
             let res = ecpay::client::Response {

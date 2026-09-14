@@ -8,8 +8,8 @@ use ecpay::invoice_b2b::{GetIssueInput, InvalidInput, IssueB2bInput};
 use ecpay::Ecpay;
 
 const MERCHANT_ID: &str = "2000132";
-const B2B_KEY: &[u8] = b"ejCk326UnaZWKisg";
-const B2B_IV: &[u8] = b"q9jcZX8Ib9LM8wYk";
+const B2B_KEY: &str = "ejCk326UnaZWKisg";
+const B2B_IV: &str = "q9jcZX8Ib9LM8wYk";
 
 fn unique_relate_number() -> String {
     let n = std::time::SystemTime::now()
@@ -45,8 +45,8 @@ fn sdk() -> Ecpay {
         merchant_id: MERCHANT_ID.into(),
         hash_key: "pwFHCqoQZGmho4w6".into(),
         hash_iv: "EkRm7iFT261dpevs".into(),
-        invoice_hash_key: B2B_KEY.to_vec(),
-        invoice_hash_iv: B2B_IV.to_vec(),
+        invoice_hash_key: B2B_KEY.to_owned(),
+        invoice_hash_iv: B2B_IV.to_owned(),
         b2b_invoice_api_url: "https://einvoice-stage.ecpay.com.tw/B2BInvoice/".into(),
         b2b_rq_id: "701b3264-a538-437e-ad45-2505eb7dde39".into(),
         ..Default::default()

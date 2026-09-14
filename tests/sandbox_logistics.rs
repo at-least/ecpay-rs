@@ -14,8 +14,8 @@ use ecpay::logistics::{
 use ecpay::Ecpay;
 
 const MERCHANT_ID: &str = "2000132";
-const LOGISTICS_KEY: &[u8] = b"5294y06JbISpM5x9";
-const LOGISTICS_IV: &[u8] = b"v77hoKGq4kWxNNIS";
+const LOGISTICS_KEY: &str = "5294y06JbISpM5x9";
+const LOGISTICS_IV: &str = "v77hoKGq4kWxNNIS";
 
 fn unique_no(tag: &str) -> String {
     let n = std::time::SystemTime::now()
@@ -31,8 +31,8 @@ fn sdk() -> Ecpay {
         hash_key: "pwFHCqoQZGmho4w6".into(),
         hash_iv: "EkRm7iFT261dpevs".into(),
         logistics_api_url: "https://logistics-stage.ecpay.com.tw/".into(),
-        logistics_hash_key: LOGISTICS_KEY.to_vec(),
-        logistics_hash_iv: LOGISTICS_IV.to_vec(),
+        logistics_hash_key: LOGISTICS_KEY.to_owned(),
+        logistics_hash_iv: LOGISTICS_IV.to_owned(),
         ..Default::default()
     }
 }

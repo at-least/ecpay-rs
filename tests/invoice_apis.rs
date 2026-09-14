@@ -10,14 +10,14 @@ use ecpay::{encrypt, encrypt_data, ApiError, Ecpay, Error, IssueInput};
 mod common;
 use common::spawn_http_server;
 
-const INVOICE_HASH_KEY: &[u8] = b"ejCk326UnaZWKisg";
-const INVOICE_HASH_IV: &[u8] = b"q9jcZX8Ib9LM8wYk";
+const INVOICE_HASH_KEY: &str = "ejCk326UnaZWKisg";
+const INVOICE_HASH_IV: &str = "q9jcZX8Ib9LM8wYk";
 
 fn client(base_url: String) -> Ecpay {
     Ecpay {
         merchant_id: "2000132".to_owned(),
-        invoice_hash_key: INVOICE_HASH_KEY.to_vec(),
-        invoice_hash_iv: INVOICE_HASH_IV.to_vec(),
+        invoice_hash_key: INVOICE_HASH_KEY.to_owned(),
+        invoice_hash_iv: INVOICE_HASH_IV.to_owned(),
         invoice_api_url: base_url,
         ..Default::default()
     }
@@ -47,7 +47,14 @@ fn mock(data: serde_json::Value) -> (Ecpay, Arc<Mutex<Vec<String>>>) {
         assert_eq!(req.merchant_id, "2000132");
         assert_eq!(req.rq_header.revision, "3.0.0");
         seen.lock().unwrap().push(path.to_owned());
-        envelope(encrypt_data(&data, INVOICE_HASH_KEY, INVOICE_HASH_IV).unwrap())
+        envelope(
+            encrypt_data(
+                &data,
+                INVOICE_HASH_KEY.as_bytes(),
+                INVOICE_HASH_IV.as_bytes(),
+            )
+            .unwrap(),
+        )
     });
     (client(srv), paths)
 }
@@ -219,7 +226,7 @@ async fn undecodable_data_is_an_error() {
             encrypt_data(
                 &serde_json::json!({"RtnCode": 1}),
                 b"0000000000000000",
-                INVOICE_HASH_IV,
+                INVOICE_HASH_IV.as_bytes(),
             )
             .unwrap(),
         )
@@ -238,7 +245,14 @@ async fn undecodable_data_is_an_error() {
 
     // Decrypts fine but is not JSON.
     let srv = spawn_http_server(|_path, _body| {
-        envelope(encrypt(b"not-json", INVOICE_HASH_KEY, INVOICE_HASH_IV).unwrap())
+        envelope(
+            encrypt(
+                b"not-json",
+                INVOICE_HASH_KEY.as_bytes(),
+                INVOICE_HASH_IV.as_bytes(),
+            )
+            .unwrap(),
+        )
     });
     let err = client(srv)
         .get_issue(&Default::default())
@@ -267,8 +281,8 @@ async fn envelope_carries_the_platform_id() {
         envelope(
             encrypt_data(
                 &serde_json::json!({"RtnCode": 1}),
-                INVOICE_HASH_KEY,
-                INVOICE_HASH_IV,
+                INVOICE_HASH_KEY.as_bytes(),
+                INVOICE_HASH_IV.as_bytes(),
             )
             .unwrap(),
         )

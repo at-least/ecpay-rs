@@ -338,8 +338,8 @@ async fn allinone_v2_print_and_redirect_response_shapes() {
         hash_key: "pwFHCqoQZGmho4w6".into(),
         hash_iv: "EkRm7iFT261dpevs".into(),
         logistics_api_url: "https://logistics-stage.ecpay.com.tw/".into(),
-        logistics_hash_key: b"5294y06JbISpM5x9".to_vec(),
-        logistics_hash_iv: b"v77hoKGq4kWxNNIS".to_vec(),
+        logistics_hash_key: "5294y06JbISpM5x9".into(),
+        logistics_hash_iv: "v77hoKGq4kWxNNIS".into(),
         ..Default::default()
     };
 

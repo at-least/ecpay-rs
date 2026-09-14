@@ -33,8 +33,8 @@ fn stage_client() -> Ecpay {
         hash_iv: "v77hoKGq4kWxNNIS".into(),
         payment_api_url: PAYMENT_API_URL_STAGE.into(),
         invoice_api_url: INVOICE_API_URL_STAGE.into(),
-        invoice_hash_key: b"ejCk326UnaZWKisg".to_vec(),
-        invoice_hash_iv: b"q9jcZX8Ib9LM8wYk".to_vec(),
+        invoice_hash_key: "ejCk326UnaZWKisg".into(),
+        invoice_hash_iv: "q9jcZX8Ib9LM8wYk".into(),
         ..Default::default()
     }
 }
@@ -277,7 +277,7 @@ async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
     // Negative control: the same request under a wrong AES key must not
     // reach the business check.
     let wrong_key = Ecpay {
-        invoice_hash_key: b"0000000000000000".to_vec(),
+        invoice_hash_key: "0000000000000000".into(),
         ..stage_client()
     };
     let err = wrong_key

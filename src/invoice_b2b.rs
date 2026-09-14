@@ -69,15 +69,9 @@ impl Ecpay {
             "RqID": self.b2b_rq_id.clone(),
             "Revision": "1.0.0",
         });
-        self.post_aes_json(
-            &endpoint,
-            rq_header,
-            &self.merchant_id,
-            data,
-            &self.invoice_hash_key,
-            &self.invoice_hash_iv,
-        )
-        .await
+        let (key, iv) = self.invoice_keys();
+        self.post_aes_json(&endpoint, rq_header, &self.merchant_id, data, key, iv)
+            .await
     }
 }
 

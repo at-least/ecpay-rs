@@ -174,8 +174,8 @@ pub struct Ecpay {
     pub hash_iv: String,
     pub payment_api_url: String,
     pub invoice_api_url: String,
-    pub invoice_hash_key: Vec<u8>,
-    pub invoice_hash_iv: Vec<u8>,
+    pub invoice_hash_key: String,
+    pub invoice_hash_iv: String,
     /// 特店自訂編號
     pub relate_number: String,
     pub return_url: String,
@@ -191,8 +191,8 @@ pub struct Ecpay {
     /// (stage B2C: 2000132/`5294y06JbISpM5x9`; C2C: 2000933/`XBERn1YOvpM9nfZc`),
     /// so unlike the invoice pair these fall back to `hash_key`/`hash_iv`
     /// when left empty.
-    pub logistics_hash_key: Vec<u8>,
-    pub logistics_hash_iv: Vec<u8>,
+    pub logistics_hash_key: String,
+    pub logistics_hash_iv: String,
     /// 站內付 2.0 token/order-creation base (`Merchant/*` appended); empty =
     /// production. Uses the PAYMENT HashKey/HashIV.
     pub ecpg_api_url: String,
@@ -289,14 +289,23 @@ impl Ecpay {
         let key = if self.logistics_hash_key.is_empty() {
             self.hash_key.as_bytes()
         } else {
-            &self.logistics_hash_key
+            self.logistics_hash_key.as_bytes()
         };
         let iv = if self.logistics_hash_iv.is_empty() {
             self.hash_iv.as_bytes()
         } else {
-            &self.logistics_hash_iv
+            self.logistics_hash_iv.as_bytes()
         };
         (key, iv)
+    }
+
+    /// Invoice (B2C + B2B) AES keys as bytes — the single `as_bytes()` site
+    /// for these fields.
+    pub(crate) fn invoice_keys(&self) -> (&[u8], &[u8]) {
+        (
+            self.invoice_hash_key.as_bytes(),
+            self.invoice_hash_iv.as_bytes(),
+        )
     }
 
     /// 站內付 2.0 token base (`Merchant/*`), defaulting to production.
@@ -354,10 +363,10 @@ mod tests {
             merchant_id: "3002607".into(),
             hash_key: "pwFHCqoQZGmho4w6".into(),
             hash_iv: "EkRm7iFT261dpevs".into(),
-            invoice_hash_key: b"ejCk326UnaZWKisg".to_vec(),
-            invoice_hash_iv: b"q9jcZX8Ib9LM8wYk".to_vec(),
-            logistics_hash_key: b"5294y06JbISpM5x9".to_vec(),
-            logistics_hash_iv: b"v77hoKGq4kWxNNIS".to_vec(),
+            invoice_hash_key: "ejCk326UnaZWKisg".into(),
+            invoice_hash_iv: "q9jcZX8Ib9LM8wYk".into(),
+            logistics_hash_key: "5294y06JbISpM5x9".into(),
+            logistics_hash_iv: "v77hoKGq4kWxNNIS".into(),
             ..Default::default()
         };
         let dumped = format!("{client:?}");

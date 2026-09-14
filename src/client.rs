@@ -462,7 +462,8 @@ impl Ecpay {
     ) -> Result<O> {
         let base = self.invoice_base_url();
         let endpoint = format!("{base}{name}");
-        let data = encrypt_data(input, &self.invoice_hash_key, &self.invoice_hash_iv)?;
+        let (key, iv) = self.invoice_keys();
+        let data = encrypt_data(input, key, iv)?;
         let req = Request {
             platform_id: self.platform_id.clone(),
             merchant_id: self.merchant_id.clone(),
@@ -498,7 +499,8 @@ impl Ecpay {
                 msg: res.trans_msg,
             });
         }
-        decrypt_data(&res.data, &self.invoice_hash_key, &self.invoice_hash_iv)
+        let (key, iv) = self.invoice_keys();
+        decrypt_data(&res.data, key, iv)
     }
 
     /// The Python-flavored payment form call (BasePayment.send_post): plain

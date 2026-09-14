@@ -42,3 +42,12 @@ _go_float 移除（wire 變更）：_
   折讓生命週期、作廢重開、B2B 開立全數 RtnCode=1 通過。
 - `Cargo.toml`：移除 `ryu` 與 serde_json 的 `raw_value` feature（皆僅
   go_float 使用）。
+
+## Unreleased（續）
+
+_金鑰型別統一：_
+
+- `Ecpay::invoice_hash_key` / `invoice_hash_iv` / `logistics_hash_key` /
+  `logistics_hash_iv` 從 `Vec<u8>` 改為 `String`，與 `hash_key`/`hash_iv`
+  一致（呼叫端從 `b"...".to_vec()` 變成 `"...".into()`）；`as_bytes()`
+  收斂到單一私有存取點 `invoice_keys()` / `logistics_keys()`。

@@ -29,8 +29,8 @@ fn logistics_sdk(api_url: String) -> Ecpay {
         hash_key: "pwFHCqoQZGmho4w6".into(),
         hash_iv: "EkRm7iFT261dpevs".into(),
         logistics_api_url: api_url,
-        logistics_hash_key: LOGISTICS_KEY.as_bytes().to_vec(),
-        logistics_hash_iv: LOGISTICS_IV.as_bytes().to_vec(),
+        logistics_hash_key: LOGISTICS_KEY.to_owned(),
+        logistics_hash_iv: LOGISTICS_IV.to_owned(),
         ..Default::default()
     }
 }

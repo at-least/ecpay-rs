@@ -63,10 +63,7 @@ fn exponent_notation_follows_serde_json() {
 fn non_finite_values_are_a_serialization_error() {
     for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let err = serde_json::to_string(&F { v }).expect_err("must not serialize");
-        assert!(
-            err.to_string().contains("non-finite float"),
-            "{v}: {err}"
-        );
+        assert!(err.to_string().contains("non-finite float"), "{v}: {err}");
     }
 }
 

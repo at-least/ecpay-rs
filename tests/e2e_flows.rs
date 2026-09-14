@@ -51,8 +51,8 @@ const LOG_KEY: &str = "5294y06JbISpM5x9";
 const LOG_IV: &str = "v77hoKGq4kWxNNIS";
 const PAY_KEY: &str = "pwFHCqoQZGmho4w6";
 const PAY_IV: &str = "EkRm7iFT261dpevs";
-const B2B_KEY: &[u8] = b"ejCk326UnaZWKisg";
-const B2B_IV: &[u8] = b"q9jcZX8Ib9LM8wYk";
+const B2B_KEY: &str = "ejCk326UnaZWKisg";
+const B2B_IV: &str = "q9jcZX8Ib9LM8wYk";
 
 // --- tiny shared helpers ---
 
@@ -184,8 +184,8 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
             merchant_id: MERCHANT_ID.into(),
             hash_key: PAY_KEY.into(),
             hash_iv: PAY_IV.into(),
-            logistics_hash_key: LOG_KEY.as_bytes().to_vec(),
-            logistics_hash_iv: LOG_IV.as_bytes().to_vec(),
+            logistics_hash_key: LOG_KEY.to_owned(),
+            logistics_hash_iv: LOG_IV.to_owned(),
             ..Default::default()
         };
         let log = merchant_log.clone();
@@ -274,8 +274,8 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
         hash_key: PAY_KEY.into(),
         hash_iv: PAY_IV.into(),
         logistics_api_url: ecpay_sim.clone(),
-        logistics_hash_key: LOG_KEY.as_bytes().to_vec(),
-        logistics_hash_iv: LOG_IV.as_bytes().to_vec(),
+        logistics_hash_key: LOG_KEY.to_owned(),
+        logistics_hash_iv: LOG_IV.to_owned(),
         ..Default::default()
     };
 
@@ -413,8 +413,8 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
             merchant_id: MERCHANT_ID.into(),
             hash_key: PAY_KEY.into(),
             hash_iv: PAY_IV.into(),
-            logistics_hash_key: LOG_KEY.as_bytes().to_vec(),
-            logistics_hash_iv: LOG_IV.as_bytes().to_vec(),
+            logistics_hash_key: LOG_KEY.to_owned(),
+            logistics_hash_iv: LOG_IV.to_owned(),
             ..Default::default()
         };
         spawn_http_server(move |path, body| {
@@ -521,8 +521,8 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
         hash_key: PAY_KEY.into(),
         hash_iv: PAY_IV.into(),
         logistics_api_url: ecpay_sim.clone(),
-        logistics_hash_key: LOG_KEY.as_bytes().to_vec(),
-        logistics_hash_iv: LOG_IV.as_bytes().to_vec(),
+        logistics_hash_key: LOG_KEY.to_owned(),
+        logistics_hash_iv: LOG_IV.to_owned(),
         ..Default::default()
     };
 
@@ -849,9 +849,12 @@ async fn b2b_issue_get_invalid_getinvalid_chain() {
                 "B2B RqHeader = Timestamp + RqID + Revision"
             );
             assert_eq!(rq["Revision"], "1.0.0");
-            let payload: serde_json::Value =
-                ecpay::crypto::decrypt_data(env["Data"].as_str().unwrap(), B2B_KEY, B2B_IV)
-                    .unwrap();
+            let payload: serde_json::Value = ecpay::crypto::decrypt_data(
+                env["Data"].as_str().unwrap(),
+                B2B_KEY.as_bytes(),
+                B2B_IV.as_bytes(),
+            )
+            .unwrap();
             let mut state = sim.lock().unwrap();
             let aes_reply = |data: serde_json::Value| {
                 (
@@ -861,7 +864,7 @@ async fn b2b_issue_get_invalid_getinvalid_chain() {
                         "MerchantID": 2000132,
                         "RpHeader": {"Timestamp": 1, "RqID": "x", "Reversion": "1.0.0"},
                         "TransCode": 1, "TransMsg": "Success",
-                        "Data": ecpay::crypto::encrypt_data(&data, B2B_KEY, B2B_IV).unwrap(),
+                        "Data": ecpay::crypto::encrypt_data(&data, B2B_KEY.as_bytes(), B2B_IV.as_bytes()).unwrap(),
                     })
                     .to_string()
                     .into_bytes(),
@@ -910,8 +913,8 @@ async fn b2b_issue_get_invalid_getinvalid_chain() {
         merchant_id: MERCHANT_ID.into(),
         hash_key: PAY_KEY.into(),
         hash_iv: PAY_IV.into(),
-        invoice_hash_key: B2B_KEY.to_vec(),
-        invoice_hash_iv: B2B_IV.to_vec(),
+        invoice_hash_key: B2B_KEY.to_owned(),
+        invoice_hash_iv: B2B_IV.to_owned(),
         b2b_invoice_api_url: ecpay_sim.clone(),
         b2b_rq_id: "701b3264-a538-437e-ad45-2505eb7dde39".into(),
         ..Default::default()
