@@ -62,3 +62,11 @@ _HTTP client 注入：_
   client 原樣使用——hardening 不會（也無法）套用到它。
 - 內部：`http_client()` / `unix_now()` 從 `crypto.rs` 搬到 `client.rs`
   （運輸層關注點歸位；均為 crate 私有）。
+
+_審查跟進：_
+
+- B2B 的 `B2bItem`/`B2bAllowanceDetail` 金額欄位（ItemCount/ItemPrice/
+  ItemAmount）也套上 `finite_f64`——NaN/±Inf 拒絕的保證現在涵蓋全部
+  金額欄位（B2B 先前為裸 f64，NaN 會靜默序列化為 `null`）。
+- README 補上自訂 HTTP client 段落；英文版「compile-time」過度陳述一併
+  修正；`Ecpay` 的 Debug 文件列出全部六個遮蔽的金鑰欄位。

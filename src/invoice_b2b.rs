@@ -149,16 +149,16 @@ pub struct B2bItem {
     pub item_seq: i64, // 商品序號
     #[serde(rename = "ItemName")]
     pub item_name: String, // 商品名稱
-    #[serde(rename = "ItemCount")]
+    #[serde(rename = "ItemCount", with = "crate::crypto::finite_f64")]
     pub item_count: f64, // 商品數量 支援小數（serde_json 原樣序列化，3.0 與官方範例的 3 是同一 JSON 數值）
-    #[serde(rename = "ItemPrice")]
+    #[serde(rename = "ItemPrice", with = "crate::crypto::finite_f64")]
     pub item_price: f64, // 商品單價 支援小數（serde_json 原樣序列化，10.0 與範例的 10 是同一 JSON 數值）
     /// 商品課稅別 '1'~'9'。官方規格頁的 B2B 欄位名是 `ItemTax`（Number
     /// 稅額），但官方 PHP 範例與 stage 實測（2026-09 開立成功）都是
     /// `ItemTaxType`（String 課稅別），本欄位依可實證的後者。
     #[serde(rename = "ItemTaxType")]
     pub item_tax_type: String,
-    #[serde(rename = "ItemAmount")]
+    #[serde(rename = "ItemAmount", with = "crate::crypto::finite_f64")]
     pub item_amount: f64, // 商品合計 各項加總（四捨五入）= SalesAmount
     #[serde(rename = "ItemWord", skip_serializing_if = "Option::is_none")]
     pub item_word: Option<String>, // 商品單位
@@ -250,11 +250,11 @@ pub struct B2bAllowanceDetail {
     pub item_name: String, // 商品名稱
     #[serde(rename = "OriginalSequenceNumber")]
     pub original_sequence_number: i64, // 原發票商品序號
-    #[serde(rename = "ItemCount")]
+    #[serde(rename = "ItemCount", with = "crate::crypto::finite_f64")]
     pub item_count: f64, // 折讓數量
-    #[serde(rename = "ItemPrice")]
+    #[serde(rename = "ItemPrice", with = "crate::crypto::finite_f64")]
     pub item_price: f64, // 商品單價
-    #[serde(rename = "ItemAmount")]
+    #[serde(rename = "ItemAmount", with = "crate::crypto::finite_f64")]
     pub item_amount: f64, // 折讓金額合計
 }
 

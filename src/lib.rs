@@ -163,9 +163,9 @@ pub const VENDOR_API_URL_PRODUCTION: &str = "https://vendor.ecpay.com.tw/Payment
 /// `ECPayPaymentSdk(MerchantID, HashKey, HashIV)` constructor). The zero
 /// value is valid: empty API URLs fall back to the production endpoints.
 ///
-/// `Debug` is hand-written and redacts the signing secrets (`hash_key`,
-/// `hash_iv`, `invoice_hash_key`, `invoice_hash_iv`) so a stray
-/// `{:?}` on the client never logs them.
+/// `Debug` is hand-written and redacts every signing secret (`hash_key`,
+/// `hash_iv`, `invoice_hash_key`, `invoice_hash_iv`, `logistics_hash_key`,
+/// `logistics_hash_iv`) so a stray `{:?}` on the client never logs them.
 #[derive(Clone, Default)]
 pub struct Ecpay {
     pub platform_id: String,

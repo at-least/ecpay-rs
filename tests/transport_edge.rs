@@ -284,4 +284,47 @@ async fn injected_http_client_is_used() {
         head.contains("ecpay-test-injected-client"),
         "the injected client's User-Agent must reach the server, head: {head}"
     );
+
+    // The AES-JSON invoice path rides the same injected client.
+    let seen3 = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let seen4 = seen3.clone();
+    let srv = spawn_http_server_with_head(move |_path, head, _body| {
+        *seen4.lock().unwrap() = head.to_owned();
+        let res = ecpay::client::Response {
+            trans_code: 1,
+            data: ecpay::encrypt_data(
+                &serde_json::json!({"RtnCode": 1}),
+                b"ejCk326UnaZWKisg",
+                b"q9jcZX8Ib9LM8wYk",
+            )
+            .unwrap(),
+            ..Default::default()
+        };
+        (
+            200,
+            "application/json".to_owned(),
+            serde_json::to_vec(&res).unwrap(),
+        )
+    });
+    let client = Ecpay {
+        invoice_api_url: srv,
+        invoice_hash_key: "ejCk326UnaZWKisg".into(),
+        invoice_hash_iv: "q9jcZX8Ib9LM8wYk".into(),
+        http: Some(
+            reqwest::Client::builder()
+                .user_agent("ecpay-test-injected-client")
+                .build()
+                .unwrap(),
+        ),
+        ..sdk()
+    };
+    client
+        .get_issue(&Default::default())
+        .await
+        .expect("envelope decodes");
+    let head = seen3.lock().unwrap().clone();
+    assert!(
+        head.contains("ecpay-test-injected-client"),
+        "the AES path must also ride the injected client, head: {head}"
+    );
 }

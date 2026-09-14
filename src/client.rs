@@ -443,7 +443,7 @@ impl Ecpay {
             // HTTP error — but only when the body really carries a TransCode
             // gate: every Response field is serde-defaulted, so any JSON
             // object (a 403/502 gateway body, for example) would otherwise
-            // decode into a meaningless Transport{code:0} and swallow the
+            // decode into a meaningless TransCode{code:0} and swallow the
             // real status and body.
             match Self::parse_envelope(&body).filter(|res| res.trans_code != 0) {
                 Some(res) => return Self::decode_aes_response(res, key, iv),
@@ -452,7 +452,7 @@ impl Ecpay {
         }
         // Same gate on the happy path: a 2xx JSON body without a TransCode
         // field is not an envelope (serde would default one into existence)
-        // and deserves the explicit error, not Transport{code:0}.
+        // and deserves the explicit error, not TransCode{code:0}.
         let res = Self::parse_envelope(&body)
             .filter(|res| res.trans_code != 0)
             .ok_or_else(|| {
