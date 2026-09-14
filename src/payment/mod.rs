@@ -216,9 +216,9 @@ wire_enum! {
     /// 向綠界確認;此 enum 依 AIO/Python SDK 語彙命名。
     ClearanceMark {
         /// 經海關出口 (1;AIO 世代文件語彙——B2C 發票指南相反,見型別文件)
-        Yes => "1",
+        ViaCustoms => "1",
         /// 非經海關出口 (2;AIO 世代文件語彙——B2C 發票指南相反,見型別文件)
-        No => "2",
+        NotViaCustoms => "2",
     }
 }
 

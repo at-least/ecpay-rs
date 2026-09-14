@@ -155,11 +155,11 @@ fn test_issue_input_field_names() {
     let input = IssueInput {
         merchant_id: "2000132".to_owned(),
         relate_number: "o1".to_owned(),
-        print: "0".to_owned(),
-        donation: "0".to_owned(),
-        tax_type: "1".to_owned(),
+        print: "0".into(),
+        donation: "0".into(),
+        tax_type: "1".into(),
         sales_amount: 100,
-        inv_type: "07".to_owned(),
+        inv_type: "07".into(),
         vat: "1".to_owned(),
         items: Some(vec![Item {
             item_seq: 1,

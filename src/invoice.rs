@@ -18,7 +18,85 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{api_error, Result};
+use crate::wire::wire_enum;
 use crate::Ecpay;
+
+// --- B2C 發票的代碼欄位 enum(per-service,與 payment 模組的 AIO 語彙不同) ---
+
+wire_enum! {
+    /// B2C 發票的課稅類別 (`TaxType`,1/2/3/4/9——比 AIO 多特種稅率 `'4'`,
+    /// 比 B2B 多混合 `'9'`,與 [`crate::payment::TaxType`]、
+    /// [`crate::invoice_b2b::TaxType`] 值域不同,型別刻意分開)。
+    TaxType {
+        /// 應稅 (1)
+        Dutiable => "1",
+        /// 零稅率 (2;需 ClearanceMark 與 ZeroTaxRateReason)
+        ZeroRate => "2",
+        /// 免稅 (3)
+        Free => "3",
+        /// 應稅(特種稅率) (4)
+        SpecialTaxable => "4",
+        /// 應稅與免稅混合 (9;各商品列需 ItemTaxType)
+        Mixed => "9",
+    }
+}
+
+wire_enum! {
+    /// B2C 發票的捐贈註記 (`Donation`,`'0'` 不捐贈/`'1'` 捐贈)——與 AIO 的
+    /// [`crate::payment::Donation`](`'1'`/`'2'`)語意相反,型別刻意分開。
+    Donation {
+        /// 不捐贈 (0)
+        No => "0",
+        /// 捐贈 (1;需要 LoveCode)
+        Yes => "1",
+    }
+}
+
+wire_enum! {
+    /// B2C 發票的列印註記 (`Print`,0/1)。
+    PrintMark {
+        /// 不列印 (0)
+        No => "0",
+        /// 列印 (1)
+        Yes => "1",
+    }
+}
+
+wire_enum! {
+    /// B2C 發票的載具類別 (`CarrierType`)。空字串(無載具)= `Other("")`
+    /// (即 `Default`)。`'4'`/`'5'`(實體卡片,需 `CarrierNum2`)官方文件
+    /// 未載明代碼名稱,以 `Other` 穿隧。
+    CarrierType {
+        /// 綠界電子發票載具 (1)
+        Ecpay => "1",
+        /// 自然人憑證 (2)
+        Citizen => "2",
+        /// 手機條碼 (3)
+        Cellphone => "3",
+    }
+}
+
+wire_enum! {
+    /// B2C 發票的通關方式 (`ClearanceMark`,TaxType 為零稅率時必填)——
+    /// **與 AIO 的 [`crate::payment::ClearanceMark`] wire 值相反**
+    /// (`'1'`=非經海關出口、`'2'`=經海關出口),型別刻意分開。
+    ClearanceMark {
+        /// 非經海關出口 (1;B2C 發票指南語彙)
+        NotViaCustoms => "1",
+        /// 經海關出口 (2;B2C 發票指南語彙)
+        ViaCustoms => "2",
+    }
+}
+
+wire_enum! {
+    /// B2C 發票的字軌類別 (`InvType`,07/08)。
+    InvType {
+        /// 一般稅額 (07)
+        General => "07",
+        /// 特種稅額 (08)
+        Special => "08",
+    }
+}
 
 // --- Issue (開立發票) — issue.go ---
 
@@ -49,21 +127,21 @@ pub struct IssueInput {
     #[serde(rename = "CustomerEmail")]
     pub customer_email: String, // 客戶電子信箱 當客戶手機號碼為空字串時，為必填。
     #[serde(rename = "ClearanceMark")]
-    pub clearance_mark: String, // 通關方式 1:非經海關出口 2:經海關出口 (TaxType=2 時必填)
+    pub clearance_mark: ClearanceMark, // 通關方式 (TaxType 為零稅率時必填)
     #[serde(rename = "Print")]
-    pub print: String, // 列印註記 0:不列印 1:要列印
+    pub print: PrintMark, // 列印註記
     #[serde(rename = "Donation")]
-    pub donation: String, // 捐贈註記 0:不捐贈 1:要捐贈
+    pub donation: Donation, // 捐贈註記 (捐贈時 LoveCode 必填)
     #[serde(rename = "LoveCode")]
-    pub love_code: String, // 捐贈碼 (Donation=1 時為必填)
+    pub love_code: String, // 捐贈碼 (Donation=捐贈時為必填)
     #[serde(rename = "CarrierType")]
-    pub carrier_type: String, // 載具類別 空字串:無載具 1:綠界電子發票載具 2:自然人憑證號碼 3:手機條碼載具
+    pub carrier_type: CarrierType, // 載具類別 (空=無載具,見 enum 文件)
     #[serde(rename = "CarrierNum")]
     pub carrier_num: String, // 載具編號
     #[serde(rename = "CarrierNum2")]
     pub carrier_num2: String, // 實體卡片顯碼id(外觀號碼) CarrierType=4 或 5 時必填
     #[serde(rename = "TaxType")]
-    pub tax_type: String, // 課稅類別 1:應稅 2:零稅率 3:免稅 4:應稅(特種稅率) 9:混合
+    pub tax_type: TaxType, // 課稅類別(見 enum 文件)
     /// 零稅率原因代號(71~79)。官方文件(developers.ecpay.com.tw/7896.md、
     /// guides/04)載明 TaxType=2 或 9 時必填，自 2026-01-01 起強制；沙盒
     /// 實測(2026-09,公開測試特店 2000132)未填仍開立成功，該帳號似未強制
@@ -81,7 +159,7 @@ pub struct IssueInput {
     #[serde(rename = "Items")]
     pub items: Option<Vec<Item>>, // 商品 (Go nil slice marshals as null)
     #[serde(rename = "InvType")]
-    pub inv_type: String, // 字軌類別 07:一般稅額 08:特種稅額
+    pub inv_type: InvType, // 字軌類別(見 enum 文件)
     /// ECPay quirk: the tax-inclusive flag is lowercase "vat" (every other
     /// field is PascalCase).
     #[serde(rename = "vat")]
@@ -189,21 +267,21 @@ pub struct IssueModel {
     #[serde(rename = "CustomerEmail")]
     pub customer_email: String,
     #[serde(rename = "ClearanceMark")]
-    pub clearance_mark: String,
+    pub clearance_mark: ClearanceMark,
     #[serde(rename = "Print")]
-    pub print: String,
+    pub print: PrintMark,
     #[serde(rename = "Donation")]
-    pub donation: String,
+    pub donation: Donation,
     #[serde(rename = "LoveCode")]
     pub love_code: String,
     #[serde(rename = "CarrierType")]
-    pub carrier_type: String,
+    pub carrier_type: CarrierType,
     #[serde(rename = "CarrierNum")]
     pub carrier_num: String,
     #[serde(rename = "CarrierNum2")]
     pub carrier_num2: String,
     #[serde(rename = "TaxType")]
-    pub tax_type: String,
+    pub tax_type: TaxType,
     /// 零稅率原因代號(71~79)。TaxType=2 或 9 時必填，見 IssueInput 對應
     /// 欄位的說明（含沙盒實測備註）。
     #[serde(rename = "ZeroTaxRateReason")]
@@ -219,7 +297,7 @@ pub struct IssueModel {
     #[serde(rename = "Items")]
     pub items: Option<Vec<Item>>,
     #[serde(rename = "InvType")]
-    pub inv_type: String,
+    pub inv_type: InvType,
     #[serde(rename = "vat")]
     pub vat: String,
 }
@@ -425,7 +503,7 @@ pub struct GovInvoiceInfo {
     #[serde(rename = "InvoiceTerm")]
     pub invoice_term: i64, // 發票期別 1:1-2月 ,2:3-4月 ,3:5-6月 ,4:7-8月 ,5:9-10月 ,6:11-12月
     #[serde(rename = "InvType")]
-    pub inv_type: String, // 字軌類別 07:一般稅額發票 08:特種稅額發票
+    pub inv_type: InvType, // 字軌類別 07:一般稅額發票 08:特種稅額發票
     #[serde(rename = "InvoiceHeader")]
     pub invoice_header: String, // 發票字軌 ex:KK
     #[serde(rename = "InvoiceStart")]
@@ -473,7 +551,7 @@ pub struct GetInvoiceWordSettingInput {
     #[serde(rename = "InvoiceCategory")]
     pub invoice_category: i64, // 發票類別 1:B2C，請固定填寫為 1
     #[serde(rename = "InvType")]
-    pub inv_type: String, // 字軌類別 07:一般稅額發票，08:特種稅額發票
+    pub inv_type: InvType, // 字軌類別 07:一般稅額發票，08:特種稅額發票
     #[serde(rename = "InvoiceHeader")]
     pub invoice_header: String, // 字軌名稱
 }
@@ -490,7 +568,7 @@ pub struct InvoiceInfo {
     #[serde(rename = "InvoiceCategory")]
     pub invoice_category: i64, // 發票類別 1:B2C
     #[serde(rename = "InvType")]
-    pub inv_type: String, // 字軌類別 07:一般稅額發票，08:特種稅額發票
+    pub inv_type: InvType, // 字軌類別 07:一般稅額發票，08:特種稅額發票
     #[serde(rename = "InvoiceHeader")]
     pub invoice_header: String, // 字軌名稱
     #[serde(rename = "InvoiceStart")]
@@ -680,21 +758,21 @@ pub struct DelayIssueInput {
     #[serde(rename = "CustomerEmail")]
     pub customer_email: String,
     #[serde(rename = "ClearanceMark")]
-    pub clearance_mark: String,
+    pub clearance_mark: ClearanceMark,
     #[serde(rename = "Print")]
-    pub print: String,
+    pub print: PrintMark,
     #[serde(rename = "Donation")]
-    pub donation: String,
+    pub donation: Donation,
     #[serde(rename = "LoveCode")]
     pub love_code: String,
     #[serde(rename = "CarrierType")]
-    pub carrier_type: String,
+    pub carrier_type: CarrierType,
     #[serde(rename = "CarrierNum")]
     pub carrier_num: String,
     #[serde(rename = "CarrierNum2")]
     pub carrier_num2: String,
     #[serde(rename = "TaxType")]
-    pub tax_type: String,
+    pub tax_type: TaxType,
     #[serde(rename = "ZeroTaxRateReason")]
     pub zero_tax_rate_reason: String,
     #[serde(rename = "SpecialTaxType")]
@@ -708,7 +786,7 @@ pub struct DelayIssueInput {
     #[serde(rename = "Items")]
     pub items: Option<Vec<Item>>,
     #[serde(rename = "InvType")]
-    pub inv_type: String,
+    pub inv_type: InvType,
     #[serde(rename = "vat")]
     pub vat: String,
     /// 1:延遲開立(等候手動/排程觸發) 2:排程觸發開立

@@ -229,7 +229,7 @@ fn test_encrypt_data_decrypt_data_real_types() {
         customer_name: "全部生命 A&B <Co> 測試".to_owned(),
         customer_email: "user+tag@example.com".to_owned(),
         sales_amount: 100,
-        inv_type: "07".to_owned(),
+        inv_type: "07".into(),
         vat: "1".to_owned(),
         items: Some(vec![ecpay::Item {
             item_seq: 1,
@@ -287,7 +287,7 @@ fn test_encrypt_data_decrypt_data_real_types() {
         invoice_year: "113".to_owned(),
         invoice_term: 0,
         invoice_category: 1,
-        inv_type: "07".to_owned(),
+        inv_type: "07".into(),
         ..Default::default()
     };
     let enc = encrypt_data(&input, INV_KEY, INV_IV).unwrap();
