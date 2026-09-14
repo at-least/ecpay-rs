@@ -15,8 +15,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::client::parse_qsl;
 use crate::error::{Error, Result};
+use crate::wire::wire_enum;
 use crate::Ecpay;
-use params::{insert_optional_str, optional_str, required_str};
+use params::{insert_optional_str, optional_str, required_code, required_str};
 
 /// 付款方式 (`ChoosePayment`)。`as_str()` 為送給 ECPay 的 wire 值。
 ///
@@ -144,67 +145,107 @@ pub mod need_extra_paid_info {
 /// 裝置來源:請帶空值，由系統自動判定。
 pub const DEVICE_SOURCE: &str = "";
 
-/// 信用卡關帳/退刷/取消/放棄 (`Action`)
-pub mod action {
-    pub const CLOSE: &str = "C"; // 關帳
-    pub const REFUND: &str = "R"; // 退刷
-    pub const CANCEL: &str = "E"; // 取消
-    pub const ABANDON: &str = "N"; // 放棄
+wire_enum! {
+    /// 信用卡關帳/退刷/取消/放棄 (`Action`,C/R/E/N)。
+    CreditAction {
+        /// 關帳 (C)
+        Close => "C",
+        /// 退刷 (R)
+        Refund => "R",
+        /// 取消 (E)
+        Cancel => "E",
+        /// 放棄 (N)
+        Abandon => "N",
+    }
 }
 
-/// 定期定額的週期種類 (`PeriodType`)
-pub mod period_type {
-    pub const YEAR: &str = "Y"; // 以年為週期
-    pub const MONTH: &str = "M"; // 以月為週期
-    pub const DAY: &str = "D"; // 以天為週期
+wire_enum! {
+    /// 定期定額的週期種類 (`PeriodType`,Y/M/D)。
+    PeriodType {
+        /// 以年為週期 (Y)
+        Year => "Y",
+        /// 以月為週期 (M)
+        Month => "M",
+        /// 以天為週期 (D)
+        Day => "D",
+    }
 }
 
 /// 電子發票開立註記 (`InvoiceMark`):需要開立電子發票
 pub const INVOICE_MARK: &str = "Y";
 
-/// 電子發票載具類別 (`CarruerType`)
-pub mod carruer_type {
-    pub const NONE: &str = ""; // 無載具
-    pub const MEMBER: &str = "1"; // 特店載具
-    pub const CITIZEN: &str = "2"; // 買受人自然人憑證
-    pub const CELLPHONE: &str = "3"; // 買受人手機條碼
+wire_enum! {
+    /// AIO 付款附帶發票的載具類別 (`CarruerType`,1/2/3)。「無載具」不設此欄位
+    /// (`None`)——wire 上本來就是省略,而非送空字串。
+    CarruerType {
+        /// 特店載具 (1)
+        Member => "1",
+        /// 買受人自然人憑證 (2)
+        Citizen => "2",
+        /// 買受人手機條碼 (3)
+        Cellphone => "3",
+    }
 }
 
-/// 電子發票捐贈註記 (`Donation`) — **僅適用 AIO 訂單附帶發票** (InvoiceMark)
-/// 的舊版語彙,與 B2C 電子發票 API 用的 `'0'`(不捐贈)/`'1'`(捐贈)不同;
-/// 兩套不可混用。
-pub mod donation {
-    pub const NO: &str = "2"; // 若為不捐贈或統一編號 [CustomerIdentifier] 有值時, 不捐贈
-    pub const YES: &str = "1"; // 捐贈
+wire_enum! {
+    /// AIO 訂單附帶發票的捐贈註記 (`Donation`) — **AIO 舊版語彙:`'1'` 捐贈/
+    /// `'2'` 不捐贈**,與 B2C 電子發票 API 的 [`crate::invoice::Donation`]
+    /// (`'0'`/`'1'`)語意相反,型別刻意分開 so 兩套無法互抄。
+    Donation {
+        /// 捐贈 (1;需要 LoveCode)
+        Yes => "1",
+        /// 不捐贈 (2;統一編號有值時亦為不捐贈)
+        No => "2",
+    }
 }
 
-/// 電子發票列印註記 (`Print`)
-pub mod print_mark {
-    pub const NO: &str = "0"; // 若為不列印或捐贈註記 [Donation] 為 1 (捐贈) 時, 不列印
-    pub const YES: &str = "1"; // 若為列印或統一編號 [CustomerIdentifier] 有值時, 列印
+wire_enum! {
+    /// AIO 訂單附帶發票的列印註記 (`Print`,0/1)。
+    PrintMark {
+        /// 不列印 (0;捐贈註記為捐贈時亦不列印)
+        No => "0",
+        /// 列印 (1;統一編號有值時必為列印)
+        Yes => "1",
+    }
 }
 
-/// 通關方式, 當課稅類別 TaxType 為 2 (零稅率)時 (`ClearanceMark`)
-/// ⚠ 官方文件間存在歧義:AIO 世代文件(官方 Python SDK)記 `'1'`=經海關出口、
-/// `'2'`=非經海關出口;現行 B2C 發票指南記 `'1'`=非經海關出口、`'2'`=經海關出口。
-/// 上線前請以你的應用場景向綠界確認;此常數依 AIO/Python SDK 語彙。
-pub mod clearance_mark {
-    pub const YES: &str = "1"; // 經海關出口(AIO 世代文件;B2C 發票指南相反,見上)
-    pub const NO: &str = "2"; // 非經海關出口(AIO 世代文件;B2C 發票指南相反,見上)
+wire_enum! {
+    /// AIO 訂單附帶發票的通關方式 (`ClearanceMark`,TaxType 為零稅率時必填)。
+    /// ⚠ 官方文件間存在歧義:AIO 世代文件(官方 Python SDK)記 `'1'`=經海關出口、
+    /// `'2'`=非經海關出口;現行 B2C 發票指南記法相反。上線前請以你的應用場景
+    /// 向綠界確認;此 enum 依 AIO/Python SDK 語彙命名。
+    ClearanceMark {
+        /// 經海關出口 (1;AIO 世代文件語彙——B2C 發票指南相反,見型別文件)
+        Yes => "1",
+        /// 非經海關出口 (2;AIO 世代文件語彙——B2C 發票指南相反,見型別文件)
+        No => "2",
+    }
 }
 
-/// 課稅類別 (`TaxType`)
-pub mod tax_type {
-    pub const DUTIABLE: &str = "1"; // 應稅
-    pub const ZERO: &str = "2"; // 零稅率
-    pub const FREE: &str = "3"; // 免稅
-    pub const MIX: &str = "9"; // 應稅與免稅混合(限收銀機發票無法分辦時使用，且需通過申請核可)
+wire_enum! {
+    /// AIO 訂單附帶發票的課稅類別 (`TaxType`,1/2/3/9——沒有 B2C 發票 API 的
+    /// 特種稅率 `'4'`,與 [`crate::invoice::TaxType`]、
+    /// [`crate::invoice_b2b::TaxType`] 值域不同,型別刻意分開)。
+    TaxType {
+        /// 應稅 (1)
+        Dutiable => "1",
+        /// 零稅率 (2;需 ClearanceMark)
+        ZeroRate => "2",
+        /// 免稅 (3)
+        Free => "3",
+        /// 應稅與免稅混合 (9;限收銀機發票無法分辨時使用,且需申請核可)
+        Mixed => "9",
+    }
 }
 
-/// 字軌類別 (`InvType`)
-pub mod inv_type {
-    pub const GENERAL: &str = "07"; // 一般稅額
-    pub const SPECIAL: &str = "08"; // 特種稅額
+wire_enum! {
+    /// AIO 訂單附帶發票的字軌類別 (`InvType`,07/08)。
+    InvType {
+        /// 一般稅額 (07)
+        General => "07",
+        /// 特種稅額 (08)
+        Special => "08",
+    }
 }
 
 /// 銀聯卡交易選項 (`UnionPay`)
@@ -287,8 +328,8 @@ pub struct CreditDoActionParams {
     pub merchant_trade_no: String,
     /// 綠界的交易編號(必填,最大 20 字元)。
     pub trade_no: String,
-    /// 執行動作 `C`/`R`/`E`/`N`(必填,見 [`action`])。
-    pub action: String,
+    /// 執行動作 `C`/`R`/`E`/`N`(必填,見 [`CreditAction`])。
+    pub action: CreditAction,
     /// 交易金額(必填)。
     pub total_amount: i64,
     /// 平台特店合作專用(最大 10 字元)。
@@ -347,8 +388,8 @@ pub struct DownloadDisbursementBalanceParams {
 pub struct CreditCardPeriodActionParams {
     /// 特店交易編號(必填,最大 20 字元)。
     pub merchant_trade_no: String,
-    /// 訂單狀態處理動作(必填,最大 20 字元)。
-    pub action: String,
+    /// 訂單狀態處理動作(必填)。
+    pub action: CreditAction,
     /// 查詢時間,Unix 秒數整數(必填)。
     pub time_stamp: i64,
     /// 平台特店合作專用(最大 10 字元)。
@@ -477,14 +518,14 @@ impl Ecpay {
     ) -> Result<BTreeMap<String, String>> {
         required_str("MerchantTradeNo", &p.merchant_trade_no, 20)?;
         required_str("TradeNo", &p.trade_no, 20)?;
-        required_str("Action", &p.action, 1)?;
+        required_code("Action", &p.action)?;
         optional_str("PlatformID", &p.platform_id, 10)?;
 
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
         m.insert("TradeNo".to_owned(), p.trade_no.clone());
-        m.insert("Action".to_owned(), p.action.clone());
+        m.insert("Action".to_owned(), p.action.as_str().to_owned());
         m.insert("TotalAmount".to_owned(), p.total_amount.to_string());
         insert_optional_str(&mut m, "PlatformID", &p.platform_id);
         let endpoint = format!("{}DoAction", self.credit_base_url());
@@ -572,13 +613,13 @@ impl Ecpay {
         p: &CreditCardPeriodActionParams,
     ) -> Result<BTreeMap<String, String>> {
         required_str("MerchantTradeNo", &p.merchant_trade_no, 20)?;
-        required_str("Action", &p.action, 20)?;
+        required_code("Action", &p.action)?;
         optional_str("PlatformID", &p.platform_id, 10)?;
 
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
-        m.insert("Action".to_owned(), p.action.clone());
+        m.insert("Action".to_owned(), p.action.as_str().to_owned());
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
         insert_optional_str(&mut m, "PlatformID", &p.platform_id);
         let endpoint = format!("{}CreditCardPeriodAction", self.payment_base_url());

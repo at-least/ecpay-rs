@@ -3,8 +3,7 @@
 //! form (offline).
 
 use ecpay::payment::{
-    carruer_type, donation, inv_type, print_mark, tax_type, AioCheckOutParams, ChoosePayment,
-    InvoiceExtend,
+    AioCheckOutParams, ChoosePayment, Donation, InvType, InvoiceExtend, PrintMark, TaxType,
 };
 use ecpay::Ecpay;
 
@@ -34,15 +33,15 @@ fn main() {
                 customer_name: Some("客戶名稱".into()),
                 customer_addr: Some("台北市中正區100號".into()),
                 customer_phone: Some("0912345678".into()),
-                tax_type: tax_type::DUTIABLE.into(),
-                donation: donation::NO.into(),
-                print: print_mark::NO.into(),
+                tax_type: TaxType::Dutiable,
+                donation: Donation::No,
+                print: PrintMark::No,
                 invoice_item_name: "測試商品1#測試商品2".into(),
                 invoice_item_count: "2#3".into(),
                 invoice_item_word: "個#包".into(),
                 invoice_item_price: "350#100".into(),
                 delay_day: 0,
-                inv_type: inv_type::GENERAL.into(),
+                inv_type: InvType::General,
                 ..Default::default()
             }),
             ..Default::default()
@@ -50,5 +49,4 @@ fn main() {
         .expect("create_order");
 
     println!("{}", checkout.html_form());
-    let _ = carruer_type::NONE; // 載具常數一覽見 ecpay::payment::carruer_type
 }

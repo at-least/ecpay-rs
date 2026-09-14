@@ -41,9 +41,11 @@ use std::collections::{BTreeMap, HashMap};
 pub const MERCHANT_TRADE_DATE_FORMAT: &str = "%Y/%m/%d %H:%M:%S";
 
 use super::params::{
-    insert_optional_int, insert_optional_int_seq, insert_optional_str, insert_optional_str_seq,
-    optional_str, py_len, required_str,
+    insert_optional_code, insert_optional_code_seq, insert_optional_int, insert_optional_int_seq,
+    insert_optional_str, insert_optional_str_seq, optional_str, py_len, required_code,
+    required_str,
 };
+use super::{CarruerType, ClearanceMark, Donation, InvType, PeriodType, PrintMark, TaxType};
 use crate::crypto::query_escape;
 use crate::error::{Error, Result};
 use crate::payment::ChoosePayment;
@@ -140,8 +142,8 @@ pub struct AioCheckOutParams {
     pub credit_installment: Option<String>,
     /// 定期定額:每次要付費的金額。
     pub period_amount: Option<i64>,
-    /// 定期定額:週期種類 `Y`/`M`/`D`(見 [`crate::payment::period_type`])。
-    pub period_type: Option<String>,
+    /// 定期定額:週期種類(見 [`crate::payment::PeriodType`])。
+    pub period_type: Option<PeriodType>,
     /// 定期定額:執行頻率,每幾個週期。
     pub frequency: Option<i64>,
     /// 定期定額:總執行次數。
@@ -233,20 +235,20 @@ pub struct InvoiceExtend {
     pub customer_phone: Option<String>,
     /// 客戶電子信箱(最大 200 字元;與手機號碼至少一個)。
     pub customer_email: Option<String>,
-    /// 通關方式 `1`/`2`(見 [`crate::payment::clearance_mark`];TaxType=2 時必填)。
-    pub clearance_mark: Option<String>,
-    /// 課稅類別(必填,見 [`crate::payment::tax_type`])。
-    pub tax_type: String,
-    /// 載具類別(見 [`crate::payment::carruer_type`])。
-    pub carruer_type: Option<String>,
+    /// 通關方式(TaxType 為零稅率時必填,見 [`crate::payment::ClearanceMark`])。
+    pub clearance_mark: Option<ClearanceMark>,
+    /// 課稅類別(必填,見 [`crate::payment::TaxType`])。
+    pub tax_type: TaxType,
+    /// 載具類別(見 [`crate::payment::CarruerType`];`None`=無載具)。
+    pub carruer_type: Option<CarruerType>,
     /// 載具編號(最大 64 字元;CarruerType 為 2/3 時必填)。
     pub carruer_num: Option<String>,
-    /// 捐贈註記(必填,`1` 捐贈 / `2` 不捐贈,見 [`crate::payment::donation`])。
-    pub donation: String,
+    /// 捐贈註記(必填,見 [`crate::payment::Donation`])。
+    pub donation: Donation,
     /// 捐贈碼(3~7 碼;Donation=1 時必填)。
     pub love_code: Option<String>,
-    /// 列印註記(必填,`0` 不列印 / `1` 列印,見 [`crate::payment::print_mark`])。
-    pub print: String,
+    /// 列印註記(必填,見 [`crate::payment::PrintMark`])。
+    pub print: PrintMark,
     /// 商品名稱,多筆以 `#` 分隔(必填,最大 100 字元)。
     pub invoice_item_name: String,
     /// 商品數量,多筆以 `#` 分隔(必填)。
@@ -261,8 +263,8 @@ pub struct InvoiceExtend {
     pub invoice_remark: Option<String>,
     /// 延遲天數,0 為立即開立(必填;若延遲,最長依法規限制)。
     pub delay_day: i64,
-    /// 字軌類別 `07` 一般稅額 / `08` 特種稅額(必填)。
-    pub inv_type: String,
+    /// 字軌類別(必填,見 [`crate::payment::InvType`])。
+    pub inv_type: InvType,
 }
 
 /// The signed All-in-One checkout payload `aio_check_out` returns: the
@@ -567,13 +569,13 @@ fn add_invoice_fields(
         insert_escaped(m, "CustomerAddr", &inv.customer_addr);
         insert_optional_str(m, "CustomerPhone", &inv.customer_phone);
         insert_escaped(m, "CustomerEmail", &inv.customer_email);
-        insert_optional_str(m, "ClearanceMark", &inv.clearance_mark);
-        m.insert("TaxType".to_owned(), inv.tax_type.clone());
-        insert_optional_str(m, "CarruerType", &inv.carruer_type);
+        insert_optional_code(m, "ClearanceMark", &inv.clearance_mark);
+        m.insert("TaxType".to_owned(), inv.tax_type.as_str().to_owned());
+        insert_optional_code(m, "CarruerType", &inv.carruer_type);
         insert_optional_str(m, "CarruerNum", &inv.carruer_num);
-        m.insert("Donation".to_owned(), inv.donation.clone());
+        m.insert("Donation".to_owned(), inv.donation.as_str().to_owned());
         insert_optional_str(m, "LoveCode", &inv.love_code);
-        m.insert("Print".to_owned(), inv.print.clone());
+        m.insert("Print".to_owned(), inv.print.as_str().to_owned());
         m.insert(
             "InvoiceItemName".to_owned(),
             query_escape(&inv.invoice_item_name),
@@ -593,7 +595,7 @@ fn add_invoice_fields(
         insert_optional_str(m, "InvoiceItemTaxType", &inv.invoice_item_tax_type);
         insert_escaped(m, "InvoiceRemark", &inv.invoice_remark);
         m.insert("DelayDay".to_owned(), inv.delay_day.to_string());
-        m.insert("InvType".to_owned(), inv.inv_type.clone());
+        m.insert("InvType".to_owned(), inv.inv_type.as_str().to_owned());
     }
     Ok(())
 }
@@ -632,7 +634,7 @@ fn credit_plan_pairs(p: &AioCheckOutParams) -> Option<Vec<(String, String)>> {
     {
         let mut v = Vec::new();
         insert_optional_int_seq(&mut v, "PeriodAmount", &p.period_amount);
-        insert_optional_str_seq(&mut v, "PeriodType", &p.period_type);
+        insert_optional_code_seq(&mut v, "PeriodType", &p.period_type);
         insert_optional_int_seq(&mut v, "Frequency", &p.frequency);
         insert_optional_int_seq(&mut v, "ExecTimes", &p.exec_times);
         insert_optional_str_seq(&mut v, "PeriodReturnURL", &p.period_return_url);
@@ -661,20 +663,19 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
     optional_str("CustomerAddr", &inv.customer_addr, 200)?;
     optional_str("CustomerPhone", &inv.customer_phone, 20)?;
     optional_str("CustomerEmail", &inv.customer_email, 200)?;
-    optional_str("ClearanceMark", &inv.clearance_mark, 1)?;
-    required_str("TaxType", &inv.tax_type, 1)?;
-    optional_str("CarruerType", &inv.carruer_type, 1)?;
     optional_str("CarruerNum", &inv.carruer_num, 64)?;
-    required_str("Donation", &inv.donation, 1)?;
     optional_str("LoveCode", &inv.love_code, 7)?;
-    required_str("Print", &inv.print, 1)?;
+    // enum 欄位:只檢查「有填」,值本身(含 Other 穿隧的新代碼)由綠界裁定
+    required_code("TaxType", &inv.tax_type)?;
+    required_code("Donation", &inv.donation)?;
+    required_code("Print", &inv.print)?;
     required_str("InvoiceItemName", &inv.invoice_item_name, 100)?;
     required_str("InvoiceItemCount", &inv.invoice_item_count, usize::MAX)?;
     required_str("InvoiceItemWord", &inv.invoice_item_word, usize::MAX)?;
     required_str("InvoiceItemPrice", &inv.invoice_item_price, usize::MAX)?;
     optional_str("InvoiceItemTaxType", &inv.invoice_item_tax_type, usize::MAX)?;
     optional_str("InvoiceRemark", &inv.invoice_remark, usize::MAX)?;
-    required_str("InvType", &inv.inv_type, 2)?;
+    required_code("InvType", &inv.inv_type)?;
 
     // 該參數有值時，請帶固定長度為數字 8 碼
     let customer_identifier = inv.customer_identifier.as_deref().unwrap_or("");
@@ -684,34 +685,35 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
         ));
     }
     // 若統一編號 CustomerIdentifier 有值時，不可以有載具
-    let carruer_type = inv.carruer_type.as_deref().unwrap_or("");
-    if !customer_identifier.is_empty() && !carruer_type.is_empty() {
+    let has_carruer = inv.carruer_type.as_ref().is_some_and(|c| !c.is_unset());
+    if !customer_identifier.is_empty() && has_carruer {
         return Err(Error::Validation(
             "CarruerType do not fill any value, when CustomerIdentifier have value.".into(),
         ));
     }
     // 統一編號 CustomerIdentifier 有值時，一定要列印
-    if !customer_identifier.is_empty() && inv.print == "0" {
+    if !customer_identifier.is_empty() && inv.print == PrintMark::No {
         return Err(Error::Validation(
             "Print have to fill \"1\", when CustomerIdentifier have value.".into(),
         ));
     }
-    // 統一編號 CustomerIdentifier 有值時，Donation 要為 '0'... (SDK 訊息寫 "0"，判斷為不可捐贈 '1')
-    if !customer_identifier.is_empty() && inv.donation == "1" {
+    // 統一編號 CustomerIdentifier 有值時，Donation 要為不捐贈(SDK 訊息寫 "0"，
+    // 判斷為 AIO 語彙的不可捐贈 '1')
+    if !customer_identifier.is_empty() && inv.donation == Donation::Yes {
         return Err(Error::Validation(
             "Donation have to fill \"0\", when CustomerIdentifier have value.".into(),
         ));
     }
 
     // 當列印註記 Print 為 1 (列印)時，CustomerName 與 CustomerAddr 必須有值
-    if inv.print == "1" {
+    if inv.print == PrintMark::Yes {
         if inv.customer_name.as_deref().unwrap_or("").is_empty() {
             return Err(Error::Validation("CustomerName have to fill value.".into()));
         }
         if inv.customer_addr.as_deref().unwrap_or("").is_empty() {
             return Err(Error::Validation("CustomerAddr have to fill value.".into()));
         }
-        if !carruer_type.is_empty() {
+        if has_carruer {
             return Err(Error::Validation(
                 "CarruerType do not fill any value, when Print is \"1\".".into(),
             ));
@@ -728,9 +730,9 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
         ));
     }
 
-    // 當 Donation 為 '1' 時，Print 要為 '0'，且 LoveCode 須有值
-    if inv.donation == "1" {
-        if inv.print == "1" {
+    // 當 Donation 為捐贈時，Print 要為不列印，且 LoveCode 須有值
+    if inv.donation == Donation::Yes {
+        if inv.print == PrintMark::Yes {
             return Err(Error::Validation(
                 "Print have to fill \"0\", when Donation is \"1\".".into(),
             ));

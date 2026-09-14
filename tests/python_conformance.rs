@@ -12,7 +12,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use ecpay::payment::{action, union_pay, AioCheckOutParams, ChoosePayment, InvoiceExtend};
+use ecpay::payment::{
+    union_pay, AioCheckOutParams, CarruerType, ChoosePayment, CreditAction, Donation, InvType,
+    InvoiceExtend, PeriodType, PrintMark, TaxType,
+};
 use ecpay::Ecpay;
 
 const FIXTURE: &str = include_str!("fixtures/python_sdk_vectors.json");
@@ -95,7 +98,7 @@ fn scenario(name: &str) -> AioCheckOutParams {
         },
         "credit_period" => AioCheckOutParams {
             period_amount: Some(1000),
-            period_type: Some(ecpay::payment::period_type::MONTH.into()),
+            period_type: Some(PeriodType::Month),
             frequency: Some(1),
             exec_times: Some(12),
             period_return_url: Some("https://www.ecpay.com.tw/period_return_url.php".into()),
@@ -146,16 +149,16 @@ fn scenario(name: &str) -> AioCheckOutParams {
                 customer_name: Some("客戶名稱".into()),
                 customer_addr: Some("台北市中正區100號".into()),
                 customer_phone: Some("0912345678".into()),
-                tax_type: ecpay::payment::tax_type::DUTIABLE.into(),
-                donation: ecpay::payment::donation::NO.into(),
-                print: ecpay::payment::print_mark::NO.into(),
+                tax_type: TaxType::Dutiable,
+                donation: Donation::No,
+                print: PrintMark::No,
                 invoice_item_name: "測試商品1#測試商品2".into(),
                 invoice_item_count: "2#3".into(),
                 invoice_item_word: "個#包".into(),
                 invoice_item_price: "350#100".into(),
                 invoice_remark: Some("測試商品說明".into()),
                 delay_day: 0,
-                inv_type: ecpay::payment::inv_type::GENERAL.into(),
+                inv_type: InvType::General,
                 ..Default::default()
             }),
             invoice_mark: Some("Y".into()),
@@ -169,15 +172,15 @@ fn scenario(name: &str) -> AioCheckOutParams {
                 customer_name: Some("客戶名稱".into()),
                 customer_addr: Some("台北市中正區100號".into()),
                 customer_email: Some("abc@ecpay.com.tw".into()),
-                tax_type: ecpay::payment::tax_type::DUTIABLE.into(),
-                donation: ecpay::payment::donation::NO.into(),
-                print: ecpay::payment::print_mark::YES.into(),
+                tax_type: TaxType::Dutiable,
+                donation: Donation::No,
+                print: PrintMark::Yes,
                 invoice_item_name: "測試商品1".into(),
                 invoice_item_count: "2".into(),
                 invoice_item_word: "個".into(),
                 invoice_item_price: "350".into(),
                 delay_day: 0,
-                inv_type: ecpay::payment::inv_type::GENERAL.into(),
+                inv_type: InvType::General,
                 ..Default::default()
             }),
             invoice_mark: Some("Y".into()),
@@ -518,30 +521,30 @@ fn wire_constants_match_the_official_dicts() {
     assert_eq!(ChoosePayment::Twqr.as_str(), "TWQR");
     assert_eq!(ChoosePayment::Cvs.as_str(), "CVS");
     assert_eq!(ChoosePayment::Credit.as_str(), "Credit");
-    assert_eq!(action::CLOSE, "C");
-    assert_eq!(action::REFUND, "R");
-    assert_eq!(action::CANCEL, "E");
-    assert_eq!(action::ABANDON, "N");
+    assert_eq!(CreditAction::Close.as_str(), "C");
+    assert_eq!(CreditAction::Refund.as_str(), "R");
+    assert_eq!(CreditAction::Cancel.as_str(), "E");
+    assert_eq!(CreditAction::Abandon.as_str(), "N");
     assert_eq!(union_pay::ONLY, 1);
     assert_eq!(union_pay::SELECT, 0);
     assert_eq!(union_pay::HIDDEN, 2);
 }
 
 fn error_scenario(name: &str) -> AioCheckOutParams {
-    let invoice = |print: &str, donation: &str| InvoiceExtend {
+    let invoice = |print: PrintMark, donation: Donation| InvoiceExtend {
         relate_number: "T1".into(),
         customer_name: Some("客戶".into()),
         customer_addr: Some("地址".into()),
         customer_phone: Some("0912345678".into()),
-        tax_type: ecpay::payment::tax_type::DUTIABLE.into(),
-        donation: donation.into(),
-        print: print.into(),
+        tax_type: TaxType::Dutiable,
+        donation,
+        print,
         invoice_item_name: "商品".into(),
         invoice_item_count: "1".into(),
         invoice_item_word: "個".into(),
         invoice_item_price: "10".into(),
         delay_day: 0,
-        inv_type: ecpay::payment::inv_type::GENERAL.into(),
+        inv_type: InvType::General,
         ..Default::default()
     };
     match name {
@@ -556,7 +559,7 @@ fn error_scenario(name: &str) -> AioCheckOutParams {
         "identifier_not_8" => AioCheckOutParams {
             invoice: Some(InvoiceExtend {
                 customer_identifier: Some("123".into()),
-                ..invoice("0", ecpay::payment::donation::NO)
+                ..invoice(PrintMark::No, Donation::No)
             }),
             invoice_mark: Some("Y".into()),
             ..base(ChoosePayment::Credit)
@@ -564,8 +567,8 @@ fn error_scenario(name: &str) -> AioCheckOutParams {
         "identifier_with_carrier" => AioCheckOutParams {
             invoice: Some(InvoiceExtend {
                 customer_identifier: Some("53348111".into()),
-                carruer_type: Some(ecpay::payment::carruer_type::CELLPHONE.into()),
-                ..invoice("1", ecpay::payment::donation::NO)
+                carruer_type: Some(CarruerType::Cellphone),
+                ..invoice(PrintMark::Yes, Donation::No)
             }),
             invoice_mark: Some("Y".into()),
             ..base(ChoosePayment::Credit)
@@ -573,7 +576,7 @@ fn error_scenario(name: &str) -> AioCheckOutParams {
         "print_without_name" => AioCheckOutParams {
             invoice: Some(InvoiceExtend {
                 customer_name: None,
-                ..invoice("1", ecpay::payment::donation::NO)
+                ..invoice(PrintMark::Yes, Donation::No)
             }),
             invoice_mark: Some("Y".into()),
             ..base(ChoosePayment::Credit)
@@ -581,20 +584,20 @@ fn error_scenario(name: &str) -> AioCheckOutParams {
         "no_email_no_phone" => AioCheckOutParams {
             invoice: Some(InvoiceExtend {
                 customer_phone: None,
-                ..invoice("0", ecpay::payment::donation::NO)
+                ..invoice(PrintMark::No, Donation::No)
             }),
             invoice_mark: Some("Y".into()),
             ..base(ChoosePayment::Credit)
         },
         "donation_without_love_code" => AioCheckOutParams {
-            invoice: Some(invoice("0", ecpay::payment::donation::YES)),
+            invoice: Some(invoice(PrintMark::No, Donation::Yes)),
             invoice_mark: Some("Y".into()),
             ..base(ChoosePayment::Credit)
         },
         "love_code_too_short" => AioCheckOutParams {
             invoice: Some(InvoiceExtend {
                 love_code: Some("1".into()),
-                ..invoice("0", ecpay::payment::donation::YES)
+                ..invoice(PrintMark::No, Donation::Yes)
             }),
             invoice_mark: Some("Y".into()),
             ..base(ChoosePayment::Credit)
@@ -602,7 +605,7 @@ fn error_scenario(name: &str) -> AioCheckOutParams {
         "donation_with_print" => AioCheckOutParams {
             invoice: Some(InvoiceExtend {
                 love_code: Some("168001".into()),
-                ..invoice("1", ecpay::payment::donation::YES)
+                ..invoice(PrintMark::Yes, Donation::Yes)
             }),
             invoice_mark: Some("Y".into()),
             ..base(ChoosePayment::Credit)

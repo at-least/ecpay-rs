@@ -5,7 +5,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use ecpay::payment::{action, AioCheckOutParams, ChoosePayment, InvoiceExtend};
+use ecpay::payment::{
+    AioCheckOutParams, ChoosePayment, CreditAction, Donation, InvType, InvoiceExtend, PrintMark,
+    TaxType,
+};
 use ecpay::Ecpay;
 
 mod common;
@@ -444,7 +447,7 @@ async fn action_apis_route_and_parse() {
         .credit_do_action(&ecpay::payment::CreditDoActionParams {
             merchant_trade_no: "no1".into(),
             trade_no: "2308150001".into(),
-            action: action::CLOSE.into(),
+            action: CreditAction::Close,
             total_amount: 100,
             platform_id: None,
         })
@@ -542,7 +545,7 @@ async fn credit_do_action_parses_like_python_parse_qsl() {
         .credit_do_action(&ecpay::payment::CreditDoActionParams {
             merchant_trade_no: "no1".into(),
             trade_no: "2308150001".into(),
-            action: action::REFUND.into(),
+            action: CreditAction::Refund,
             total_amount: 100,
             platform_id: None,
         })
@@ -726,11 +729,9 @@ async fn server_side_apis_validate_before_sending() {
         .await
         .unwrap_err();
     assert_eq!(validation(e), "TradeNo content is required.");
-    let e = client
-        .credit_do_action(&do_action("t", "CC"))
-        .await
-        .unwrap_err();
-    assert_eq!(validation(e), "Action max langth is 1.");
+    // (The old "Action max langth is 1." case is gone with the String
+    // field: an unmodeled action code now passes through as Other — the
+    // server adjudicates the value, like the official SDK.)
     let e = client
         .credit_do_action(&do_action("t", ""))
         .await
@@ -784,7 +785,7 @@ async fn server_side_apis_validate_before_sending() {
     let e = client
         .credit_card_period_action(&CreditCardPeriodActionParams {
             merchant_trade_no: "no1".into(),
-            action: String::new(),
+            action: ecpay::payment::CreditAction::Other(String::new()),
             time_stamp: 1,
             platform_id: None,
         })
@@ -821,15 +822,15 @@ fn invoice_free_text_fields_preserve_letter_case() {
                 customer_name: Some("AB市".into()),
                 customer_addr: Some("台北市".into()),
                 customer_phone: Some("0912345678".into()),
-                tax_type: ecpay::payment::tax_type::DUTIABLE.into(),
-                donation: ecpay::payment::donation::NO.into(),
-                print: ecpay::payment::print_mark::NO.into(),
+                tax_type: TaxType::Dutiable,
+                donation: Donation::No,
+                print: PrintMark::No,
                 invoice_item_name: "Widget#小物".into(),
                 invoice_item_count: "1#2".into(),
                 invoice_item_word: "個#個".into(),
                 invoice_item_price: "10#20".into(),
                 delay_day: 0,
-                inv_type: ecpay::payment::inv_type::GENERAL.into(),
+                inv_type: InvType::General,
                 ..Default::default()
             }),
             ..Default::default()

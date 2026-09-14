@@ -67,6 +67,43 @@ pub(crate) fn insert_optional_str_seq(
     }
 }
 
+/// Enum-code variant of [`insert_optional_str`]: drops `None` and unset
+/// (`Other("")`), sends the wire string otherwise.
+pub(crate) fn insert_optional_code<T: crate::wire::WireCode>(
+    m: &mut HashMap<String, String>,
+    key: &str,
+    v: &Option<T>,
+) {
+    if let Some(v) = v {
+        if !v.is_unset() {
+            m.insert(key.to_owned(), v.as_str().to_owned());
+        }
+    }
+}
+
+/// Required-enum check: keeps the official SDK's message for a missing
+/// value; the VALUE itself is adjudicated by ECPay (unknown codes pass
+/// through as `Other`).
+pub(crate) fn required_code<T: crate::wire::WireCode>(name: &str, v: &T) -> Result<(), Error> {
+    if v.is_unset() {
+        return Err(Error::Validation(format!("{name} content is required.")));
+    }
+    Ok(())
+}
+
+/// Ordered-pairs variant of [`insert_optional_code`].
+pub(crate) fn insert_optional_code_seq<T: crate::wire::WireCode>(
+    v: &mut Vec<(String, String)>,
+    key: &str,
+    value: &Option<T>,
+) {
+    if let Some(c) = value {
+        if !c.is_unset() {
+            v.push((key.to_owned(), c.as_str().to_owned()));
+        }
+    }
+}
+
 /// Ordered-pairs variant of [`insert_optional_int`].
 pub(crate) fn insert_optional_int_seq(
     v: &mut Vec<(String, String)>,

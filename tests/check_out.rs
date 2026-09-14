@@ -6,8 +6,8 @@
 use std::collections::BTreeMap;
 
 use ecpay::payment::{
-    carruer_type, donation, inv_type, print_mark, reply_payment_type, tax_type, union_pay,
-    AioCheckOutParams, ChoosePayment, InvoiceExtend,
+    reply_payment_type, union_pay, AioCheckOutParams, CarruerType, ChoosePayment, Donation,
+    InvType, InvoiceExtend, PrintMark, TaxType,
 };
 use ecpay::{Ecpay, Error, PAYMENT_API_URL_PRODUCTION, PAYMENT_API_URL_STAGE};
 
@@ -38,15 +38,15 @@ fn invoice() -> InvoiceExtend {
     InvoiceExtend {
         relate_number: "R1".into(),
         customer_phone: Some("0912345678".into()),
-        tax_type: tax_type::DUTIABLE.into(),
-        donation: donation::NO.into(),
-        print: print_mark::NO.into(),
+        tax_type: TaxType::Dutiable,
+        donation: Donation::No,
+        print: PrintMark::No,
         invoice_item_name: "商品".into(),
         invoice_item_count: "1".into(),
         invoice_item_word: "個".into(),
         invoice_item_price: "100".into(),
         delay_day: 0,
-        inv_type: inv_type::GENERAL.into(),
+        inv_type: InvType::General,
         ..Default::default()
     }
 }
@@ -547,7 +547,7 @@ fn invoice_validation_branches_not_covered_by_the_sdk_fixture() {
     let printable = || InvoiceExtend {
         customer_name: Some("客戶".into()),
         customer_addr: Some("地址".into()),
-        print: print_mark::YES.into(),
+        print: PrintMark::Yes,
         ..invoice()
     };
     let cases: Vec<(InvoiceExtend, &str)> = vec![
@@ -561,7 +561,7 @@ fn invoice_validation_branches_not_covered_by_the_sdk_fixture() {
         (
             InvoiceExtend {
                 customer_identifier: Some("53348111".into()),
-                donation: donation::YES.into(),
+                donation: Donation::Yes,
                 love_code: Some("168001".into()),
                 ..printable()
             },
@@ -576,7 +576,7 @@ fn invoice_validation_branches_not_covered_by_the_sdk_fixture() {
         ),
         (
             InvoiceExtend {
-                carruer_type: Some(carruer_type::MEMBER.into()),
+                carruer_type: Some(CarruerType::Member),
                 ..printable()
             },
             r#"CarruerType do not fill any value, when Print is "1"."#,
@@ -604,13 +604,6 @@ fn invoice_validation_branches_not_covered_by_the_sdk_fixture() {
         ),
         (
             InvoiceExtend {
-                inv_type: "007".into(),
-                ..invoice()
-            },
-            "InvType max langth is 2.",
-        ),
-        (
-            InvoiceExtend {
                 invoice_item_count: String::new(),
                 ..invoice()
             },
@@ -621,6 +614,17 @@ fn invoice_validation_branches_not_covered_by_the_sdk_fixture() {
         let got = validation(client.aio_check_out(&with(inv)).expect_err(want));
         assert_eq!(got, want);
     }
+
+    // An unmodeled code passes through verbatim — the value is ECPay's to
+    // adjudicate, exactly like the official SDK (the pre-enum local length
+    // check "InvType max langth is 2." is gone with the String field).
+    let out = client
+        .aio_check_out(&with(InvoiceExtend {
+            inv_type: "007".into(),
+            ..invoice()
+        }))
+        .expect("unknown codes pass through to the server");
+    assert_eq!(param(&out, "InvType"), Some("007"));
 
     // The positive counterparts: a printed B2B invoice and a donation.
     let out = client
@@ -634,7 +638,7 @@ fn invoice_validation_branches_not_covered_by_the_sdk_fixture() {
     assert_eq!(param(&out, "CustomerAddr"), Some("%E5%9C%B0%E5%9D%80"));
     let out = client
         .aio_check_out(&with(InvoiceExtend {
-            donation: donation::YES.into(),
+            donation: Donation::Yes,
             love_code: Some("168001".into()),
             customer_email: Some("A@Example.com".into()),
             customer_phone: None,

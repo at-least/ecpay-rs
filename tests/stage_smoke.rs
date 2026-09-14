@@ -17,7 +17,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ecpay::payment::{
-    action, AioCheckOutParams, ChoosePayment, CreditDoActionParams, OrderSearchParams,
+    AioCheckOutParams, ChoosePayment, CreditAction, CreditDoActionParams, OrderSearchParams,
     OrderSearchPeriodParams, SearchSingleTransactionParams,
 };
 use ecpay::Ecpay;
@@ -236,7 +236,7 @@ async fn stage_period_query_and_credit_action_answer() {
         .credit_do_action(&CreditDoActionParams {
             merchant_trade_no: unique_trade_no("SMOKE"),
             trade_no: unique_trade_no("NO"),
-            action: action::CLOSE.into(),
+            action: CreditAction::Close,
             total_amount: 100,
             platform_id: None,
         })

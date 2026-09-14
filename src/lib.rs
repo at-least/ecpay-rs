@@ -79,6 +79,7 @@ pub mod invoice;
 pub mod invoice_b2b;
 pub mod logistics;
 pub mod payment;
+mod wire;
 
 pub use crypto::{
     check_mac_value, decrypt, decrypt_data, encrypt, encrypt_data, hash_mac, unmarshal, url_encode,
