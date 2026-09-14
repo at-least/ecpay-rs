@@ -449,109 +449,31 @@ pub(crate) fn http_client() -> &'static reqwest::Client {
     })
 }
 
-/// Serialize f64 exactly like Go's encoding/json: shortest round-trip decimal,
-/// NO trailing ".0" for integral values (1 -> "1"), switching to the 'e'
-/// format outside [1e-6, 1e21) with Go's exponent cleanup ("1e-07" -> "1e-7",
-/// "1e+21" keeps its plus). serde_json would emit "1.0" and change the AES
-/// wire payload.
-pub mod go_float {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+/// serde helper for the AES-JSON money fields (ItemCount/ItemPrice/
+/// ItemAmount, GoodsWeight): JSON has no NaN/Infinity, and serde_json
+/// silently serializes a non-finite f64 as `null` — a payment field must
+/// never do that, so reject it loudly. Finite values use serde_json's
+/// default (shortest round-trip digits; integral values keep a trailing
+/// `.0`). `1.0` and `1` are the same JSON number to ECPay's parser — the
+/// B2B module has sent serde_json-formatted floats to the stage server and
+/// been accepted (2026-09) — which is why the former Go-`encoding/json`
+/// byte emulation was dropped.
+pub mod finite_f64 {
+    use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
-        if !v.is_finite() {
-            // Go: json: unsupported value: NaN / +Inf / -Inf
-            let name = if v.is_nan() {
-                "NaN"
-            } else if *v > 0.0 {
-                "+Inf"
-            } else {
-                "-Inf"
-            };
-            return Err(serde::ser::Error::custom(format_args!(
-                "json: unsupported value: {name}"
-            )));
-        }
-        // Emit the Go-formatted digits as a raw JSON number token (not a
-        // quoted string, and not ryu's notation, which differs from Go's).
-        let text = super::render_go_float(*v);
-        match serde_json::value::RawValue::from_string(text) {
-            Ok(raw) => raw.serialize(s),
-            Err(e) => Err(serde::ser::Error::custom(e)),
+        if v.is_finite() {
+            s.serialize_f64(*v)
+        } else {
+            Err(serde::ser::Error::custom(format_args!(
+                "non-finite float {v} cannot be serialized to JSON"
+            )))
         }
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
         f64::deserialize(d)
     }
-}
-
-/// Format f64 exactly like Go's encoding/json. Digits come from ryu's shortest
-/// form — ryu's digits (including tie-breaking on exact halfway cases like
-/// 652171443578374.25) match Go strconv's; only the notation differs. Go emits
-/// plain notation inside [1e-6, 1e21) and 'e' notation outside, with a "+" on
-/// positive exponents ("1e+21").
-fn render_go_float(v: f64) -> String {
-    let mut buffer = ryu::Buffer::new();
-    let ryu = buffer.format_finite(v);
-    let (neg, rest) = match ryu.strip_prefix('-') {
-        Some(r) => (true, r),
-        None => (false, ryu),
-    };
-    let (mant, exp): (&str, i32) = match rest.split_once(['e', 'E']) {
-        Some((m, e)) => (m, e.parse().expect("ryu exponent")),
-        None => (rest, 0),
-    };
-    let (int_part, frac_part) = mant.split_once('.').unwrap_or((mant, ""));
-    let sig: String = format!("{int_part}{frac_part}");
-    let point = int_part.len() as i32; // decimal point position within sig
-    let abs = v.abs();
-    let use_e_format = abs != 0.0 && (abs < 1e-6 || abs >= 1e21);
-    let mut out = String::new();
-    if neg {
-        out.push('-');
-    }
-    if use_e_format {
-        // Go's 'e' path: d[.ddd]e[-]X / e+X for positive exponents.
-        out.push_str(&sig[..1]);
-        if sig.len() > 1 {
-            out.push('.');
-            out.push_str(&sig[1..]);
-        }
-        if exp < 0 {
-            out.push_str(&format!("e{exp}"));
-        } else {
-            out.push_str(&format!("e+{exp}"));
-        }
-    } else {
-        // Go's 'f' path. Shift the decimal point by the exponent.
-        let new_point = point + exp;
-        if new_point <= 0 {
-            out.push_str("0.");
-            for _ in 0..-new_point {
-                out.push('0');
-            }
-            out.push_str(&sig);
-        } else if new_point as usize >= sig.len() {
-            out.push_str(&sig);
-            for _ in 0..(new_point as usize - sig.len()) {
-                out.push('0');
-            }
-        } else {
-            out.push_str(&sig[..new_point as usize]);
-            out.push('.');
-            out.push_str(&sig[new_point as usize..]);
-        }
-        // ryu pads integral values with a forced ".0"; Go emits none.
-        if out[if neg { 1 } else { 0 }..].contains('.') {
-            while out.ends_with('0') {
-                out.pop();
-            }
-            if out.ends_with('.') {
-                out.pop();
-            }
-        }
-    }
-    out
 }
 
 #[cfg(test)]

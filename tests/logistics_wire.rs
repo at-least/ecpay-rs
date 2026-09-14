@@ -1116,7 +1116,7 @@ async fn raw_html_v2_endpoints_surface_the_html_verbatim() {
 // three get. ---
 
 #[tokio::test]
-async fn crossborder_create_posts_the_full_field_set_with_go_float_weight() {
+async fn crossborder_create_posts_the_full_field_set_with_finite_f64_weight() {
     let server = spawn_http_server(|path, body| {
         let data = assert_v2_envelope_and_decrypt(path, body, "/CrossBorder/Create");
         // Official PHP example (CreateUnimartCvsOrder.php): MerchantID rides
@@ -1144,7 +1144,7 @@ async fn crossborder_create_posts_the_full_field_set_with_go_float_weight() {
                 "ServerReplyURL",
             ],
         );
-        assert_eq!(data["GoodsWeight"], 1.5, "go_float shortest round-trip");
+        assert_eq!(data["GoodsWeight"], 1.5, "finite_f64 shortest round-trip");
         assert_eq!(data["ReceiverCountry"], "SG");
         v2_ok_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "OK"}))
     });

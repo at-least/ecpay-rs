@@ -27,3 +27,18 @@ _非破壞性：_
 
 - README：安裝版本 `0.2` → `0.3`；「必填欄位編譯期檢查」的過度陳述改為
   如實描述（必填欄位是非 `Option` 型別，值仍於執行期驗證）。
+
+## Unreleased（續）
+
+_go_float 移除（wire 變更）：_
+
+- `crypto::go_float`（逐位元組模擬 Go `encoding/json` 的 float 序列化，
+  約 100 行 + ryu 依賴）移除，改為極簡的 `crypto::finite_f64`：有限值用
+  serde_json 預設格式（整數值帶尾 `.0`，如 `1.0`；ECPay 伺服器解 JSON，
+  `1.0` 與 `1` 是同一個 JSON number），非有限值（NaN/±Inf，serde_json 會
+  靜默序列化為 `null`）保持為序列化錯誤。`ItemCount`/`ItemPrice`/
+  `ItemAmount`/`GoodsWeight` 的 wire 位元組因此改變。
+  Live 證據（2026-09，stage 實測）：B2C Issue/GetIssue/Invalid 往返、
+  折讓生命週期、作廢重開、B2B 開立全數 RtnCode=1 通過。
+- `Cargo.toml`：移除 `ryu` 與 serde_json 的 `raw_value` feature（皆僅
+  go_float 使用）。

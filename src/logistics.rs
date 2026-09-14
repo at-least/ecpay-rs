@@ -1144,7 +1144,7 @@ pub struct CrossBorderCreateInput {
     #[serde(rename = "GoodsAmount")]
     pub goods_amount: i64,
     /// 商品重量(公斤,支援小數)
-    #[serde(rename = "GoodsWeight", with = "crate::crypto::go_float")]
+    #[serde(rename = "GoodsWeight", with = "crate::crypto::finite_f64")]
     pub goods_weight: f64,
     /// 商品英文名稱 maxlength 50
     #[serde(rename = "GoodsEnglishName")]

@@ -95,16 +95,16 @@ pub struct Item {
     pub item_seq: i64, // 商品序號
     #[serde(rename = "ItemName")]
     pub item_name: String, // 商品名稱
-    #[serde(rename = "ItemCount", with = "crate::crypto::go_float")]
+    #[serde(rename = "ItemCount", with = "crate::crypto::finite_f64")]
     pub item_count: f64, // 商品數量 支援整數 8 位小數 2 位
     #[serde(rename = "ItemWord")]
     pub item_word: String, // 商品單位
     /// 若 vat=0(未稅)，商品金額需為未稅金額 若 vat=1(含稅)，商品金額需為含稅金額
-    #[serde(rename = "ItemPrice", with = "crate::crypto::go_float")]
+    #[serde(rename = "ItemPrice", with = "crate::crypto::finite_f64")]
     pub item_price: f64, // 商品單價 支援整數 8 位小數 7 位
     #[serde(rename = "ItemTaxType")]
     pub item_tax_type: String, // 商品課稅別 (TaxType=9 時不可為空)
-    #[serde(rename = "ItemAmount", with = "crate::crypto::go_float")]
+    #[serde(rename = "ItemAmount", with = "crate::crypto::finite_f64")]
     pub item_amount: f64, // 商品合計(含稅) 各項總合並四捨五入=salesAmount(含稅)
     #[serde(rename = "ItemRemark")]
     pub item_remark: String, // 商品備註
@@ -915,15 +915,15 @@ pub struct AllowanceItem {
     pub item_seq: i64,
     #[serde(rename = "ItemName")]
     pub item_name: String,
-    #[serde(rename = "ItemCount", with = "crate::crypto::go_float")]
+    #[serde(rename = "ItemCount", with = "crate::crypto::finite_f64")]
     pub item_count: f64,
     #[serde(rename = "ItemWord")]
     pub item_word: String,
-    #[serde(rename = "ItemPrice", with = "crate::crypto::go_float")]
+    #[serde(rename = "ItemPrice", with = "crate::crypto::finite_f64")]
     pub item_price: f64,
     #[serde(rename = "ItemTaxType")]
     pub item_tax_type: String,
-    #[serde(rename = "ItemAmount", with = "crate::crypto::go_float")]
+    #[serde(rename = "ItemAmount", with = "crate::crypto::finite_f64")]
     pub item_amount: f64,
 }
 
@@ -1177,17 +1177,17 @@ pub struct AllowanceInfoItem {
     pub item_seq: i64,
     #[serde(rename = "ItemName")]
     pub item_name: String,
-    #[serde(rename = "ItemCount", with = "crate::crypto::go_float")]
+    #[serde(rename = "ItemCount", with = "crate::crypto::finite_f64")]
     pub item_count: f64,
     #[serde(rename = "ItemWord")]
     pub item_word: String,
-    #[serde(rename = "ItemPrice", with = "crate::crypto::go_float")]
+    #[serde(rename = "ItemPrice", with = "crate::crypto::finite_f64")]
     pub item_price: f64,
     #[serde(rename = "ItemRateAmt")]
     pub item_rate_amt: serde_json::Value,
     #[serde(rename = "ItemTaxType")]
     pub item_tax_type: String,
-    #[serde(rename = "ItemAmount", with = "crate::crypto::go_float")]
+    #[serde(rename = "ItemAmount", with = "crate::crypto::finite_f64")]
     pub item_amount: f64,
 }
 
