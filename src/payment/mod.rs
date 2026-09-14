@@ -9,7 +9,7 @@
 pub mod check_out;
 mod params;
 
-pub use check_out::{AioCheckOut, AioCheckOutParams, InvoiceExtend};
+pub use check_out::{AioCheckOut, AioCheckOutParams, InvoiceExtend, MERCHANT_TRADE_DATE_FORMAT};
 
 use std::collections::{BTreeMap, HashMap};
 

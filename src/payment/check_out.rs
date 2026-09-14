@@ -16,6 +16,30 @@
 use crate::client::render_auto_submit_form;
 use std::collections::{BTreeMap, HashMap};
 
+/// ECPay `MerchantTradeDate` 的日期時間格式（chrono 格式字串）：
+/// `yyyy/MM/dd HH:mm:ss`。付款查詢回應的 `PaymentDate`/`TradeDate`
+/// 也是同一樣式。⚠️ ECPay 要求 **UTC+8（台灣時間）** — 海外或 UTC 伺服器
+/// 必須先轉換，超過允許時差的訂單會被拒絕。
+///
+/// 注意：這是本 crate 唯一「文件性」常數 — crate 本身不格式化日期
+/// （`merchant_trade_date` 由呼叫端自備），提供它是為了讓 chrono 使用者
+/// 不必重抄樣式。`time` crate 的使用者請自行對應
+/// （`[year]/[month]/[day] [hour]:[minute]:[second]`）。
+///
+/// # Example
+///
+/// ```
+/// use chrono::TimeZone;
+///
+/// let taipei = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+/// let dt = taipei.with_ymd_and_hms(2024, 1, 1, 12, 0, 0).unwrap();
+/// assert_eq!(
+///     dt.format(ecpay::MERCHANT_TRADE_DATE_FORMAT).to_string(),
+///     "2024/01/01 12:00:00",
+/// );
+/// ```
+pub const MERCHANT_TRADE_DATE_FORMAT: &str = "%Y/%m/%d %H:%M:%S";
+
 use super::params::{
     insert_optional_int, insert_optional_int_seq, insert_optional_str, insert_optional_str_seq,
     optional_str, py_len, required_str,

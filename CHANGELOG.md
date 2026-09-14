@@ -70,3 +70,10 @@ _審查跟進：_
   金額欄位（B2B 先前為裸 f64，NaN 會靜默序列化為 `null`）。
 - README 補上自訂 HTTP client 段落；英文版「compile-time」過度陳述一併
   修正；`Ecpay` 的 Debug 文件列出全部六個遮蔽的金鑰欄位。
+
+_新增：_
+
+- `ecpay::MERCHANT_TRADE_DATE_FORMAT`（chrono 格式 `"%Y/%m/%d %H:%M:%S"`）：
+  ECPay `MerchantTradeDate`／付款查詢日期欄位的樣式，RFC 上取代被移除的
+  Go 佈局常數 `DATE_TIME_FORMAT`。crate 本身不格式化日期，常數附帶執行
+  驗證的 doctest（chrono 為 dev-dependency）。

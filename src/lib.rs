@@ -118,7 +118,7 @@ pub use payment::{
     AioCheckOut, AioCheckOutParams, ChoosePayment, CreditCardPeriodActionParams,
     CreditDoActionParams, DownloadDisbursementBalanceParams, DownloadMerchantBalanceParams,
     OrderSearchParams, OrderSearchPeriodParams, QueryTradeInfoOutput,
-    SearchSingleTransactionParams,
+    SearchSingleTransactionParams, MERCHANT_TRADE_DATE_FORMAT,
 };
 
 pub const PAYMENT_API_URL_PRODUCTION: &str = "https://payment.ecpay.com.tw/Cashier/";
