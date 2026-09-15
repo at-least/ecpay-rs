@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{check_mac_value, decrypt_data, encrypt_data, query_unescape};
+use crate::crypto::{decrypt_data, encrypt_data, query_unescape};
 use crate::error::{Error, Result};
 use crate::Ecpay;
 
@@ -135,11 +135,14 @@ pub(crate) fn render_auto_submit_form(action: &str, pairs: &[(String, String)]) 
     html
 }
 
-/// Go `url.Values.Encode()`: keys sorted alphabetically, each key and value
-/// QueryEscape'd, pairs joined by &.
-pub(crate) fn encode_query(pairs: &[(String, String)]) -> String {
-    let mut pairs = pairs.to_vec();
-    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+/// Go `url.Values.Encode()` form body: keys sorted bytewise, each key and
+/// value QueryEscape'd, pairs joined by & (Python's `requests.post(data=...)`
+/// sends the same pairs in dict order; ECPay accepts either, the sort is
+/// for deterministic wire bytes). The one encoder behind every form POST
+/// this crate sends.
+pub(crate) fn encode_query<'a>(pairs: impl IntoIterator<Item = (&'a str, &'a str)>) -> String {
+    let mut pairs: Vec<(&str, &str)> = pairs.into_iter().collect();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
     let mut out = String::new();
     for (i, (k, v)) in pairs.iter().enumerate() {
         if i > 0 {
@@ -281,26 +284,15 @@ async fn body_string(resp: &mut reqwest::Response) -> Result<String> {
 
 impl Ecpay {
     /// POST the params as a urlencoded form (Python `requests.post(url,
-    /// data=params)` / BasePayment.send_post): plain POST, no envelope, keys
-    /// sorted for deterministic wire bytes, values QueryEscape'd. Returns the
-    /// raw body bytes; the caller decodes (query string, JSON, or Big5 text).
+    /// data=params)` / BasePayment.send_post): plain POST, no envelope,
+    /// [`encode_query`] wire bytes. Returns the raw body bytes; the caller
+    /// decodes (query string, JSON, or Big5 text).
     pub(crate) async fn post_form(
         &self,
         endpoint: &str,
         params: &HashMap<String, String>,
     ) -> Result<Vec<u8>> {
-        let pairs: std::collections::BTreeMap<&String, &String> = params.iter().collect();
-        let encoded = pairs
-            .iter()
-            .map(|(k, v)| {
-                format!(
-                    "{}={}",
-                    crate::crypto::query_escape(k),
-                    crate::crypto::query_escape(v)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("&");
+        let encoded = encode_query(crate::crypto::str_pairs(params));
         let resp = self
             .http()
             .post(endpoint)
@@ -331,10 +323,10 @@ impl Ecpay {
         let base = self.payment_base_url();
         let endpoint = format!("{base}{name}/V5");
         let mac = crate::crypto::hash_mac(params, &self.hash_key, &self.hash_iv);
-        let mut pairs: Vec<(String, String)> =
-            params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        pairs.push(("CheckMacValue".to_owned(), mac));
-        let encoded = encode_query(&pairs);
+        let encoded = encode_query(
+            crate::crypto::str_pairs(params)
+                .chain(std::iter::once(("CheckMacValue", mac.as_str()))),
+        );
         let mut resp = self
             .http()
             .post(endpoint)
@@ -350,10 +342,21 @@ impl Ecpay {
         parse_query(&body)
     }
 
-    /// Parses an AES-JSON response envelope. `None` when the body isn't an
-    /// envelope at all (e.g. an HTML error page).
+    /// Parses a body as the AES-JSON envelope. `None` unless it is a JSON
+    /// object carrying a `TransCode` key: every `Response` field is
+    /// serde-defaulted, so without this check any JSON object (a gateway's
+    /// 502 page, an empty `{}`) would decode into a meaningless
+    /// `TransCode{code:0}` and swallow the real status and body. Presence of
+    /// the key is the test, not its value — a literal `"TransCode":0` is a
+    /// real envelope (ECPay's 查無資料 answers look like that). A body that
+    /// has the key but does not fit `Response` (`"TransCode":"1"`, a
+    /// non-string `Data`) is `None` too: it is reported through the same
+    /// bounded excerpt rather than serde's type error, which would echo an
+    /// attacker-sized string verbatim.
     fn parse_envelope(body: &str) -> Option<Response> {
-        crate::crypto::unmarshal(body).ok()
+        let value: serde_json::Value = serde_json::from_str(body).ok()?;
+        value.get("TransCode")?;
+        crate::crypto::unmarshal_value(value).ok()
     }
 
     /// Gates on TransCode and decrypts `Data` into the typed output.
@@ -365,6 +368,26 @@ impl Ecpay {
             });
         }
         decrypt_data(&res.data, key, iv)
+    }
+
+    /// The decode every AES-JSON consumer shares — an API's 2xx body or an
+    /// inbound callback POST: require an envelope ([`Self::parse_envelope`]),
+    /// gate on TransCode, decrypt `Data`. A non-envelope body is reported
+    /// with a bounded, escaped excerpt of its content ([`body_excerpt`])
+    /// rather than as `TransCode{code:0}` or a bare JSON parse error that
+    /// drops it.
+    pub(crate) fn decode_envelope<O: DeserializeOwned>(
+        body: &str,
+        key: &[u8],
+        iv: &[u8],
+    ) -> Result<O> {
+        let res = Self::parse_envelope(body).ok_or_else(|| {
+            Error::Message(format!(
+                "ecpay: body is not an AES-JSON envelope: {}",
+                body_excerpt(body)
+            ))
+        })?;
+        Self::decode_aes_response(res, key, iv)
     }
 
     /// The two v2 browser-flow endpoints (`PrintTradeDocument`,
@@ -437,27 +460,15 @@ impl Ecpay {
             // Server-truth (logistics v2, captured live 2026-09): some
             // business errors answer HTTP 500 with a VALID envelope whose
             // Data decrypts to the RtnCode/RtnMsg. Prefer that over a bare
-            // HTTP error — but only when the body really carries a TransCode
-            // gate: every Response field is serde-defaulted, so any JSON
-            // object (a 403/502 gateway body, for example) would otherwise
-            // decode into a meaningless TransCode{code:0} and swallow the
-            // real status and body.
-            match Self::parse_envelope(&body).filter(|res| res.trans_code != 0) {
+            // HTTP error — but only when the body really is an envelope
+            // (parse_envelope's TransCode-key gate), so a 403/502 gateway
+            // body keeps its real status and content.
+            match Self::parse_envelope(&body) {
                 Some(res) => return Self::decode_aes_response(res, key, iv),
                 None => return Err(Error::InvoiceStatus { status, body }),
             }
         }
-        // Same gate on the happy path: a 2xx JSON body without a TransCode
-        // field is not an envelope (serde would default one into existence)
-        // and deserves the explicit error, not TransCode{code:0}.
-        let res = Self::parse_envelope(&body)
-            .filter(|res| res.trans_code != 0)
-            .ok_or_else(|| {
-                Error::Message(format!(
-                    "ecpay: response is not an AES-JSON envelope: {body}"
-                ))
-            })?;
-        Self::decode_aes_response(res, key, iv)
+        Self::decode_envelope(&body, key, iv)
     }
 
     /// Go `CallInvoiceAPI`: encrypt the input into the AES-JSON envelope, POST
@@ -500,8 +511,7 @@ impl Ecpay {
             });
         }
         let body = body_string(&mut resp).await?;
-        let res: Response = crate::crypto::unmarshal(&body)?;
-        Self::decode_aes_response(res, key, iv)
+        Self::decode_envelope(&body, key, iv)
     }
 
     /// The HTTP client requests are sent with: an injected
@@ -519,10 +529,31 @@ impl Ecpay {
     /// MerchantID entry is forced to the client's configured merchant, exactly
     /// like the official SDK's `generate_check_value`.
     pub fn generate_check_value(&self, params: &HashMap<String, String>) -> Result<String> {
-        let encrypt_type = crate::crypto::parse_encrypt_type(params);
-        let mut with_id = params.clone();
-        with_id.insert("MerchantID".to_owned(), self.merchant_id.clone());
-        check_mac_value(&with_id, &self.hash_key, &self.hash_iv, encrypt_type)
+        let encrypt_type =
+            crate::crypto::parse_encrypt_type(params.get("EncryptType").map(String::as_str));
+        let pairs = crate::crypto::str_pairs(params)
+            .filter(|(k, _)| *k != "MerchantID")
+            .chain(std::iter::once(("MerchantID", self.merchant_id.as_str())));
+        crate::crypto::check_mac_value_pairs(pairs, &self.hash_key, &self.hash_iv, encrypt_type)
+    }
+}
+
+/// How much of a body an error message quotes.
+const BODY_EXCERPT_CHARS: usize = 512;
+
+/// A bounded, escaped excerpt of a body for error messages: at most
+/// [`BODY_EXCERPT_CHARS`] chars, `Debug`-quoted so newlines and control
+/// characters cannot reach a log line raw. The callback decoders feed
+/// attacker-controlled POST bodies (a public ServerReplyURL/ReturnURL) into
+/// this, so the echo must never be unbounded or verbatim; API responses
+/// take the same bound for one consistent message.
+fn body_excerpt(body: &str) -> String {
+    let mut chars = body.chars();
+    let head: String = chars.by_ref().take(BODY_EXCERPT_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{head:?}… ({} bytes total)", body.len())
+    } else {
+        format!("{head:?}")
     }
 }
 
@@ -593,5 +624,43 @@ method=\"post\"><input type=\"hidden\" name=\"MerchantID\" value=\"3002607\" />\
 <script type=\"text/javascript\">document.getElementById(\"data_set\").submit();</script>\
 </form>"
         );
+    }
+
+    /// The one form encoder: Go `url.Values.Encode` order (bytewise key
+    /// sort, so uppercase before lowercase) and QueryEscape bytes (space is
+    /// `+`, `~` literal, everything else uppercase %XX per UTF-8 byte) for
+    /// keys and values alike.
+    #[test]
+    fn encode_query_sorts_bytewise_and_query_escapes_keys_and_values() {
+        use super::encode_query;
+        let pairs = [
+            ("b", "2"),
+            ("A", "1 ~"),
+            ("a", "\u{4e2d}"),
+            ("C", "x&y=z"),
+            ("k y", "v"),
+        ];
+        assert_eq!(
+            encode_query(pairs),
+            "A=1+~&C=x%26y%3Dz&a=%E4%B8%AD&b=2&k+y=v"
+        );
+        assert_eq!(encode_query(std::iter::empty()), "");
+    }
+
+    #[test]
+    fn body_excerpt_is_bounded_and_escaped() {
+        use super::{body_excerpt, BODY_EXCERPT_CHARS};
+        assert_eq!(body_excerpt("{}"), "\"{}\"");
+        // Newlines and quotes are escaped, so a log line cannot be forged.
+        assert_eq!(body_excerpt("a\n\"b"), "\"a\\n\\\"b\"");
+        let long = "x".repeat(BODY_EXCERPT_CHARS + 1);
+        let out = body_excerpt(&long);
+        assert!(out.ends_with("… (513 bytes total)"), "{out}");
+        assert!(out.len() < BODY_EXCERPT_CHARS + 64, "{}", out.len());
+        // Exactly the bound is quoted whole.
+        assert!(!body_excerpt(&"y".repeat(BODY_EXCERPT_CHARS)).contains('…'));
+        // Multi-byte chars are never split.
+        let cjk = "中".repeat(BODY_EXCERPT_CHARS + 5);
+        assert!(body_excerpt(&cjk).contains("… (1551 bytes total)"));
     }
 }

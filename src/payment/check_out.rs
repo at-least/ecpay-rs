@@ -17,8 +17,9 @@ use crate::client::render_auto_submit_form;
 use std::collections::{BTreeMap, HashMap};
 
 use super::params::{
-    insert_optional_int, insert_optional_int_seq, insert_optional_str, insert_optional_str_seq,
-    optional_str, py_len, required_code, required_str,
+    insert_optional_code, insert_optional_code_seq, insert_optional_int, insert_optional_int_seq,
+    insert_optional_str, insert_optional_str_seq, optional_str, py_len, required_code,
+    required_nonempty, required_str,
 };
 use super::{CarruerType, ClearanceMark, Donation, InvType, PeriodType, PrintMark, TaxType};
 use crate::crypto::query_escape;
@@ -568,9 +569,9 @@ fn add_invoice_fields(
         insert_escaped(m, "CustomerAddr", &inv.customer_addr);
         insert_optional_str(m, "CustomerPhone", &inv.customer_phone);
         insert_escaped(m, "CustomerEmail", &inv.customer_email);
-        insert_optional_str(m, "ClearanceMark", &inv.clearance_mark);
+        insert_optional_code(m, "ClearanceMark", &inv.clearance_mark);
         m.insert("TaxType".to_owned(), inv.tax_type.as_str().to_owned());
-        insert_optional_str(m, "CarruerType", &inv.carruer_type);
+        insert_optional_code(m, "CarruerType", &inv.carruer_type);
         insert_optional_str(m, "CarruerNum", &inv.carruer_num);
         m.insert("Donation".to_owned(), inv.donation.as_str().to_owned());
         insert_optional_str(m, "LoveCode", &inv.love_code);
@@ -633,7 +634,7 @@ fn credit_plan_pairs(p: &AioCheckOutParams) -> Option<Vec<(String, String)>> {
     {
         let mut v = Vec::new();
         insert_optional_int_seq(&mut v, "PeriodAmount", &p.period_amount);
-        insert_optional_str_seq(&mut v, "PeriodType", &p.period_type);
+        insert_optional_code_seq(&mut v, "PeriodType", &p.period_type);
         insert_optional_int_seq(&mut v, "Frequency", &p.frequency);
         insert_optional_int_seq(&mut v, "ExecTimes", &p.exec_times);
         insert_optional_str_seq(&mut v, "PeriodReturnURL", &p.period_return_url);
@@ -647,11 +648,7 @@ fn credit_plan_pairs(p: &AioCheckOutParams) -> Option<Vec<(String, String)>> {
 /// corrupts ASCII letter case in customer data, and ECPay url-decodes the
 /// value either way.
 fn insert_escaped(m: &mut HashMap<String, String>, key: &str, value: &Option<String>) {
-    if let Some(v) = value {
-        if !v.is_empty() {
-            m.insert(key.to_owned(), query_escape(v));
-        }
-    }
+    insert_optional_str(m, key, &value.as_deref().map(query_escape));
 }
 
 fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
@@ -669,11 +666,11 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
     required_code("Donation", &inv.donation)?;
     required_code("Print", &inv.print)?;
     required_str("InvoiceItemName", &inv.invoice_item_name, 100)?;
-    required_str("InvoiceItemCount", &inv.invoice_item_count, usize::MAX)?;
-    required_str("InvoiceItemWord", &inv.invoice_item_word, usize::MAX)?;
-    required_str("InvoiceItemPrice", &inv.invoice_item_price, usize::MAX)?;
-    optional_str("InvoiceItemTaxType", &inv.invoice_item_tax_type, usize::MAX)?;
-    optional_str("InvoiceRemark", &inv.invoice_remark, usize::MAX)?;
+    // 商品明細欄位:官方 SDK 只檢查必填,沒有長度上限(InvoiceItemTaxType、
+    // InvoiceRemark 連必填都不檢查)。
+    required_nonempty("InvoiceItemCount", &inv.invoice_item_count)?;
+    required_nonempty("InvoiceItemWord", &inv.invoice_item_word)?;
+    required_nonempty("InvoiceItemPrice", &inv.invoice_item_price)?;
     required_code("InvType", &inv.inv_type)?;
 
     // 該參數有值時，請帶固定長度為數字 8 碼
@@ -690,22 +687,24 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
             "CarruerType do not fill any value, when CustomerIdentifier have value.".into(),
         ));
     }
-    // 統一編號 CustomerIdentifier 有值時，一定要列印
-    if !customer_identifier.is_empty() && inv.print == PrintMark::No {
+    // 統一編號 CustomerIdentifier 有值時，一定要列印。
+    // 代碼欄位以 wire 值比較(`as_str()`,非 variant 身分):手工建構的
+    // `Other("0")` 也要算作不列印,與舊 String 欄位的比較行為一致。
+    if !customer_identifier.is_empty() && inv.print.as_str() == PrintMark::No.as_str() {
         return Err(Error::Validation(
             "Print have to fill \"1\", when CustomerIdentifier have value.".into(),
         ));
     }
     // 統一編號 CustomerIdentifier 有值時，Donation 要為不捐贈(SDK 訊息寫 "0"，
     // 判斷為 AIO 語彙的不可捐贈 '1')
-    if !customer_identifier.is_empty() && inv.donation == Donation::Yes {
+    if !customer_identifier.is_empty() && inv.donation.as_str() == Donation::Yes.as_str() {
         return Err(Error::Validation(
             "Donation have to fill \"0\", when CustomerIdentifier have value.".into(),
         ));
     }
 
     // 當列印註記 Print 為 1 (列印)時，CustomerName 與 CustomerAddr 必須有值
-    if inv.print == PrintMark::Yes {
+    if inv.print.as_str() == PrintMark::Yes.as_str() {
         if inv.customer_name.as_deref().unwrap_or("").is_empty() {
             return Err(Error::Validation("CustomerName have to fill value.".into()));
         }
@@ -730,8 +729,8 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
     }
 
     // 當 Donation 為捐贈時，Print 要為不列印，且 LoveCode 須有值
-    if inv.donation == Donation::Yes {
-        if inv.print == PrintMark::Yes {
+    if inv.donation.as_str() == Donation::Yes.as_str() {
+        if inv.print.as_str() == PrintMark::Yes.as_str() {
             return Err(Error::Validation(
                 "Print have to fill \"0\", when Donation is \"1\".".into(),
             ));
@@ -751,4 +750,23 @@ fn validate_invoice(inv: &InvoiceExtend) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::insert_escaped;
+    use std::collections::HashMap;
+
+    /// Same drop rule as the plain optional fields (None and "" are skipped;
+    /// `query_escape("")` is `""` so filtering after escaping is equivalent),
+    /// and the value is QueryEscape'd without lowercasing.
+    #[test]
+    fn insert_escaped_skips_empty_and_escapes_without_lowercasing() {
+        let mut m = HashMap::new();
+        insert_escaped(&mut m, "K", &None);
+        insert_escaped(&mut m, "K", &Some(String::new()));
+        assert!(m.is_empty());
+        insert_escaped(&mut m, "K", &Some("Ab c/\u{4e2d}".into()));
+        assert_eq!(m["K"], "Ab+c%2F%E4%B8%AD");
+    }
 }

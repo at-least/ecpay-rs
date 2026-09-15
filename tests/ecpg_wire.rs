@@ -250,7 +250,7 @@ async fn unset_optional_pieces_are_omitted_from_the_wire() {
     assert_eq!(full["ATMInfo"]["ExpireDate"], 3);
 }
 
-/// TransCode != 1 (the transport layer) surfaces as `Error::TransCode`
+/// TransCode != 1 (the envelope gate) surfaces as `Error::TransCode`
 /// before any Data decoding is attempted.
 #[tokio::test]
 async fn transcode_rejection_surfaces_as_a_transcode_error() {
@@ -624,7 +624,7 @@ async fn stage_probe_get_token_by_trade_with_the_typed_method() {
     let out = ec
         .get_token_by_trade(&input)
         .await
-        .expect("transport layer: TransCode==1 and Data decrypts");
+        .expect("envelope: TransCode==1 and Data decrypts");
     println!(
         "stage GetTokenbyTrade: RtnCode={} RtnMsg={:?} Token={} TokenExpireDate={}",
         out.rtn_code, out.rtn_msg, out.token, out.token_expire_date

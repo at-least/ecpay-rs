@@ -1010,6 +1010,91 @@ fn ecpg_callback_helper_decodes_a_self_encrypted_envelope() {
     assert_eq!(decoded["MerchantTradeNo"], "X1");
 }
 
+/// An envelope-shaped body whose values do not fit the envelope
+/// (`"TransCode":"1"`) is reported the same bounded way, not through serde's
+/// type error — that message quotes the offending string verbatim, which
+/// on a public ReturnURL is an attacker-sized echo.
+#[test]
+fn ecpg_callback_helper_reports_a_mistyped_envelope_bounded() {
+    let client = Ecpay {
+        merchant_id: MERCHANT_ID.into(),
+        hash_key: PAY_KEY.into(),
+        hash_iv: PAY_IV.into(),
+        ..Default::default()
+    };
+    let body = format!(
+        r#"{{"TransCode":"{}","TransMsg":"","Data":""}}"#,
+        "x".repeat(700 * 1024)
+    );
+    let err = client
+        .decrypt_ecpg_callback::<serde_json::Value>(&body)
+        .expect_err("a mistyped envelope must not decode");
+    let text = err.to_string();
+    assert!(
+        matches!(&err, ecpay::Error::Message(m) if m.contains("not an AES-JSON envelope")),
+        "{}",
+        &text[..text.len().min(200)]
+    );
+    assert!(text.len() < 1024, "unbounded echo: {} bytes", text.len());
+}
+
+/// A callback body that is not an envelope (no `TransCode` key) is reported
+/// as such — the same gate the API 2xx paths use — rather than decoding into
+/// a meaningless `TransCode{code:0}`.
+#[test]
+fn ecpg_callback_helper_rejects_a_non_envelope_body() {
+    let client = Ecpay {
+        merchant_id: MERCHANT_ID.into(),
+        hash_key: PAY_KEY.into(),
+        hash_iv: PAY_IV.into(),
+        ..Default::default()
+    };
+    let err = client
+        .decrypt_ecpg_callback::<serde_json::Value>(r#"{"RtnCode":1}"#)
+        .expect_err("no TransCode key");
+    assert!(
+        matches!(&err, ecpay::Error::Message(m) if m.contains("not an AES-JSON envelope")),
+        "{err:?}"
+    );
+}
+
+/// The callback body is attacker-controlled (a public ReturnURL), so the
+/// error must not echo it unbounded or raw: it is cut to an excerpt and
+/// Debug-escaped, so a 1 MiB body with an injected "log line" cannot bloat
+/// or forge the handler's log.
+#[test]
+fn ecpg_callback_helper_bounds_and_escapes_the_echoed_body() {
+    let client = Ecpay {
+        merchant_id: MERCHANT_ID.into(),
+        hash_key: PAY_KEY.into(),
+        hash_iv: PAY_IV.into(),
+        ..Default::default()
+    };
+    let mut body = String::from("<html>\n[FAKE LOG LINE] admin login ok\n");
+    body.push_str(&"x".repeat(1 << 20));
+    for err in [
+        client
+            .decrypt_ecpg_callback::<serde_json::Value>(&body)
+            .expect_err("html is not an envelope"),
+        client
+            .decrypt_logistics_callback::<serde_json::Value>(&body)
+            .expect_err("html is not an envelope"),
+    ] {
+        let text = err.to_string();
+        assert!(text.contains("not an AES-JSON envelope"), "{text}");
+        assert!(text.len() < 1024, "unbounded echo: {} bytes", text.len());
+        assert!(
+            !text.contains('\n'),
+            "raw newline reached the message: {text}"
+        );
+        assert!(
+            text.contains("\\n[FAKE LOG LINE]"),
+            "escaped, not dropped: {text}"
+        );
+        assert!(text.contains("bytes total"), "{text}");
+    }
+}
+
 #[test]
 fn ecpg_callback_helper_gates_on_transcode() {
     let client = Ecpay {

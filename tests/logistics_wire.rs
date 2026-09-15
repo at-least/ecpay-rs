@@ -165,6 +165,47 @@ async fn response_without_mac_is_rejected_not_swallowed() {
     }
 }
 
+/// A real envelope whose TransCode is literally 0 (ECPay's 查無資料 shape)
+/// IS an envelope — the gate keys on the presence of the `TransCode` key,
+/// not its value — so it surfaces as `Error::TransCode{code:0}` on a 2xx
+/// and on a non-2xx status alike. On non-2xx the HTTP status is not
+/// surfaced separately: the TransMsg is the useful signal (before the
+/// key-presence gate, a 500 carrying such a body came back as a bare
+/// `InvoiceStatus`). This pins that choice.
+#[tokio::test]
+async fn transcode_zero_envelope_is_an_envelope_on_any_status() {
+    for status in [200u16, 500] {
+        let server = spawn_http_server(move |_path, _body| {
+            (
+                status,
+                "application/json".into(),
+                serde_json::json!({
+                    "MerchantID": MERCHANT_ID,
+                    "TransCode": 0,
+                    "TransMsg": "查無資料",
+                    "Data": "",
+                })
+                .to_string()
+                .into_bytes(),
+            )
+        });
+        let err = logistics_sdk(server)
+            .allinone_query_logistics_trade_info(&AllInOneQueryInput {
+                merchant_id: MERCHANT_ID.into(),
+                logistics_id: "1".into(),
+            })
+            .await
+            .expect_err("TransCode 0 is a gate failure");
+        match err {
+            ecpay::Error::TransCode { code, msg } => {
+                assert_eq!(code, 0, "status {status}");
+                assert_eq!(msg, "查無資料", "status {status}");
+            }
+            other => panic!("status {status}: expected Error::TransCode, got {other:?}"),
+        }
+    }
+}
+
 #[tokio::test]
 async fn http_500_with_a_valid_envelope_surfaces_the_business_error() {
     // Server-truth (captured live on stage, 2026-09): v2 business errors can
@@ -221,6 +262,39 @@ async fn gateway_json_without_transcode_is_not_mistaken_for_an_envelope() {
             assert!(body.contains("bad gateway"), "{body}");
         }
         other => panic!("expected InvoiceStatus, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn aes_json_2xx_non_envelope_is_reported_with_the_body() {
+    // The same gateway-style bodies on a 2xx have no HTTP status worth
+    // keeping: the AES-JSON path shares `decode_envelope` with the B2C API
+    // and the callbacks, so they are reported as "not an envelope" with the
+    // Debug-quoted body — not decoded into TransCode{code:0}.
+    for body in [
+        r#"{"error": "bad gateway"}"#,
+        "<html>Service Unavailable</html>",
+    ] {
+        let server = spawn_http_server(move |_path, _body| {
+            (200, "application/json".into(), body.as_bytes().to_vec())
+        });
+        let err = logistics_sdk(server)
+            .allinone_query_logistics_trade_info(&AllInOneQueryInput {
+                merchant_id: MERCHANT_ID.into(),
+                logistics_id: "1".into(),
+            })
+            .await
+            .expect_err("a 2xx non-envelope must not decode");
+        match &err {
+            ecpay::Error::Message(m) => {
+                assert!(m.contains("not an AES-JSON envelope"), "{m}");
+                assert!(
+                    m.contains(&format!("{body:?}")),
+                    "the body must be carried: {m}"
+                );
+            }
+            other => panic!("body {body:?}: expected Error::Message, got {other:?}"),
+        }
     }
 }
 

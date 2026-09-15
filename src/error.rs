@@ -89,7 +89,12 @@ pub enum Error {
     /// Unsupported CheckMacValue EncryptType (only 0 = MD5 and 1 = SHA-256
     /// exist; anything else is a caller bug).
     UnsupportedEncryptType(i64),
-    /// Ad-hoc messages (body-read failures, non-UTF-8 payloads).
+    /// Ad-hoc messages: body-read failures, non-UTF-8 payloads, and a body
+    /// that is not an AES-JSON envelope (no `TransCode` key, or one whose
+    /// values do not fit the envelope) on every AES-JSON consumer — the B2C
+    /// invoice API, the AES-JSON APIs (logistics v2 / ECPG / B2B) and the
+    /// callback decoders (`"ecpay: body is not an AES-JSON envelope:
+    /// <bounded, escaped excerpt>"`).
     Message(String),
 }
 

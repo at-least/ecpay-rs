@@ -219,7 +219,8 @@ impl Ecpay {
     ///
     /// 回傳型別是單純的 `Result`（B2B 沒有 Go 參考實作，不需要 B2C
     /// `issue` 的雙回傳 shape）：業務層失敗（RtnCode ≠ 1）回
-    /// [`crate::Error::Api`]，傳輸層失敗回各自的錯誤。
+    /// [`crate::Error::Api`]，其他失敗（HTTP 狀態、信封 TransCode、解密）回
+    /// 各自的錯誤。
     pub async fn issue_b2b(&self, input: &IssueB2bInput) -> Result<B2bIssueOutput> {
         let output: B2bIssueOutput = self.b2b_post("Issue", &input.merchant_id, input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;

@@ -74,7 +74,7 @@ async fn aes_post(
 
 /// Decrypts the `Data` field of an AES-JSON response envelope, printing the
 /// TransCode gate and the decrypted payload. Returns the decrypted Value if
-/// the transport layer succeeded.
+/// the TransCode gate passed.
 fn unwrap_aes_response(body: &str, key: &str, iv: &str) -> Option<Value> {
     let res: Value = serde_json::from_str(body).expect("response is JSON");
     let trans_code = res["TransCode"].as_i64().unwrap_or(-1);

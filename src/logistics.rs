@@ -147,12 +147,10 @@ impl Ecpay {
             .remove("CheckMacValue")
             .filter(|v| !v.is_empty())
             .ok_or(Error::CheckMacValueMismatch)?;
-        let as_map: HashMap<String, String> =
-            fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         let (key, iv) = self.logistics_keys();
         let key = std::str::from_utf8(key).map_err(|_| Error::AesKeySize(key.len()))?;
         let iv = std::str::from_utf8(iv).map_err(|_| Error::AesKeySize(iv.len()))?;
-        if !verify_mac(&got, &as_map, key, iv, 0)? {
+        if !verify_mac(&got, crate::crypto::str_pairs(&fields), key, iv, 0)? {
             return Err(Error::CheckMacValueMismatch);
         }
         if let Some(status) = status {
@@ -762,24 +760,22 @@ impl Ecpay {
         let (Ok(key), Ok(iv)) = (std::str::from_utf8(key), std::str::from_utf8(iv)) else {
             return false;
         };
-        verify_mac(got, params, key, iv, 0).unwrap_or(false)
+        verify_mac(got, crate::crypto::str_pairs(params), key, iv, 0).unwrap_or(false)
     }
 
     /// 解密全方位物流 v2 / 跨境物流的 ServerReplyURL 回呼(整包 JSON POST,
     /// `Data` 為 AES 加密)。`T` 通常接 [`serde_json::Value`] 或自訂型別。
+    ///
+    /// 錯誤形狀:body 不是帶 `TransCode` 鍵的 JSON 物件(或鍵存在但值不符
+    /// 信封型別)時回 [`crate::Error::Message`]——訊息只引用有界、跳脫過的
+    /// body 節錄,回呼 body 來自公開端點,不可原樣回灌到 log;`TransCode != 1`
+    /// 回 [`crate::Error::TransCode`];解密/解析失敗回各自的錯誤。
     pub fn decrypt_logistics_callback<T: serde::de::DeserializeOwned>(
         &self,
         posted_json: &str,
     ) -> Result<T> {
-        let res: crate::client::Response = crate::crypto::unmarshal(posted_json)?;
-        if res.trans_code != 1 {
-            return Err(Error::TransCode {
-                code: res.trans_code,
-                msg: res.trans_msg,
-            });
-        }
         let (key, iv) = self.logistics_keys();
-        crate::crypto::decrypt_data(&res.data, key, iv)
+        Self::decode_envelope(posted_json, key, iv)
     }
 
     /// 全方位物流 v2 狀態通知的應答體:綠界要求以同格式(AES 加密 JSON)

@@ -200,7 +200,7 @@ async fn crossborder_create_test_data_answers_with_the_aes_envelope() {
     {
         Ok(out) => println!("crossborder create_test_data = {out:?}"),
         Err(ecpay::Error::TransCode { code, msg }) => {
-            println!("crossborder create_test_data transport answer = {code} {msg:?}");
+            println!("crossborder create_test_data TransCode answer = {code} {msg:?}");
             assert_eq!(code, 128, "captured server-truth for this account");
         }
         Err(e) => panic!("unexpected error: {e:?}"),

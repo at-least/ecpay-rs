@@ -31,7 +31,7 @@
 //!
 //! # 回應與雙層錯誤檢查
 //!
-//! 回應為 `{TransCode, TransMsg, Data}`。TransCode != 1（傳輸層）會以
+//! 回應為 `{TransCode, TransMsg, Data}`。TransCode != 1（信封層）會以
 //! [`crate::Error::TransCode`] 回報；Data 解密後的業務層 `RtnCode` 由呼叫端
 //! 自行檢查（1 = 成功）。雙層都要查：先 TransCode 後 RtnCode。
 //!
@@ -235,7 +235,7 @@ pub struct GetTokenbyTradeInput {
 pub struct GetTokenbyTradeOutput {
     #[serde(rename = "MerchantID")]
     pub merchant_id: String,
-    /// 業務層回應代碼：1 = 成功（傳輸層 TransCode 已由 crate 閘門檢查）。
+    /// 業務層回應代碼：1 = 成功（信封層 TransCode 已由 crate 閘門檢查）。
     #[serde(rename = "RtnCode")]
     pub rtn_code: i64,
     /// 業務層回應訊息（失敗時可能是空字串 — 先檢查 ConsumerInfo）。
@@ -732,8 +732,10 @@ impl Ecpay {
     /// 解密站內付 2.0 的 `ReturnURL` 付款結果回呼（JSON POST）。
     ///
     /// 官方處理順序（guides/21 引官方規格 9058.md）：
-    /// 1. 解析 JSON body（`{TransCode, TransMsg, Data}`）；
-    /// 2. 檢查外層 `TransCode == 1`（傳輸層；否則回 [`crate::Error::TransCode`]）；
+    /// 1. 解析 JSON body（`{TransCode, TransMsg, Data}`；不是帶 `TransCode`
+    ///    鍵的 JSON 物件、或鍵存在但值不符信封型別時回
+    ///    [`crate::Error::Message`]，訊息只引用有界、跳脫過的 body 節錄）；
+    /// 2. 檢查外層 `TransCode == 1`（信封層；否則回 [`crate::Error::TransCode`]）；
     /// 3. 用 **PAYMENT 組** HashKey/HashIV AES 解密 `Data`；
     /// 4. 內層 `RtnCode`（業務層，1 = 付款成功）由呼叫端自行檢查 —— 本方法
     ///    刻意不做業務層判斷；
@@ -745,13 +747,10 @@ impl Ecpay {
         &self,
         posted_json: &str,
     ) -> Result<T> {
-        let res: crate::client::Response = crate::crypto::unmarshal(posted_json)?;
-        if res.trans_code != 1 {
-            return Err(Error::TransCode {
-                code: res.trans_code,
-                msg: res.trans_msg,
-            });
-        }
-        crate::crypto::decrypt_data(&res.data, self.hash_key.as_bytes(), self.hash_iv.as_bytes())
+        Self::decode_envelope(
+            posted_json,
+            self.hash_key.as_bytes(),
+            self.hash_iv.as_bytes(),
+        )
     }
 }

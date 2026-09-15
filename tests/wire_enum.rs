@@ -1,6 +1,6 @@
 //! `wire_enum!` 生成的代碼 enum:as_str 值表逐一釘死(抓 macro/值表筆誤)、
 //! Display→From 往返、未知值 serde 往返透明、Default/is_unset 的空字串
-//! zero-value 語意、以 wire 值(非 variant 身分)為準的 `==`/`Hash`。
+//! zero-value 語意、結構性 `==`(與 `From` 的正規化)。
 
 use ecpay::invoice;
 use ecpay::payment::{
@@ -76,15 +76,9 @@ fn every_modeled_variant_round_trips_through_from() {
         T: for<'a> From<&'a str> + PartialEq + std::fmt::Debug + std::fmt::Display,
     {
         let s = v.to_string();
-        let back = T::from(s.as_str());
-        assert_eq!(back, v, "round-trip failed: {s:?}");
-        // `==` is by wire value, so also pin that `From` canonicalizes to the
-        // modeled variant rather than tunnelling the value through `Other`.
-        assert_eq!(
-            std::mem::discriminant(&back),
-            std::mem::discriminant(&v),
-            "From did not canonicalize {s:?} to its modeled variant"
-        );
+        // `==` is structural, so this also pins that `From` canonicalizes to
+        // the modeled variant rather than tunnelling the value through `Other`.
+        assert_eq!(T::from(s.as_str()), v, "round-trip failed: {s:?}");
     }
     for v in [
         TaxType::Dutiable,
@@ -114,6 +108,15 @@ fn unknown_values_pass_through_serde_verbatim() {
     assert_eq!(serde_json::to_string(&unknown).unwrap(), r#""42""#);
     let back: TaxType = serde_json::from_str(r#""42""#).unwrap();
     assert_eq!(back, TaxType::Other("42".to_owned()));
+    // The owned-String constructor canonicalizes the same way and, on the
+    // `Other` path, keeps the caller's String instead of re-allocating.
+    assert_eq!(TaxType::from("1".to_owned()), TaxType::Dutiable);
+    let owned = "42".to_owned();
+    let ptr = owned.as_ptr();
+    match TaxType::from(owned) {
+        TaxType::Other(s) => assert_eq!(s.as_ptr(), ptr, "Other must reuse the String"),
+        other => panic!("expected Other, got {other:?}"),
+    }
 
     // 與 String 欄位的 wire bytes 完全一致(嵌在 struct 裡也一樣)。
     #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
@@ -138,20 +141,25 @@ fn default_is_the_empty_zero_value() {
     assert_eq!(serde_json::to_string(&TaxType::default()).unwrap(), r#""""#);
 }
 
-/// 手工建構的 `Other("0")` 與建模的 `No` 是同一個 wire 值:`==` 與 `Hash`
-/// 都以 `as_str()` 為準,`validate_invoice` 之類的分支才不會漏掉它
-/// (`From`/serde 會正規化,一般建構點不受影響)。
+/// `==`/`Hash` 是結構比對(與 `match` 一致):手工建構的 `Other("0")` 不等於
+/// 建模的 `No`,即使 wire 值相同;`From`/serde 會把已知值正規化為 variant,
+/// 所以經 `.into()`/反序列化得到的值仍然相等。需要把手工 `Other` 也算進去
+/// 的地方(如 `validate_invoice`)比較 `as_str()`——見 tests/check_out.rs。
 #[test]
-fn equality_and_hash_follow_the_wire_value() {
-    use std::collections::HashSet;
-
+fn equality_is_structural_and_from_canonicalizes() {
     let hand_built = PrintMark::Other("0".to_owned());
-    assert_eq!(hand_built, PrintMark::No);
-    assert_ne!(hand_built, PrintMark::Yes);
-    assert_ne!(PrintMark::Other("x".to_owned()), PrintMark::No);
+    assert_ne!(hand_built, PrintMark::No);
+    assert_eq!(hand_built.as_str(), PrintMark::No.as_str());
+    assert_eq!(PrintMark::from("0"), PrintMark::No);
+    assert_eq!(PrintMark::from("0".to_owned()), PrintMark::No);
+    let parsed: PrintMark = serde_json::from_str(r#""0""#).unwrap();
+    assert_eq!(parsed, PrintMark::No);
 
-    let set: HashSet<PrintMark> = [PrintMark::No, hand_built].into_iter().collect();
-    assert_eq!(set.len(), 1, "equal values must hash alike");
+    // `Hash` is structural too (consistent with `==`): the two are distinct
+    // set members.
+    let set: std::collections::HashSet<PrintMark> =
+        [PrintMark::No, hand_built].into_iter().collect();
+    assert_eq!(set.len(), 2);
 }
 
 #[test]

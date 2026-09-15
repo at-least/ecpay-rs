@@ -133,18 +133,28 @@ pub(crate) fn aes_url_encode(s: &str) -> String {
     query_escape(s).replace('~', "%7E")
 }
 
+/// Borrowed `(key, value)` view of a `HashMap`/`BTreeMap<String, String>`
+/// for the pair-iterator entry points below — a response map is hashed as
+/// received, without cloning it first.
+pub(crate) fn str_pairs<'a>(
+    map: impl IntoIterator<Item = (&'a String, &'a String)>,
+) -> impl Iterator<Item = (&'a str, &'a str)> {
+    map.into_iter().map(|(k, v)| (k.as_str(), v.as_str()))
+}
+
 /// Sort the "k=v" pairs the way the official SDKs order the CheckMacValue
 /// preimage: by lowercased key (the Python SDK sorts `key=lambda k:
 /// k[0].lower()`), with the original key as a deterministic tie-breaker (the
 /// Python sort is stable over dict insertion order, which a hash map does not
 /// reproduce).
-fn sorted_pairs(params: &HashMap<String, String>) -> Vec<(String, String)> {
-    let mut pairs: Vec<(String, String)> =
-        params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+fn sorted_pairs<'a>(
+    pairs: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Vec<(&'a str, &'a str)> {
+    let mut pairs: Vec<(&str, &str)> = pairs.into_iter().collect();
     pairs.sort_by(|a, b| {
         a.0.to_lowercase()
             .cmp(&b.0.to_lowercase())
-            .then_with(|| a.0.cmp(&b.0))
+            .then_with(|| a.0.cmp(b.0))
     });
     pairs
 }
@@ -157,16 +167,16 @@ pub fn hash_mac(params: &HashMap<String, String>, hash_key: &str, hash_iv: &str)
 }
 
 /// Shared verification half of [`check_mac_value`]: recompute the mac over
-/// `params` (a leftover `CheckMacValue` key in the map is scrubbed) and
+/// the `params` pairs (a leftover `CheckMacValue` pair is scrubbed) and
 /// constant-time compare against `got`, upper-casing the inbound value
 /// defensively (ECPay sends uppercase, but a received value's case isn't a
 /// signal worth failing on). Empty `got` verifies as `false`;
 /// `encrypt_type` is chosen by the caller (payment responses derive it from
 /// the response's `EncryptType`, logistics hardcodes MD5 = 0, the AIO
 /// callback verifies SHA-256 only).
-pub(crate) fn verify_mac(
+pub(crate) fn verify_mac<'a>(
     got: &str,
-    params: &HashMap<String, String>,
+    params: impl IntoIterator<Item = (&'a str, &'a str)>,
     hash_key: &str,
     hash_iv: &str,
     encrypt_type: i64,
@@ -174,38 +184,47 @@ pub(crate) fn verify_mac(
     if got.is_empty() {
         return Ok(false);
     }
-    let want = check_mac_value(params, hash_key, hash_iv, encrypt_type)?;
+    let want = check_mac_value_pairs(params, hash_key, hash_iv, encrypt_type)?;
     Ok(constant_time_eq(
         got.to_uppercase().as_bytes(),
         want.as_bytes(),
     ))
 }
 
-/// Reads the `EncryptType` field out of a params map, defaulting to 1
-/// (SHA-256) like the official SDK when it's missing or unparsable. Shared
-/// by [`crate::Ecpay::generate_check_value`] (signing an outbound request)
-/// and the payment-response verification path (checking an inbound one).
-pub(crate) fn parse_encrypt_type(params: &HashMap<String, String>) -> i64 {
-    params
-        .get("EncryptType")
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(1)
+/// Parses a params map's `EncryptType` value, defaulting to 1 (SHA-256)
+/// like the official SDK when it's missing or unparsable. Shared by
+/// [`crate::Ecpay::generate_check_value`] (signing an outbound request) and
+/// the payment-response verification path (checking an inbound one).
+pub(crate) fn parse_encrypt_type(value: Option<&str>) -> i64 {
+    value.and_then(|v| v.parse::<i64>().ok()).unwrap_or(1)
 }
 
-/// The Python SDK's `generate_check_value`: drop any existing CheckMacValue,
-/// force MerchantID to the client's, sort by lowercased key, wrap in
-/// HashKey/HashIV, .NET-URLEncode, lowercase, then SHA-256 (EncryptType 1) or
-/// MD5 (EncryptType 0) — uppercase hex. `encrypt_type` comes from the
-/// request's own `EncryptType` field, defaulting to 1.
+/// The hashing half of the Python SDK's `generate_check_value`: drop any
+/// existing CheckMacValue, sort by lowercased key, wrap in HashKey/HashIV,
+/// .NET-URLEncode, lowercase, then SHA-256 (EncryptType 1) or MD5
+/// (EncryptType 0) — uppercase hex. Forcing MerchantID to the client's is
+/// [`crate::Ecpay::generate_check_value`]'s job, not this function's;
+/// `encrypt_type` is chosen by the caller (the request's own `EncryptType`
+/// field, defaulting to 1).
 pub fn check_mac_value(
     params: &HashMap<String, String>,
     hash_key: &str,
     hash_iv: &str,
     encrypt_type: i64,
 ) -> Result<String> {
-    let mut scrubbed = params.clone();
-    scrubbed.remove("CheckMacValue");
-    let pairs = sorted_pairs(&scrubbed);
+    check_mac_value_pairs(str_pairs(params), hash_key, hash_iv, encrypt_type)
+}
+
+/// [`check_mac_value`] over borrowed pairs — the crate-internal form every
+/// signing and verifying path shares, so a response map is hashed as
+/// received without a clone. Any `CheckMacValue` pair is scrubbed.
+pub(crate) fn check_mac_value_pairs<'a>(
+    pairs: impl IntoIterator<Item = (&'a str, &'a str)>,
+    hash_key: &str,
+    hash_iv: &str,
+    encrypt_type: i64,
+) -> Result<String> {
+    let pairs = sorted_pairs(pairs.into_iter().filter(|(k, _)| *k != "CheckMacValue"));
     let mut s = format!("HashKey={hash_key}&");
     for (k, v) in &pairs {
         s.push_str(&format!("{k}={v}&"));
@@ -360,7 +379,11 @@ pub fn decrypt_data<T: DeserializeOwned>(data: &str, hash_key: &[u8], hash_iv: &
 /// inside arrays are left as-is; no ecpay wire struct has a Vec whose ECPay
 /// ever sends null elements in.
 pub fn unmarshal<T: DeserializeOwned>(s: &str) -> Result<T> {
-    let v: serde_json::Value = serde_json::from_str(s)?;
+    unmarshal_value(serde_json::from_str(s)?)
+}
+
+/// [`unmarshal`] for an already-parsed JSON value (same null stripping).
+pub(crate) fn unmarshal_value<T: DeserializeOwned>(v: serde_json::Value) -> Result<T> {
     Ok(serde_json::from_value(strip_null_properties(v))?)
 }
 
@@ -470,23 +493,25 @@ mod tests {
         params.insert("EncryptType".to_owned(), "1".to_owned());
 
         let sha = check_mac_value(&params, "k", "i", 1).unwrap();
-        assert!(verify_mac(&sha, &params, "k", "i", 1).unwrap());
+        assert!(verify_mac(&sha, str_pairs(&params), "k", "i", 1).unwrap());
         // Lowercase inbound verifies too (upper-cased before compare).
-        assert!(verify_mac(&sha.to_lowercase(), &params, "k", "i", 1).unwrap());
+        assert!(verify_mac(&sha.to_lowercase(), str_pairs(&params), "k", "i", 1).unwrap());
         // Wrong key / wrong digest type / empty got all verify as false.
-        assert!(!verify_mac(&sha, &params, "other", "i", 1).unwrap());
-        assert!(!verify_mac(&sha, &params, "k", "i", 0).unwrap());
-        assert!(!verify_mac("", &params, "k", "i", 1).unwrap());
+        assert!(!verify_mac(&sha, str_pairs(&params), "other", "i", 1).unwrap());
+        assert!(!verify_mac(&sha, str_pairs(&params), "k", "i", 0).unwrap());
+        assert!(!verify_mac("", str_pairs(&params), "k", "i", 1).unwrap());
 
-        // A leftover CheckMacValue in the map is scrubbed before hashing.
+        // A leftover CheckMacValue in the map is scrubbed before hashing —
+        // by the public map form and the borrowed-pairs form alike.
         params.insert("CheckMacValue".to_owned(), "stale".to_owned());
-        assert!(verify_mac(&sha, &params, "k", "i", 1).unwrap());
+        assert_eq!(check_mac_value(&params, "k", "i", 1).unwrap(), sha);
+        assert!(verify_mac(&sha, str_pairs(&params), "k", "i", 1).unwrap());
 
         // MD5 (EncryptType 0) verifies against its own digest.
         let md5 = check_mac_value(&params, "k", "i", 0).unwrap();
-        assert!(verify_mac(&md5, &params, "k", "i", 0).unwrap());
+        assert!(verify_mac(&md5, str_pairs(&params), "k", "i", 0).unwrap());
         assert!(matches!(
-            verify_mac(&md5, &params, "k", "i", 7),
+            verify_mac(&md5, str_pairs(&params), "k", "i", 7),
             Err(Error::UnsupportedEncryptType(7))
         ));
     }
@@ -497,15 +522,8 @@ mod tests {
         params.insert("b".to_owned(), "2".to_owned());
         params.insert("A".to_owned(), "1".to_owned());
         params.insert("a".to_owned(), "3".to_owned());
-        let got: Vec<(String, String)> = sorted_pairs(&params);
-        assert_eq!(
-            got,
-            vec![
-                ("A".to_owned(), "1".to_owned()),
-                ("a".to_owned(), "3".to_owned()),
-                ("b".to_owned(), "2".to_owned()),
-            ]
-        );
+        let got = sorted_pairs(str_pairs(&params));
+        assert_eq!(got, vec![("A", "1"), ("a", "3"), ("b", "2")]);
     }
 
     #[test]

@@ -323,3 +323,42 @@ async fn injected_http_client_is_used() {
         "the AES path must also ride the injected client, head: {head}"
     );
 }
+
+/// A 2xx body that is not an AES-JSON envelope (no `TransCode` key) must be
+/// reported as such with the body attached — not decoded into a meaningless
+/// `TransCode{code:0}` (every `Response` field is serde-defaulted) nor as a
+/// bare JSON parse error that drops the body. Same gate as the AES-JSON
+/// (logistics v2 / ECPG / B2B) path.
+#[tokio::test]
+async fn invoice_2xx_non_envelope_bodies_are_reported_with_the_body() {
+    for (content_type, body) in [
+        ("application/json", "{}"),
+        ("application/json", r#"{"RtnCode":1,"Data":"x"}"#),
+        ("text/html; charset=utf-8", "<html>Server Error</html>"),
+    ] {
+        let srv = spawn_http_server(move |_path, _body| {
+            (200, content_type.to_owned(), body.as_bytes().to_vec())
+        });
+        let client = Ecpay {
+            invoice_api_url: srv,
+            invoice_hash_key: "ejCk326UnaZWKisg".into(),
+            invoice_hash_iv: "q9jcZX8Ib9LM8wYk".into(),
+            ..sdk()
+        };
+        let err = client
+            .get_issue(&Default::default())
+            .await
+            .expect_err("a non-envelope body must not decode");
+        match &err {
+            ecpay::Error::Message(msg) => {
+                assert!(msg.contains("not an AES-JSON envelope"), "{msg}");
+                // The body is quoted (Debug-escaped) so it survives a log line.
+                assert!(
+                    msg.contains(&format!("{body:?}")),
+                    "the body must be carried: {msg}"
+                );
+            }
+            other => panic!("expected Error::Message for body {body:?}, got {other:?}"),
+        }
+    }
+}

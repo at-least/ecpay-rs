@@ -558,6 +558,17 @@ fn invoice_validation_branches_not_covered_by_the_sdk_fixture() {
             },
             r#"Print have to fill "1", when CustomerIdentifier have value."#,
         ),
+        // A hand-built `Other("0")` is structurally != `PrintMark::No` but
+        // carries the same wire value; validation compares wire values, so
+        // it must hit the same branch as the modeled variant.
+        (
+            InvoiceExtend {
+                customer_identifier: Some("53348111".into()),
+                print: PrintMark::Other("0".into()),
+                ..invoice()
+            },
+            r#"Print have to fill "1", when CustomerIdentifier have value."#,
+        ),
         (
             InvoiceExtend {
                 customer_identifier: Some("53348111".into()),
@@ -566,6 +577,42 @@ fn invoice_validation_branches_not_covered_by_the_sdk_fixture() {
                 ..printable()
             },
             r#"Donation have to fill "0", when CustomerIdentifier have value."#,
+        ),
+        // The same hand-built twin for each of the other code comparisons
+        // in the validator (Donation with an identifier, Print == 1,
+        // Donation == 1 alone and with Print == 1).
+        (
+            InvoiceExtend {
+                customer_identifier: Some("53348111".into()),
+                donation: Donation::Other("1".into()),
+                love_code: Some("168001".into()),
+                ..printable()
+            },
+            r#"Donation have to fill "0", when CustomerIdentifier have value."#,
+        ),
+        (
+            InvoiceExtend {
+                customer_name: None,
+                print: PrintMark::Other("1".into()),
+                ..printable()
+            },
+            "CustomerName have to fill value.",
+        ),
+        (
+            InvoiceExtend {
+                donation: Donation::Yes,
+                love_code: Some("168001".into()),
+                print: PrintMark::Other("1".into()),
+                ..printable()
+            },
+            r#"Print have to fill "0", when Donation is "1"."#,
+        ),
+        (
+            InvoiceExtend {
+                donation: Donation::Other("1".into()),
+                ..invoice()
+            },
+            r#"LoveCode have to fill value, when Donation is "1"."#,
         ),
         (
             InvoiceExtend {

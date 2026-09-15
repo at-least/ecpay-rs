@@ -201,11 +201,17 @@ let client = Ecpay {
 | —(比對 `ECPay/SDK_PHP` 後新增) | **物流**(`ecpay::logistics`):國內 9 支 MD5 form API + 6 種瀏覽器表單、全方位物流 v2 13 支、跨境 4 支 + 表單,含 MD5 回呼驗證與 AES 回呼解密 |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **B2B 電子發票**(`ecpay::invoice_b2b`):開立/折讓/作廢/拒收/通知/客戶資料/字軌與全部查詢,共 23 支 |
 
-常數(付款方式、課稅類別、載具、捐贈、銀聯……)在 [`ecpay::payment`](src/payment/mod.rs)
-模組,名稱對應官方 dict:`ChoosePayment`(enum)、`choose_sub_payment`、
-`tax_type`、`donation`、`print_mark`、`carruer_type`、`clearance_mark`、
-`inv_type`、`union_pay`、`period_type`、`action`、`need_extra_paid_info`;
-另有 `reply_payment_type()` 對照回覆付款方式中文說明。
+代碼欄位(付款方式、課稅類別、載具、捐贈、銀聯……)在 [`ecpay::payment`](src/payment/mod.rs)
+模組,名稱對應官方 dict:`ChoosePayment`(封閉 enum:無 `Other` 穿隧,但仍
+`#[non_exhaustive]`;決定啟用哪組延伸參數);
+`TaxType`、`Donation`、`PrintMark`、`CarruerType`、`ClearanceMark`、`InvType`、
+`PeriodType`、`CreditAction`(半開 enum:已知值是 variant,未建模的值以
+`Other(String)` 原樣穿隧,`"1".into()` 仍可建構);仍為常數 module 的有
+`choose_sub_payment`、`union_pay`、`need_extra_paid_info`,另有 `INVOICE_MARK`、
+`DEVICE_SOURCE` 與 `reply_payment_type()`(回覆付款方式中文說明)。電子發票
+另有自己的型別,值域與語意和 AIO 不同,刻意不互通:B2C(`ecpay::invoice`)的
+`TaxType`、`Donation`、`PrintMark`、`CarrierType`、`ClearanceMark`、`InvType`;
+B2B(`ecpay::invoice_b2b`)的 `TaxType`、`InvType`。
 
 ## 與官方 Python SDK 的三點刻意差異
 

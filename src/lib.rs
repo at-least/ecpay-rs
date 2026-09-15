@@ -357,8 +357,14 @@ impl Ecpay {
         };
         // SHA-256 only: EncryptType=0 is retired. A caller-supplied
         // EncryptType field is deliberately ignored here.
-        crypto::verify_mac(got, params, &self.hash_key, &self.hash_iv, 1)
-            .expect("SHA-256 is always supported")
+        crypto::verify_mac(
+            got,
+            crypto::str_pairs(params),
+            &self.hash_key,
+            &self.hash_iv,
+            1,
+        )
+        .expect("SHA-256 is always supported")
     }
 }
 

@@ -414,10 +414,10 @@ impl Ecpay {
         let body = self.post_form(endpoint, &m).await?;
         let mut query = parse_qsl(&String::from_utf8_lossy(&body));
 
-        let got = query.get("CheckMacValue").cloned().unwrap_or_default();
-        if got.is_empty() {
-            return Err(Error::CheckMacValueMismatch);
-        }
+        let got = query
+            .remove("CheckMacValue")
+            .filter(|v| !v.is_empty())
+            .ok_or(Error::CheckMacValueMismatch)?;
         // Recompute over exactly the fields the server sent, unmodified —
         // unlike generate_check_value (for signing OUR outbound requests,
         // where forcing MerchantID to the configured client ID is correct),
@@ -428,13 +428,17 @@ impl Ecpay {
         // signed, a false-positive CheckMacValueMismatch that order_search's
         // equivalent "not found" reply never exposed only because it happens
         // to echo the real MerchantID back.
-        let as_map: HashMap<String, String> =
-            query.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let encrypt_type = crate::crypto::parse_encrypt_type(&as_map);
-        if !crate::crypto::verify_mac(&got, &as_map, &self.hash_key, &self.hash_iv, encrypt_type)? {
+        let encrypt_type =
+            crate::crypto::parse_encrypt_type(query.get("EncryptType").map(String::as_str));
+        if !crate::crypto::verify_mac(
+            &got,
+            crate::crypto::str_pairs(&query),
+            &self.hash_key,
+            &self.hash_iv,
+            encrypt_type,
+        )? {
             return Err(Error::CheckMacValueMismatch);
         }
-        query.remove("CheckMacValue");
         Ok(query)
     }
 

@@ -70,13 +70,32 @@ _審查跟進：_
   金額欄位（B2B 先前為裸 f64，NaN 會靜默序列化為 `null`）。
 - README 補上自訂 HTTP client 段落；英文版「compile-time」過度陳述一併
   修正；`Ecpay` 的 Debug 文件列出全部六個遮蔽的金鑰欄位。
+- `rust-version` 由 1.82 修正為 1.89：`aes = "0.9"` 解析到的 0.9.3 是
+  edition 2024、要求 rustc 1.89（0.9.1/0.9.2 也要 1.85），1.82 從未能編譯。
+- AES-JSON 信封檢查統一：`call_invoice_api`（B2C 發票全部 API）、
+  `decrypt_logistics_callback`、`decrypt_ecpg_callback` 改走與 AES-JSON
+  （物流 v2 / ECPG / B2B）相同的信封判定——body 不是帶 `TransCode` 鍵的
+  JSON 物件時回 `Error::Message("ecpay: body is not an AES-JSON envelope:
+  <body 節錄>")`（節錄最多 512 字元、`Debug` 跳脫——回呼 body 來自公開
+  端點，不可無上限原樣回灌 log），不再解成無意義的 `TransCode{code:0}`（`Response` 全欄位
+  serde default）或丟掉 body 的 JSON 解析錯誤。判定看鍵是否存在而非值：
+  `"TransCode":0` 的真實信封（ECPay 的查無資料）回 `Error::TransCode`——
+  在 AES-JSON 路徑上 2xx 與非 2xx 皆然（先前 2xx 誤判為「不是信封」、
+  非 2xx 回 `InvoiceStatus`；HTTP 狀態碼不再另行呈現，TransMsg 才是有用
+  的訊號）。鍵存在但值不符信封型別（如 `"TransCode":"1"`）同樣回
+  `Error::Message`——先前回 serde 的 `Error::Json`，其訊息會原樣引用整段
+  違規字串，在公開回呼端點上等於無上限回灌。
+- CheckMacValue 簽章/驗證改走借用的 `(key, value)` 迭代器核心
+  （`check_mac_value` 公開簽章不變）；form POST 的編碼統一為單一
+  `encode_query`。內部整理，wire bytes 不變（`encode_query` 單元測試釘死
+  排序與跳脫，簽章由 conformance 測試釘死）。
 
 _選擇性 enumify(監管級穩定代碼欄位;advisor 裁決 per-service + Other 穿隧):_
 
 - 新增 `wire_enum!` 生成的 `#[non_exhaustive]` enum(`Other(String)`
   原樣穿隧未知代碼;`Default`=`Other("")` 維持 wire zero-value 語意;
-  `From<&str>` 讓 `"1".into()` 建構點續用;`PartialEq`/`Hash` 以 wire
-  字串為準——手工建構的 `Other("0")` 與 `No` 相等;實作 `AsRef<str>`):
+  `From<&str>`/`From<String>` 讓 `"1".into()` 建構點續用(已知值正規化為
+  variant);`PartialEq`/`Hash` 為結構比對,與 `match` 一致):
   - `ecpay::payment`:`TaxType`(1/2/3/9)、`Donation`(AIO 語彙 1/2)、
     `PrintMark`、`CarruerType`、`ClearanceMark`、`InvType`、`PeriodType`、
     `CreditAction`——取代同名的 String 常數 module(已移除)。
