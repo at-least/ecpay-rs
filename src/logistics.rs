@@ -101,8 +101,6 @@ impl Ecpay {
     /// the ONLY service family using MD5), appends CheckMacValue.
     fn sign_logistics(&self, params: &mut HashMap<String, String>) -> Result<()> {
         let (key, iv) = self.logistics_keys();
-        let key = std::str::from_utf8(key).map_err(|_| Error::AesKeySize(key.len()))?;
-        let iv = std::str::from_utf8(iv).map_err(|_| Error::AesKeySize(iv.len()))?;
         let mac = check_mac_value(params, key, iv, 0)?;
         params.insert("CheckMacValue".to_owned(), mac);
         Ok(())
@@ -156,8 +154,6 @@ impl Ecpay {
             .filter(|v| !v.is_empty())
             .ok_or(Error::CheckMacValueMismatch)?;
         let (key, iv) = self.logistics_keys();
-        let key = std::str::from_utf8(key).map_err(|_| Error::AesKeySize(key.len()))?;
-        let iv = std::str::from_utf8(iv).map_err(|_| Error::AesKeySize(iv.len()))?;
         if !verify_mac(&got, crate::crypto::str_pairs(&fields), key, iv, 0)? {
             return Err(Error::CheckMacValueMismatch);
         }
@@ -193,8 +189,15 @@ impl Ecpay {
             "Revision": "1.0.0",
         });
         let (key, iv) = self.logistics_keys();
-        self.post_aes_json(&endpoint, rq_header, &self.merchant_id, input, key, iv)
-            .await
+        self.post_aes_json(
+            &endpoint,
+            rq_header,
+            &self.merchant_id,
+            input,
+            key.as_bytes(),
+            iv.as_bytes(),
+        )
+        .await
     }
 
     /// The two v2 BROWSER-flow endpoints answer raw text/html (live-captured
@@ -215,8 +218,15 @@ impl Ecpay {
             "Revision": "1.0.0",
         });
         let (key, iv) = self.logistics_keys();
-        self.post_aes_json_raw(&endpoint, rq_header, &self.merchant_id, input, key, iv)
-            .await
+        self.post_aes_json_raw(
+            &endpoint,
+            rq_header,
+            &self.merchant_id,
+            input,
+            key.as_bytes(),
+            iv.as_bytes(),
+        )
+        .await
     }
 }
 
@@ -779,9 +789,6 @@ impl Ecpay {
             _ => return false,
         };
         let (key, iv) = self.logistics_keys();
-        let (Ok(key), Ok(iv)) = (std::str::from_utf8(key), std::str::from_utf8(iv)) else {
-            return false;
-        };
         verify_mac(got, crate::crypto::str_pairs(params), key, iv, 0).unwrap_or(false)
     }
 
@@ -801,7 +808,7 @@ impl Ecpay {
         posted_json: &str,
     ) -> Result<T> {
         let (key, iv) = self.logistics_keys();
-        Self::decode_envelope_opaque(posted_json, key, iv)
+        Self::decode_envelope_opaque(posted_json, key.as_bytes(), iv.as_bytes())
     }
 
     /// 全方位物流 v2 狀態通知的應答體:綠界要求以同格式(AES 加密 JSON)
@@ -811,8 +818,8 @@ impl Ecpay {
         let (key, iv) = self.logistics_keys();
         let data = crate::crypto::encrypt_data(
             &serde_json::json!({"RtnCode": "1", "RtnMsg": ""}),
-            key,
-            iv,
+            key.as_bytes(),
+            iv.as_bytes(),
         )?;
         Ok(serde_json::json!({
             "MerchantID": self.merchant_id,

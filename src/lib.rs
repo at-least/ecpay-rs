@@ -297,16 +297,16 @@ impl Ecpay {
     }
 
     /// Logistics signing keys, falling back to the payment HashKey/HashIV.
-    pub(crate) fn logistics_keys(&self) -> (&[u8], &[u8]) {
+    pub(crate) fn logistics_keys(&self) -> (&str, &str) {
         let key = if self.logistics_hash_key.is_empty() {
-            self.hash_key.as_bytes()
+            &self.hash_key
         } else {
-            self.logistics_hash_key.as_bytes()
+            &self.logistics_hash_key
         };
         let iv = if self.logistics_hash_iv.is_empty() {
-            self.hash_iv.as_bytes()
+            &self.hash_iv
         } else {
-            self.logistics_hash_iv.as_bytes()
+            &self.logistics_hash_iv
         };
         (key, iv)
     }
@@ -367,7 +367,9 @@ impl Ecpay {
             &self.hash_iv,
             1,
         )
-        .expect("SHA-256 is always supported")
+        // The Err branch (UnsupportedEncryptType) is unreachable with
+        // EncryptType=1 hardcoded; a library must not panic on an invariant.
+        .unwrap_or(false)
     }
 }
 

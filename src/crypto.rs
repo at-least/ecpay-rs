@@ -164,7 +164,11 @@ fn sorted_pairs<'a>(
 /// URL-encoded with the .NET-flavored encoder, lowercased, SHA-256-hashed,
 /// UPPERCASE hex. Equivalent to [`check_mac_value`] with EncryptType = 1.
 pub fn hash_mac(params: &HashMap<String, String>, hash_key: &str, hash_iv: &str) -> String {
-    check_mac_value(params, hash_key, hash_iv, 1).expect("EncryptType=1 cannot fail")
+    let mac = check_mac_value(params, hash_key, hash_iv, 1);
+    debug_assert!(mac.is_ok(), "EncryptType=1 cannot fail");
+    // Unreachable (EncryptType=1 is hardcoded); degrade to an empty MAC
+    // rather than panic inside a library.
+    mac.unwrap_or_default()
 }
 
 /// Shared verification half of [`check_mac_value`]: recompute the mac over
@@ -226,11 +230,13 @@ pub(crate) fn check_mac_value_pairs<'a>(
     encrypt_type: i64,
 ) -> Result<String> {
     let pairs = sorted_pairs(pairs.into_iter().filter(|(k, _)| *k != "CheckMacValue"));
+    use std::fmt::Write as _;
     let mut s = format!("HashKey={hash_key}&");
     for (k, v) in &pairs {
-        s.push_str(&format!("{k}={v}&"));
+        // write! into a String cannot fail; avoids a per-pair allocation.
+        let _ = write!(s, "{k}={v}&");
     }
-    s.push_str(&format!("HashIV={hash_iv}"));
+    let _ = write!(s, "HashIV={hash_iv}");
     let s = url_encode(&s).to_lowercase();
     let digest: Vec<u8> = match encrypt_type {
         1 => Sha256::digest(s.as_bytes()).to_vec(),
