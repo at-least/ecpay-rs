@@ -11,12 +11,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use ecpay::{
-    encrypt_data, hash_mac, AllowanceByCollegiateInput, AllowanceInput, AllowanceInvalidInput,
-    AllowanceItem, CancelDelayIssueInput, CheckBarcodeInput, CheckLoveCodeInput, DelayIssueInput,
-    Ecpay, GetAllowanceInput, GetAllowanceInvalidInput, GetCompanyNameByTaxIDInput,
-    GetGovInvoiceWordSettingInput, GetInvalidInput, GetInvoiceWordSettingInput, GetIssueInput,
-    GetIssueOutput, InvalidInput, InvoiceNotifyInput, IssueInput, IssueModel, Item,
-    TriggerIssueInput, VoidModel, VoidWithReIssueInput,
+    check_mac_value, encrypt_data, hash_mac, AllowanceByCollegiateInput, AllowanceInput,
+    AllowanceInvalidInput, AllowanceItem, CancelDelayIssueInput, CheckBarcodeInput,
+    CheckLoveCodeInput, DelayIssueInput, Ecpay, GetAllowanceInput, GetAllowanceInvalidInput,
+    GetCompanyNameByTaxIDInput, GetGovInvoiceWordSettingInput, GetInvalidInput,
+    GetInvoiceWordSettingInput, GetIssueInput, GetIssueOutput, InvalidInput, InvoiceNotifyInput,
+    IssueInput, IssueModel, Item, TriggerIssueInput, VoidModel, VoidWithReIssueInput,
 };
 
 mod common;
@@ -127,10 +127,16 @@ fn new_payment_mock(
         let want_mac = hash_mac(&params, TEST_PAYMENT_HASH_KEY, TEST_PAYMENT_HASH_IV);
         assert_eq!(got_mac, want_mac, "mock: CheckMacValue signing mismatch");
         *captured.lock().unwrap() = Some(params);
+        // The response carries its own CheckMacValue over the fields as
+        // sent, like the real server (the client verifies it).
+        let mut signed = respond.clone();
+        let mac = check_mac_value(&signed, TEST_PAYMENT_HASH_KEY, TEST_PAYMENT_HASH_IV, 1)
+            .expect("mock signs SHA-256");
+        signed.insert("CheckMacValue".to_owned(), mac);
         (
             200,
             "application/x-www-form-urlencoded".to_owned(),
-            encode_form(&respond),
+            encode_form(&signed),
         )
     })
 }

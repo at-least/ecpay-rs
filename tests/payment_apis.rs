@@ -477,7 +477,7 @@ async fn action_apis_route_and_parse() {
 /// the Python-flavored endpoints), a `;` is rejected, and a malformed escape
 /// is an error rather than a literal.
 #[tokio::test]
-async fn query_trade_info_parses_like_go_parse_query() {
+async fn call_payment_api_parses_like_go_parse_query() {
     let serve = |body: &'static str| {
         spawn_http_server(move |_path, _body| {
             (
@@ -495,18 +495,22 @@ async fn query_trade_info_parses_like_go_parse_query() {
         ..sdk()
     };
     let out = client
-        .query_trade_info("x")
+        .call_payment_api("QueryTradeInfo", &map(&[("MerchantTradeNo", "x")]))
         .await
-        .expect("query_trade_info");
-    assert_eq!(out.merchant_trade_no, "first", "first value wins");
-    assert_eq!(out.trade_status, "1");
+        .expect("call_payment_api");
+    assert_eq!(
+        out.get("MerchantTradeNo").map(String::as_str),
+        Some("first"),
+        "first value wins"
+    );
+    assert_eq!(out.get("TradeStatus").map(String::as_str), Some("1"));
 
     let client = Ecpay {
         payment_api_url: serve("MerchantTradeNo=a;TradeStatus=1"),
         ..sdk()
     };
     let err = client
-        .query_trade_info("x")
+        .call_payment_api("QueryTradeInfo", &map(&[("MerchantTradeNo", "x")]))
         .await
         .expect_err("a semicolon separator is rejected");
     assert!(matches!(err, ecpay::Error::SemicolonInQuery), "{err:?}");
@@ -516,13 +520,84 @@ async fn query_trade_info_parses_like_go_parse_query() {
         ..sdk()
     };
     let err = client
-        .query_trade_info("x")
+        .call_payment_api("QueryTradeInfo", &map(&[("MerchantTradeNo", "x")]))
         .await
         .expect_err("a malformed escape is rejected");
     match err {
         ecpay::Error::UrlEscape(esc) => assert_eq!(esc, "%zz"),
         other => panic!("expected Error::UrlEscape, got {other:?}"),
     }
+}
+
+/// `query_trade_info` rides the crate's verification contract (since 0.4):
+/// a correctly-signed query response decodes into the typed output, a
+/// tampered CheckMacValue is rejected rather than parsed, and the request
+/// carries `order_search`'s MerchantTradeNo length validation.
+#[tokio::test]
+async fn query_trade_info_verifies_the_response_mac() {
+    let srv = spawn_http_server(move |_path, _body| {
+        let respond = map(&[
+            ("MerchantID", MERCHANT_ID),
+            ("MerchantTradeNo", "order_abc"),
+            ("TradeStatus", "1"),
+            ("TradeAmt", "100"),
+        ]);
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            respond
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .chain(std::iter::once(format!("CheckMacValue={mac}")))
+                .collect::<Vec<_>>()
+                .join("&")
+                .into_bytes(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    let out = client
+        .query_trade_info("order_abc")
+        .await
+        .expect("query_trade_info");
+    assert_eq!(out.merchant_trade_no, "order_abc");
+    assert_eq!(out.trade_status, "1");
+    assert_eq!(out.trade_amt, "100");
+
+    // A tampered CheckMacValue must be rejected, never decoded.
+    let srv = spawn_http_server(move |_path, _body| {
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            b"MerchantID=3002607&TradeStatus=1&CheckMacValue=DEADBEEF".to_vec(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    let err = client
+        .query_trade_info("order_abc")
+        .await
+        .expect_err("a tampered mac must be rejected");
+    assert!(
+        matches!(err, ecpay::Error::CheckMacValueMismatch),
+        "{err:?}"
+    );
+
+    // The length contract matches order_search (same request builder).
+    let err = sdk()
+        .query_trade_info("this-trade-no-is-too-long")
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("MerchantTradeNo max langth is 20."),
+        "{err}"
+    );
 }
 
 /// The Python-flavored endpoints decode with `parse_qsl` leniency: a

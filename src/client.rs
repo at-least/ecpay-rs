@@ -326,7 +326,11 @@ impl Ecpay {
 
     /// Go `CallPaymentAPI`: POST the form params plus CheckMacValue (keys
     /// sorted like url.Values.Encode) and parse the response as a query
-    /// string, first value winning.
+    /// string, first value winning. The MAC is [`Self::generate_check_value`]'s
+    /// (honors the params' `EncryptType`, forces `MerchantID` to the client's
+    /// configured merchant); the response is NOT verified — callers who need
+    /// a verified query should use [`crate::Ecpay::order_search`] or
+    /// [`crate::Ecpay::query_trade_info`].
     pub async fn call_payment_api(
         &self,
         name: &str,
@@ -334,7 +338,7 @@ impl Ecpay {
     ) -> Result<HashMap<String, String>> {
         let base = self.payment_base_url();
         let endpoint = format!("{base}{name}/V5");
-        let mac = crate::crypto::hash_mac(params, &self.hash_key, &self.hash_iv);
+        let mac = self.generate_check_value(params)?;
         let encoded = encode_query(
             crate::crypto::str_pairs(params)
                 .chain(std::iter::once(("CheckMacValue", mac.as_str()))),

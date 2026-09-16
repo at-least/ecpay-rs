@@ -265,10 +265,16 @@ async fn injected_http_client_is_used() {
     let seen2 = seen.clone();
     let srv = spawn_http_server_with_head(move |_path, head, _body| {
         *seen2.lock().unwrap() = head.to_owned();
+        // query_trade_info verifies the response CheckMacValue, so the body
+        // must be correctly signed; the header assertion is the point.
+        let mut respond = std::collections::HashMap::new();
+        respond.insert("MerchantID".to_owned(), MERCHANT_ID.to_owned());
+        respond.insert("TradeStatus".to_owned(), "1".to_owned());
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
         (
             200,
             "text/html; charset=utf-8".to_owned(),
-            b"MerchantID=3002607&TradeStatus=1".to_vec(),
+            format!("MerchantID={MERCHANT_ID}&TradeStatus=1&CheckMacValue={mac}").into_bytes(),
         )
     });
     let client = Ecpay {
@@ -276,8 +282,6 @@ async fn injected_http_client_is_used() {
         http: Some(injected.clone()),
         ..sdk()
     };
-    // query_trade_info does not verify a response CheckMacValue, so the
-    // 2-field body decodes cleanly; the header assertion is the point.
     client.query_trade_info("x").await.expect("decodes");
     let head = seen.lock().unwrap().clone();
     assert!(

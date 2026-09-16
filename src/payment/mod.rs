@@ -400,9 +400,9 @@ impl Ecpay {
     /// response's own `CheckMacValue` (raising [`Error::CheckMacValueMismatch`]
     /// on mismatch or absence), and returns the response fields with
     /// CheckMacValue stripped (blank values kept, like
-    /// `parse_qsl(keep_blank_values=True)`). Shared by [`Self::order_search`]
-    /// and [`Self::query_payment_info`], which only differ in endpoint and
-    /// request fields.
+    /// `parse_qsl(keep_blank_values=True)`). Shared by [`Self::order_search`],
+    /// [`Self::query_payment_info`], and [`Self::query_trade_info`], which
+    /// only differ in endpoint and request fields.
     async fn post_cmv_verified(
         &self,
         endpoint: &str,
@@ -664,22 +664,20 @@ pub struct QueryTradeInfoOutput {
 }
 
 impl Ecpay {
-    /// Go `QueryTradeInfo`: the reference port's typed query — unlike
-    /// [`Self::order_search`] it does NOT verify the response CheckMacValue
-    /// (matching the Go SDK it was ported from) and decodes into a typed
-    /// struct.
+    /// Go `query_trade_info.go`'s typed query, on the crate's verification
+    /// contract: same endpoint, request shape, and response CheckMacValue
+    /// verification as [`Self::order_search`] (raising
+    /// [`Error::CheckMacValueMismatch`] on mismatch or absence) — a query
+    /// response is never trusted unsigned. Formerly the Go port's
+    /// verify-less variant; the divergence was closed in 0.4.
     pub async fn query_trade_info(&self, order_id: &str) -> Result<QueryTradeInfoOutput> {
-        let params = [
-            ("MerchantID".to_owned(), self.merchant_id.clone()),
-            ("MerchantTradeNo".to_owned(), order_id.to_owned()),
-            (
-                "TimeStamp".to_owned(),
-                crate::client::unix_now().to_string(),
-            ), // note ECPay's spelling
-        ]
-        .into_iter()
-        .collect();
-        let ss = self.call_payment_api("QueryTradeInfo", &params).await?;
+        let m = self.order_search_request(&OrderSearchParams {
+            merchant_trade_no: order_id.to_owned(),
+            time_stamp: crate::client::unix_now(),
+            platform_id: None,
+        })?;
+        let endpoint = format!("{}QueryTradeInfo/V5", self.payment_base_url());
+        let ss = self.post_cmv_verified(&endpoint, m).await?;
         let get = |k: &str| ss.get(k).cloned().unwrap_or_default();
         Ok(QueryTradeInfoOutput {
             merchant_id: get("MerchantID"),
