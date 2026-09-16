@@ -366,3 +366,45 @@ async fn invoice_2xx_non_envelope_bodies_are_reported_with_the_body() {
         }
     }
 }
+
+/// A non-2xx body is kept in full on the error FIELD (programmatic access)
+/// but its DISPLAY rendering is bounded: a hostile or misbehaving endpoint
+/// answering a megabyte of HTML cannot flood a log line through a
+/// `PaymentStatus`/`InvoiceStatus` message.
+#[tokio::test]
+async fn status_error_display_is_bounded_but_the_field_keeps_the_body() {
+    let big = "x".repeat(100_000);
+    let srv = spawn_http_server(move |_path, _body| {
+        (500, "text/html".to_owned(), big.clone().into_bytes())
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    let err = client
+        .query_trade_info("order_x")
+        .await
+        .expect_err("a non-2xx payment reply must surface as an error");
+    match &err {
+        ecpay::Error::PaymentStatus { status, body } => {
+            assert_eq!(*status, 500);
+            assert_eq!(body.len(), 100_000, "the field keeps the full body");
+        }
+        other => panic!("expected Error::PaymentStatus, got {other:?}"),
+    }
+    let rendered = err.to_string();
+    assert!(
+        rendered.starts_with("ecpay payment API error: status=500 body="),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("… (truncated; 100000 bytes total)"),
+        "the display must be truncated: {}",
+        rendered.len()
+    );
+    assert!(
+        rendered.len() < 600,
+        "the rendered message must stay small: {}",
+        rendered.len()
+    );
+}

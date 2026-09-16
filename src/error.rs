@@ -46,12 +46,16 @@ pub enum Error {
     /// (`order_search` verifies it; the Python SDK raises
     /// `"CheckMacValue is error!"`).
     CheckMacValueMismatch,
-    /// Go: `fmt.Errorf("ecpay payment API error: status=%d body=%s", ...)`
+    /// Go: `fmt.Errorf("ecpay payment API error: status=%d body=%s", ...)`.
+    /// `Display` renders the body verbatim up to 512 chars, then a
+    /// truncation notice with the total size ([`crate::client::
+    /// truncate_for_display`]); the field itself keeps the full body.
     PaymentStatus {
         status: u16,
         body: String,
     },
-    /// Go: `fmt.Errorf("ecpay invoice API error: status=%d body=%s", ...)`
+    /// Go: `fmt.Errorf("ecpay invoice API error: status=%d body=%s", ...)`.
+    /// `Display` bounds the body like [`Error::PaymentStatus`].
     InvoiceStatus {
         status: u16,
         body: String,
@@ -104,12 +108,16 @@ impl fmt::Display for Error {
             Error::Api(e) => write!(f, "{e}"),
             Error::Validation(m) => write!(f, "ecpay: {m}"),
             Error::CheckMacValueMismatch => write!(f, "ecpay: CheckMacValue is error!"),
-            Error::PaymentStatus { status, body } => {
-                write!(f, "ecpay payment API error: status={status} body={body}")
-            }
-            Error::InvoiceStatus { status, body } => {
-                write!(f, "ecpay invoice API error: status={status} body={body}")
-            }
+            Error::PaymentStatus { status, body } => write!(
+                f,
+                "ecpay payment API error: status={status} body={}",
+                crate::client::truncate_for_display(body)
+            ),
+            Error::InvoiceStatus { status, body } => write!(
+                f,
+                "ecpay invoice API error: status={status} body={}",
+                crate::client::truncate_for_display(body)
+            ),
             Error::TransCode { code, msg } => {
                 write!(f, "ecpay TransCode error: code={code} msg={msg}")
             }

@@ -592,14 +592,16 @@ impl Ecpay {
 }
 
 /// How much of a body an error message quotes.
-const BODY_EXCERPT_CHARS: usize = 512;
+pub(crate) const BODY_EXCERPT_CHARS: usize = 512;
 
 /// A bounded, escaped excerpt of a body for error messages: at most
 /// [`BODY_EXCERPT_CHARS`] chars, `Debug`-quoted so newlines and control
 /// characters cannot reach a log line raw. The callback decoders feed
 /// attacker-controlled POST bodies (a public ServerReplyURL/ReturnURL) into
-/// this, so the echo must never be unbounded or verbatim; API responses
-/// take the same bound for one consistent message.
+/// this, so the echo must never be unbounded or verbatim. The non-envelope
+/// status errors (`Error::PaymentStatus`/`InvoiceStatus`) instead render
+/// their bodies through [`truncate_for_display`] — verbatim-but-bounded,
+/// keeping the Go-parity `body=%s` shape for normal server responses.
 fn body_excerpt(body: &str) -> String {
     let mut chars = body.chars();
     let head: String = chars.by_ref().take(BODY_EXCERPT_CHARS).collect();
@@ -607,6 +609,21 @@ fn body_excerpt(body: &str) -> String {
         format!("{head:?}… ({} bytes total)", body.len())
     } else {
         format!("{head:?}")
+    }
+}
+
+/// A bounded rendering of a response body for error `Display`: verbatim up
+/// to [`BODY_EXCERPT_CHARS`] chars, then a truncation notice with the total
+/// size. The `PaymentStatus`/`InvoiceStatus` fields keep the full body for
+/// programmatic access; only the rendered message is bounded, so a hostile
+/// or misbehaving endpoint cannot flood a log line with megabytes of HTML.
+pub(crate) fn truncate_for_display(body: &str) -> String {
+    let mut chars = body.chars();
+    let head: String = chars.by_ref().take(BODY_EXCERPT_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{head}… (truncated; {} bytes total)", body.len())
+    } else {
+        head
     }
 }
 
@@ -715,5 +732,26 @@ method=\"post\"><input type=\"hidden\" name=\"MerchantID\" value=\"3002607\" />\
         // Multi-byte chars are never split.
         let cjk = "中".repeat(BODY_EXCERPT_CHARS + 5);
         assert!(body_excerpt(&cjk).contains("… (1551 bytes total)"));
+    }
+
+    #[test]
+    fn truncate_for_display_is_verbatim_within_the_bound() {
+        use super::{truncate_for_display, BODY_EXCERPT_CHARS};
+        assert_eq!(truncate_for_display("upstream boom"), "upstream boom");
+        // Exactly the bound renders whole.
+        assert_eq!(
+            truncate_for_display(&"z".repeat(BODY_EXCERPT_CHARS)),
+            "z".repeat(BODY_EXCERPT_CHARS)
+        );
+        // Over it: the head plus a notice carrying the total byte count.
+        let out = truncate_for_display(&"x".repeat(BODY_EXCERPT_CHARS + 1));
+        assert!(
+            out.starts_with(&"x".repeat(BODY_EXCERPT_CHARS))
+                && out.ends_with("… (truncated; 513 bytes total)"),
+            "{out}"
+        );
+        // Multi-byte chars are never split mid-char.
+        let cjk = "中".repeat(BODY_EXCERPT_CHARS + 5);
+        assert!(truncate_for_display(&cjk).ends_with("… (truncated; 1551 bytes total)"));
     }
 }
