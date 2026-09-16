@@ -419,16 +419,20 @@ async fn ecpg_query_family_error_shapes() {
         ..Default::default()
     };
 
+    // The three queries share one not-found shape: the envelope is
+    // TransCode=1 and Data decrypts to `{RtnCode: 10000185, RtnMsg: "Cant
+    // not find the trade data"}` with an INTEGER RtnCode (captured 2026-09;
+    // the typed docs on each method state this).
     for name in ["QueryTrade", "QueryPaymentInfo", "CreditDetail/QueryTrade"] {
         let r: Result<Value, _> = match name {
             "QueryTrade" => client.ecpg_query_trade(&trade_ref).await,
             "QueryPaymentInfo" => client.ecpg_query_payment_info(&trade_ref).await,
             _ => client.ecpg_query_credit_trade(&trade_ref).await,
         };
-        match r {
-            Ok(v) => println!("{name} (unknown trade) = {v}"),
-            Err(e) => println!("{name} (unknown trade) error = {e:?}"),
-        }
+        let v = r.unwrap_or_else(|e| panic!("{name}: envelope must decode, got {e:?}"));
+        println!("{name} (unknown trade) = {v}");
+        assert_eq!(v["RtnCode"], 10000185, "{name}: {v}");
+        assert_eq!(v["RtnMsg"], "Cant not find the trade data", "{name}: {v}");
     }
 
     let media = client
@@ -450,8 +454,14 @@ async fn ecpg_query_family_error_shapes() {
             merchant_trade_no: unknown.clone(),
             action: "ReAuth".into(),
         })
-        .await;
-    println!("CreditCardPeriodAction (merchant_id only) = {period:?}");
+        .await
+        .expect("CreditCardPeriodAction: Data MerchantID alone must be accepted");
+    println!("CreditCardPeriodAction (merchant_id only) = {period}");
+    // 不存在的訂單, with MerchantID/MerchantTradeNo echoed back — the shape
+    // the method docs promise once Data carries MerchantID.
+    assert_eq!(period["RtnCode"], 90100150, "{period}");
+    assert_eq!(period["MerchantID"], "3002607", "{period}");
+    assert_eq!(period["MerchantTradeNo"], unknown, "{period}");
 
     let do_action = client
         .ecpg_do_action(&ecpay::ecpg::EcpgDoActionInput {
@@ -462,8 +472,10 @@ async fn ecpg_query_family_error_shapes() {
             action: "R".into(),
             total_amount: 100,
         })
-        .await;
-    println!("DoAction (merchant_id only) = {do_action:?}");
+        .await
+        .expect("DoAction: Data MerchantID alone must be accepted");
+    println!("DoAction (merchant_id only) = {do_action}");
+    assert_eq!(do_action["RtnCode"], 10000185, "{do_action}");
 }
 
 // --- helpers (kept local so the probe file survives on its own) ---

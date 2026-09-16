@@ -292,17 +292,7 @@ impl Ecpay {
         endpoint: &str,
         params: &HashMap<String, String>,
     ) -> Result<Vec<u8>> {
-        let encoded = encode_query(crate::crypto::str_pairs(params));
-        let resp = self
-            .http()
-            .post(endpoint)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .body(encoded)
-            .send()
-            .await?;
-        let status = resp.status().as_u16();
-        let mut resp = resp;
-        let body = read_body_limited(&mut resp).await?;
+        let (status, body) = self.post_form_raw(endpoint, params).await?;
         if !(200..300).contains(&status) {
             return Err(Error::PaymentStatus {
                 status,
@@ -310,6 +300,28 @@ impl Ecpay {
             });
         }
         Ok(body)
+    }
+
+    /// [`Self::post_form`] without the non-2xx gate: the HTTP status and the
+    /// raw body, for a caller whose protocol carries its own error shape on
+    /// any status (the logistics `0|<message>` rejections arrive on HTTP 500
+    /// as well as 200).
+    pub(crate) async fn post_form_raw(
+        &self,
+        endpoint: &str,
+        params: &HashMap<String, String>,
+    ) -> Result<(u16, Vec<u8>)> {
+        let encoded = encode_query(crate::crypto::str_pairs(params));
+        let mut resp = self
+            .http()
+            .post(endpoint)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(encoded)
+            .send()
+            .await?;
+        let status = resp.status().as_u16();
+        let body = read_body_limited(&mut resp).await?;
+        Ok((status, body))
     }
 
     /// Go `CallPaymentAPI`: POST the form params plus CheckMacValue (keys

@@ -353,7 +353,7 @@ pub struct InvalidInput {
     #[serde(rename = "InvoiceDate")]
     pub invoice_date: String, // 發票開立日期 格式為「yyyy-MM-dd」
     #[serde(rename = "Reason")]
-    pub reason: String, // 作廢原因
+    pub reason: String, // 作廢原因 maxlength 20（沙盒實測 2026-09：超過回 2009005 作廢原因長度錯誤）
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

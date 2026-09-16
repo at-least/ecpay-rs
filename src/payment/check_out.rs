@@ -623,8 +623,10 @@ fn credit_plan_pairs(p: &AioCheckOutParams) -> Option<Vec<(String, String)>> {
         insert_optional_int_seq(&mut v, "UnionPay", &p.union_pay);
         return Some(v);
     }
-    if let Some(installment) = &p.credit_installment {
-        return Some(vec![("CreditInstallment".to_owned(), installment.clone())]);
+    if p.credit_installment.is_some() {
+        let mut v = Vec::new();
+        insert_optional_str_seq(&mut v, "CreditInstallment", &p.credit_installment);
+        return Some(v);
     }
     if p.period_amount.is_some()
         || p.period_type.is_some()

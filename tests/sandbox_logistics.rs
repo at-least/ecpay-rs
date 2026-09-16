@@ -176,10 +176,95 @@ async fn allinone_v2_endpoints_answer_with_the_aes_envelope() {
     match q {
         Ok(v) => {
             println!("allinone query (unknown id) business error = {v:?}");
-            assert!(v.get("RtnCode").is_some(), "decoded business error: {v}");
+            assert_eq!(v["RtnCode"], 85002, "找不到訂單: {v}");
+            assert_eq!(v["RtnMsg"], "找不到訂單", "{v}");
         }
         Err(e) => panic!("non-2xx envelope must still decode, got {e:?}"),
     }
+}
+
+/// A wrong AES key is answered IN-BAND by the v2 envelope — `TransCode=712
+/// 解密失敗` on AllInOne, `114 反序列化Json格式失敗` on CrossBorder (captured
+/// 2026-09) — never as a transport or MAC error, which is what a caller
+/// debugging their keys must see.
+#[tokio::test]
+async fn wrong_aes_key_is_answered_in_band_by_the_v2_envelope() {
+    let wrong_key = Ecpay {
+        logistics_hash_key: "0000000000000000".into(),
+        ..sdk()
+    };
+    match wrong_key
+        .allinone_query_logistics_trade_info(&AllInOneQueryInput {
+            merchant_id: MERCHANT_ID.into(),
+            logistics_id: "1".into(),
+        })
+        .await
+    {
+        Err(ecpay::Error::TransCode { code, msg }) => {
+            assert_eq!((code, msg.as_str()), (712, "解密失敗"));
+        }
+        other => panic!("expected TransCode 712, got {other:?}"),
+    }
+    match wrong_key
+        .crossborder_create_test_data(&CrossBorderCreateTestDataInput {
+            merchant_id: MERCHANT_ID.into(),
+            country: "SG".into(),
+            logistics_type: "CB".into(),
+            logistics_sub_type: "UNIMARTCBCVS".into(),
+        })
+        .await
+    {
+        Err(ecpay::Error::TransCode { code, msg }) => {
+            assert_eq!((code, msg.as_str()), (114, "反序列化Json格式失敗"));
+        }
+        other => panic!("expected TransCode 114, got {other:?}"),
+    }
+}
+
+/// The domestic form protocol's own rejections (`0|<message>`) reach the
+/// caller as one shape whatever HTTP status they ride on: stage answers
+/// `0|找不到訂單` and `0|CheckMacValue驗證錯誤` on HTTP 500 but `0|TimeStamp
+/// Is Expired` on HTTP 200 (captured 2026-09). Before the fix the 500s
+/// surfaced as `PaymentStatus` and the 200 as `Message` — the same protocol
+/// error in two variants.
+#[tokio::test]
+async fn domestic_rejections_share_one_shape_on_any_http_status() {
+    let query = |id: &str, ts: Option<i64>| DomesticQueryInput {
+        all_pay_logistics_id: id.into(),
+        time_stamp: ts,
+    };
+    let expect_rejection = |label: &str, r: Result<_, ecpay::Error>, want: &str| match r {
+        Err(ecpay::Error::Message(m)) => {
+            assert!(m.contains(want), "{label}: {m}");
+            assert!(m.starts_with("ecpay logistics: status 0: "), "{label}: {m}");
+        }
+        other => panic!("{label}: expected Error::Message with {want:?}, got {other:?}"),
+    };
+    expect_rejection(
+        "unknown id (HTTP 500)",
+        sdk()
+            .logistics_query_logistics_trade_info(&query("1", None))
+            .await,
+        "找不到訂單",
+    );
+    let wrong_key = Ecpay {
+        logistics_hash_key: "0000000000000000".into(),
+        ..sdk()
+    };
+    expect_rejection(
+        "wrong MD5 key (HTTP 500)",
+        wrong_key
+            .logistics_query_logistics_trade_info(&query("1", None))
+            .await,
+        "CheckMacValue驗證錯誤",
+    );
+    expect_rejection(
+        "stale TimeStamp (HTTP 200)",
+        sdk()
+            .logistics_query_logistics_trade_info(&query("1", Some(1_600_000_000)))
+            .await,
+        "TimeStamp Is Expired",
+    );
 }
 
 #[tokio::test]
@@ -187,8 +272,8 @@ async fn crossborder_create_test_data_answers_with_the_aes_envelope() {
     // Server-truth (2026-09): the envelope is accepted and answered in-band,
     // but public account 2000132 gets `TransCode=128 System exception` —
     // 跨境物流 appears not to be enabled for it. What this pins is that our
-    // wire format speaks CrossBorder (a decrypt failure would answer
-    // TransCode=110 instead, as captured for a wrong key).
+    // wire format speaks CrossBorder (a wrong key answers TransCode=114
+    // instead — see `wrong_aes_key_is_answered_in_band_by_the_v2_envelope`).
     match sdk()
         .crossborder_create_test_data(&CrossBorderCreateTestDataInput {
             merchant_id: MERCHANT_ID.into(),

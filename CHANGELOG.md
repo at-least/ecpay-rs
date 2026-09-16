@@ -85,6 +85,20 @@ _審查跟進：_
   的訊號）。鍵存在但值不符信封型別（如 `"TransCode":"1"`）同樣回
   `Error::Message`——先前回 serde 的 `Error::Json`，其訊息會原樣引用整段
   違規字串，在公開回呼端點上等於無上限回灌。
+- 物流 form 端點的 `0|<訊息>` 拒絕（`0|找不到訂單`、`0|CheckMacValue驗證錯誤`
+  在 stage 走 HTTP 500，`0|TimeStamp Is Expired` 走 HTTP 200）統一回
+  `Error::Message("ecpay logistics: status 0: <訊息>")`，不再依 HTTP 狀態碼
+  分成 `PaymentStatus` 與 `Message` 兩種；訊息也不再夾帶 `Some("0")` 的
+  Debug 格式。
+- 沙盒測試改成釘住 stage 的實際回應（不只是「有回應」）：B2C 發票生命週期的
+  錯誤碼（重複 RelateNumber 5070357、重複作廢 5070453、GetIssue 以鍵存在與否
+  決定查詢模式、GetInvalid 必填 2013001）、未建模代碼由伺服器裁決
+  （2001096/2001019）、GetAllowance 三種 SearchType 皆必填 AllowanceNo 與
+  InvoiceNo（2014003/2014001）、B2B 作廢原因長度先於查詢檢查（2103005）、
+  物流 v2 查無訂單 85002 與錯誤金鑰 TransCode 712/114、ECPG 查無訂單
+  10000185 與定期定額 90100150 回響。
+- `AioCheckOutParams.credit_installment = Some("")` 改為不送出（與其他選填字串
+  相同的過濾規則）；先前會送出空的 `CreditInstallment=`。
 - CheckMacValue 簽章/驗證改走借用的 `(key, value)` 迭代器核心
   （`check_mac_value` 公開簽章不變）；form POST 的編碼統一為單一
   `encode_query`。內部整理，wire bytes 不變（`encode_query` 單元測試釘死

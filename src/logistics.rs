@@ -118,29 +118,37 @@ impl Ecpay {
         mut params: HashMap<String, String>,
     ) -> Result<BTreeMap<String, String>> {
         self.sign_logistics(&mut params)?;
-        let body = self.post_form(&endpoint, &params).await?;
+        let (http_status, body) = self.post_form_raw(&endpoint, &params).await?;
         let text = String::from_utf8_lossy(&body);
         let (status, query) = split_status_prefix(&text);
-        let mut fields = crate::client::parse_qsl(query);
-        // Server-truth (2026-09): business errors can arrive as a SHORT
-        // UNSIGNED string after the status prefix (e.g. `0|ReceiverStoreID
-        // Is Null`) — no '=' anywhere, so it never parses as a query. Surface
-        // it verbatim instead of a misleading CheckMacValueMismatch.
+        // Server-truth (2026-09): business errors arrive as a SHORT UNSIGNED
+        // string after the status prefix (`0|ReceiverStoreID Is Null`,
+        // `0|TimeStamp Is Expired` on HTTP 200; `0|找不到訂單`,
+        // `0|CheckMacValue驗證錯誤` on HTTP 500) — no '=' anywhere, so it never
+        // parses as a query. It is the protocol's own error shape, so surface
+        // it verbatim on any HTTP status, before the non-2xx gate below.
+        if status.is_some() && !query.contains('=') {
+            let status = status.unwrap_or_default();
+            return Err(Error::Message(format!(
+                "ecpay logistics: status {status}: {}",
+                query.trim()
+            )));
+        }
+        if !(200..300).contains(&http_status) {
+            return Err(Error::PaymentStatus {
+                status: http_status,
+                body: text.into_owned(),
+            });
+        }
+        // An HTML/text error page on a 2xx has no status prefix and no '='
+        // (parse_qsl would read it as one valueless key and the missing MAC
+        // would then look like a mismatch) — surface the raw body instead.
         if !query.contains('=') {
-            // Short unsigned message (UTF-8): e.g. `0|資料處理中，無法更新貨資訊`.
-            let text = String::from_utf8_lossy(&body);
-            let text = text.trim_start_matches(|c: char| c.is_ascii_digit() || c == '|');
             return Err(Error::Message(format!(
-                "ecpay logistics: stage answered {status:?}: {text}"
+                "ecpay logistics: response is not a signed query: {text:?}"
             )));
         }
-        // An HTML/text error page parses to NOTHING — surface the raw body
-        // instead of a misleading CheckMacValueMismatch.
-        if fields.is_empty() {
-            return Err(Error::Message(format!(
-                "ecpay logistics: response is not a signed query: {body:?}"
-            )));
-        }
+        let mut fields = crate::client::parse_qsl(query);
         // Business errors still come back as a signed query (RtnCode inside);
         // a body with no CheckMacValue at all is an HTML/text error page.
         let got = fields

@@ -280,6 +280,20 @@ fn optional_fields_follow_the_filter_stage() {
         .unwrap();
     assert_eq!(param(&out, "BindingCard"), None);
     assert_eq!(param(&out, "UnionPay"), None);
+
+    // The Credit plan strings follow the same rule: an empty
+    // CreditInstallment is dropped, not sent as `CreditInstallment=`.
+    let out = sdk()
+        .aio_check_out(&AioCheckOutParams {
+            credit_installment: Some(String::new()),
+            ..base(ChoosePayment::Credit)
+        })
+        .unwrap();
+    assert_eq!(
+        param(&out, "CreditInstallment"),
+        None,
+        "empty CreditInstallment dropped"
+    );
 }
 
 #[test]

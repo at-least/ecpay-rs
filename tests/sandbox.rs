@@ -21,7 +21,7 @@
 use ecpay::{
     AllowanceByCollegiateInput, AllowanceInput, AllowanceInvalidByCollegiateInput,
     AllowanceInvalidInput, AllowanceItem, CancelDelayIssueInput, CheckBarcodeInput,
-    CheckLoveCodeInput, DelayIssueInput, Ecpay, GetAllowanceInput, GetAllowanceInvalidInput,
+    CheckLoveCodeInput, DelayIssueInput, Ecpay, Error, GetAllowanceInput, GetAllowanceInvalidInput,
     GetInvalidInput, GetIssueInput, InvalidInput, IssueInput, IssueModel, Item, TriggerIssueInput,
     VoidModel, VoidWithReIssueInput, INVOICE_API_URL_STAGE, PAYMENT_API_URL_STAGE,
 };
@@ -43,7 +43,8 @@ fn stage_client() -> Ecpay {
 /// A process-wide counter, not just a timestamp: with 7+ `#[tokio::test]`
 /// functions in this file starting within the same instant, plain
 /// nanosecond timestamps collided in practice (confirmed live, 2026-09:
-/// ECPay rejected a duplicate RelateNumber with `RtnCode=5070353`) — clock
+/// ECPay rejected the duplicate RelateNumber; the code stage answers today,
+/// 5070357, is pinned by `issue_lifecycle_error_contracts`) — clock
 /// resolution isn't fine enough to guarantee uniqueness across threads that
 /// all read it near-simultaneously, but a monotonic counter is.
 fn unique_relate_number() -> String {
@@ -190,6 +191,178 @@ async fn issue_then_get_then_invalid_roundtrip() {
         got_invalid.rtn_msg
     );
     assert_eq!(got_invalid.ii_invoice_no, issued.invoice_no);
+}
+
+/// One invoice taken through every documented error contract of its
+/// lifecycle — the codes an integration branches on, each captured live
+/// (2026-09) and pinned here so a server-side change is noticed:
+/// duplicate RelateNumber, GetIssue's key-presence query mode, a second
+/// Invalid, and GetInvalid's truly-required RelateNumber.
+#[tokio::test]
+async fn issue_lifecycle_error_contracts() {
+    let client = stage_client();
+    let merchant_id = client.merchant_id.clone();
+    let relate = unique_relate_number();
+    let issued = client
+        .issue(&sample_issue_input(relate.clone(), merchant_id.clone()))
+        .await
+        .expect("stage issue 應成功");
+    let invoice_date10: String = issued.invoice_date.chars().take(10).collect();
+
+    // RelateNumber is unique per merchant: re-issuing is a business error,
+    // not a second invoice.
+    let dup = client
+        .issue(&sample_issue_input(relate.clone(), merchant_id.clone()))
+        .await
+        .expect_err("a duplicate RelateNumber must not issue again");
+    match &dup {
+        Error::Api(e) => assert_eq!(e.code, 5070357, "{e}"),
+        other => panic!("expected Error::Api, got {other:?}"),
+    }
+
+    // GetIssue picks its query mode by KEY PRESENCE, not by value: the same
+    // RelateNumber query fails (RtnCode=2) once empty InvoiceNo/InvoiceDate
+    // keys ride along — the reason `GetIssueInput` omits empty fields
+    // instead of sending "" like the rest of the invoice structs.
+    let with_empty_keys: serde_json::Value = client
+        .call_invoice_api(
+            "GetIssue",
+            &serde_json::json!({
+                "MerchantID": merchant_id,
+                "RelateNumber": relate,
+                "InvoiceNo": "",
+                "InvoiceDate": "",
+            }),
+        )
+        .await
+        .expect("decodes");
+    assert_eq!(with_empty_keys["RtnCode"], 2, "{with_empty_keys}");
+    let typed = client
+        .get_issue(&GetIssueInput {
+            merchant_id: merchant_id.clone(),
+            relate_number: relate.clone(),
+            ..Default::default()
+        })
+        .await
+        .expect("stage get_issue 應成功");
+    assert_eq!(typed.rtn_code, 1, "{}", typed.rtn_msg);
+    assert_eq!(typed.iis_number, issued.invoice_no);
+    // An unknown RelateNumber is RtnCode=2 in the body, not an error
+    // (`get_issue` is a query; only the command calls map RtnCode to
+    // `Error::Api`).
+    let unknown = client
+        .get_issue(&GetIssueInput {
+            merchant_id: merchant_id.clone(),
+            relate_number: format!("NOSUCH{relate}"),
+            ..Default::default()
+        })
+        .await
+        .expect("stage get_issue 應成功");
+    assert_eq!(unknown.rtn_code, 2, "{}", unknown.rtn_msg);
+
+    // Invalid.Reason is capped at 20 characters (2009005 作廢原因長度錯誤 —
+    // learned live when this test's first reason was 21 chars long).
+    let invalid = InvalidInput {
+        merchant_id: merchant_id.clone(),
+        invoice_no: issued.invoice_no.clone(),
+        invoice_date: invoice_date10.clone(),
+        reason: "sandbox contract test".into(), // 21 chars
+    };
+    match client.invalid(&invalid).await {
+        Err(Error::Api(e)) => assert_eq!(e.code, 2009005, "{e}"),
+        other => panic!("a 21-char reason must be refused, got {other:?}"),
+    }
+    let invalid = InvalidInput {
+        reason: "sandbox contract".into(),
+        ..invalid
+    };
+    client
+        .invalid(&invalid)
+        .await
+        .expect("stage invalid 應成功");
+    let again = client
+        .invalid(&invalid)
+        .await
+        .expect_err("a second Invalid must be refused");
+    match &again {
+        Error::Api(e) => assert_eq!(e.code, 5070453, "{e}"),
+        other => panic!("expected Error::Api, got {other:?}"),
+    }
+
+    // GetInvalid: RelateNumber is genuinely required (2013001), and a wrong
+    // one is 查無資料 (2) — unlike GetIssue's either/or modes.
+    let missing = client
+        .get_invalid(&GetInvalidInput {
+            merchant_id: merchant_id.clone(),
+            relate_number: String::new(),
+            invoice_no: issued.invoice_no.clone(),
+            invoice_date: invoice_date10.clone(),
+        })
+        .await
+        .expect("decodes");
+    assert_eq!(missing.rtn_code, 2013001, "{}", missing.rtn_msg);
+    let wrong = client
+        .get_invalid(&GetInvalidInput {
+            merchant_id,
+            relate_number: format!("WRONG{relate}"),
+            invoice_no: issued.invoice_no.clone(),
+            invoice_date: invoice_date10,
+        })
+        .await
+        .expect("decodes");
+    assert_eq!(wrong.rtn_code, 2, "{}", wrong.rtn_msg);
+}
+
+/// The wire enums pass unmodeled codes through verbatim; the server is the
+/// one that adjudicates them. Pin that it does — each unknown code is a
+/// format error from ECPay (captured 2026-09), so no invoice is issued and
+/// nothing needs cleanup.
+#[tokio::test]
+async fn unknown_codes_are_adjudicated_by_the_server() {
+    let client = stage_client();
+    let merchant_id = client.merchant_id.clone();
+    let mut carrier = sample_issue_input(unique_relate_number(), merchant_id.clone());
+    carrier.carrier_type = ecpay::invoice::CarrierType::Other("9".into());
+    match client.issue(&carrier).await {
+        Err(Error::Api(e)) => assert_eq!((e.code, e.msg.as_str()), (2001096, "載具類別格式錯誤")),
+        other => panic!("CarrierType=9: expected the server's format error, got {other:?}"),
+    }
+    let mut tax = sample_issue_input(unique_relate_number(), merchant_id);
+    tax.tax_type = "7".into();
+    match client.issue(&tax).await {
+        Err(Error::Api(e)) => assert_eq!((e.code, e.msg.as_str()), (2001019, "課稅別格式錯誤")),
+        other => panic!("TaxType=7: expected the server's format error, got {other:?}"),
+    }
+}
+
+/// `GetAllowance` requires BOTH `AllowanceNo` and `InvoiceNo` on every
+/// `SearchType`, contrary to the spec page (see the input's docs); the
+/// server checks InvoiceNo first. Stateless: the refusals come before any
+/// lookup, so no allowance has to exist.
+#[tokio::test]
+async fn get_allowance_requires_allowance_no_and_invoice_no_on_every_search_type() {
+    let client = stage_client();
+    for (search_type, allowance_no, invoice_no, want) in [
+        ("1", "", "AB12345678", 2014003),
+        ("0", "2026091500001", "", 2014001),
+        ("2", "", "", 2014001),
+    ] {
+        let got = client
+            .get_allowance(&GetAllowanceInput {
+                merchant_id: client.merchant_id.clone(),
+                search_type: search_type.into(),
+                allowance_no: allowance_no.into(),
+                invoice_no: invoice_no.into(),
+                date: "2026-09-15".into(),
+            })
+            .await
+            .expect("decodes");
+        assert_eq!(
+            got.rtn_code, want,
+            "SearchType={search_type} AllowanceNo={allowance_no:?} InvoiceNo={invoice_no:?}: {}",
+            got.rtn_msg
+        );
+    }
 }
 
 /// `CheckLoveCode`（捐贈碼驗證）：無狀態查詢，不依賴任何先前開立的發票。

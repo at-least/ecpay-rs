@@ -165,6 +165,41 @@ async fn response_without_mac_is_rejected_not_swallowed() {
     }
 }
 
+/// A status-prefixed rejection (`0|<message>`) is the domestic form
+/// protocol's own error shape, and stage sends it on HTTP 200 (`0|TimeStamp
+/// Is Expired`) as well as on HTTP 500 (`0|找不到訂單`, `0|CheckMacValue
+/// 驗證錯誤` — captured live 2026-09). It must surface as the same
+/// `Error::Message` either way, carrying the message verbatim.
+#[tokio::test]
+async fn status_prefixed_rejections_share_one_shape_on_any_http_status() {
+    for status in [200u16, 500] {
+        let server = spawn_http_server(move |_path, _body| {
+            (
+                status,
+                "text/html; charset=utf-8".into(),
+                "0|找不到訂單".as_bytes().to_vec(),
+            )
+        });
+        let err = logistics_sdk(server)
+            .logistics_query_logistics_trade_info(&DomesticQueryInput {
+                all_pay_logistics_id: "1".into(),
+                time_stamp: None,
+            })
+            .await
+            .expect_err("a 0| rejection must fail");
+        match &err {
+            ecpay::Error::Message(m) => {
+                assert!(m.contains("找不到訂單"), "status {status}: {m}");
+                assert!(
+                    !m.contains("Some("),
+                    "status {status}: the message must not leak Debug formatting: {m}"
+                );
+            }
+            other => panic!("status {status}: expected Error::Message, got {other:?}"),
+        }
+    }
+}
+
 /// A real envelope whose TransCode is literally 0 (ECPay's 查無資料 shape)
 /// IS an envelope — the gate keys on the presence of the `TransCode` key,
 /// not its value — so it surfaces as `Error::TransCode{code:0}` on a 2xx

@@ -125,6 +125,32 @@ async fn b2b_issue_then_get_then_invalid_roundtrip() {
     assert_eq!(voided["RtnCode"], 1, "void succeeds: {voided}");
 }
 
+/// `Invalid.Reason` is capped at 20 characters and the cap is checked
+/// BEFORE the invoice lookup: an over-long reason is `2103005 發票作廢原因
+/// 格式錯誤` even for an invoice that does not exist, while a short one on
+/// the same unknown invoice is `6070004 發票號碼或日期錯誤` (captured
+/// 2026-09). Stateless — nothing is issued.
+#[tokio::test]
+async fn b2b_invalid_reason_length_is_checked_before_the_lookup() {
+    let client = sdk();
+    let unknown = InvalidInput {
+        merchant_id: MERCHANT_ID.into(),
+        invoice_number: "ZZ00000000".into(),
+        invoice_date: taipei_today(),
+        reason: "一二三四五六七八九十一二三四五六七八九十一".into(), // 21 chars
+    };
+    let long = client.invalid_b2b(&unknown).await.expect("decodes");
+    assert_eq!(long["RtnCode"], 2103005, "{long}");
+    let short = client
+        .invalid_b2b(&InvalidInput {
+            reason: "short".into(),
+            ..unknown
+        })
+        .await
+        .expect("decodes");
+    assert_eq!(short["RtnCode"], 6070004, "{short}");
+}
+
 #[tokio::test]
 async fn b2b_get_invoice_word_setting_answers() {
     // 民國年 for 2026 is 115; term/use/category follow the official example's
