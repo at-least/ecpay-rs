@@ -282,6 +282,15 @@ pub fn encrypt(text: &[u8], hash_key: &[u8], hash_iv: &[u8]) -> Result<String> {
 /// panics) on bad padding, a wrong IV length, or a non-block-multiple
 /// ciphertext. Check order matches Go: base64, key size, ciphertext length,
 /// IV length, padding.
+///
+/// ⚠ The returned errors are **detailed** (which stage failed, and `Error::
+/// Padding` is distinct from the UTF-8/JSON errors). That is right for
+/// decrypting ECPay's *responses* over your own TLS connection, but never
+/// use this directly on attacker-reachable callback bodies — a distinguishable
+/// padding failure there is a CBC padding oracle. Use the callback decoders
+/// ([`crate::Ecpay::decrypt_ecpg_callback`],
+/// [`crate::Ecpay::decrypt_logistics_callback`]), which collapse every
+/// payload-content-dependent failure into one fixed message.
 pub fn decrypt(text: &str, hash_key: &[u8], hash_iv: &[u8]) -> Result<String> {
     let decoded = base64::engine::general_purpose::STANDARD.decode(text)?;
     if hash_key.len() != 16 && hash_key.len() != 24 && hash_key.len() != 32 {
@@ -366,6 +375,10 @@ pub fn encrypt_data<T: Serialize + ?Sized>(
 
 /// Go `DecryptData`: Decrypt, url-unescape (Go QueryUnescape semantics),
 /// then JSON-parse into the typed output.
+///
+/// ⚠ Like [`decrypt`], the errors here are detailed per stage — for
+/// attacker-reachable callback bodies use the callback decoders instead
+/// (see [`decrypt`]).
 pub fn decrypt_data<T: DeserializeOwned>(data: &str, hash_key: &[u8], hash_iv: &[u8]) -> Result<T> {
     let decrypted = decrypt(data, hash_key, hash_iv)?;
     let j = query_unescape(&decrypted)?;

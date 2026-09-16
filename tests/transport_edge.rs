@@ -487,3 +487,58 @@ fn callback_payload_failures_are_indistinguishable() {
         assert_eq!(e, errs[0], "callback decoders must share one uniform error");
     }
 }
+
+/// The callback decoders must decrypt with their OWN key pair (payment for
+/// ECPG, logistics for the logistics decoders — no silent fallback) and
+/// still round-trip a valid payload. Complements the uniform-error test,
+/// which cannot catch a wrong-key routing because every wrong-key failure
+/// also collapses into the same fixed message.
+#[test]
+fn callback_decoders_route_through_their_own_key_pairs() {
+    let client = Ecpay {
+        hash_key: "0123456789abcdef".into(),
+        hash_iv: "0123456789abcdef".into(),
+        logistics_hash_key: "fedcba9876543210".into(),
+        logistics_hash_iv: "fedcba9876543210".into(),
+        ..Default::default()
+    };
+    let payment = (
+        b"0123456789abcdef".as_slice(),
+        b"0123456789abcdef".as_slice(),
+    );
+    let logistics = (
+        b"fedcba9876543210".as_slice(),
+        b"fedcba9876543210".as_slice(),
+    );
+    let envelope = |d: &str| format!(r#"{{"TransCode":1,"TransMsg":"","Data":"{d}"}}"#);
+
+    let ecpg_payload =
+        ecpay::encrypt_data(&serde_json::json!({"RtnCode": 1}), payment.0, payment.1).unwrap();
+    let logistics_payload = ecpay::encrypt_data(
+        &serde_json::json!({"RtnCode": "1"}),
+        logistics.0,
+        logistics.1,
+    )
+    .unwrap();
+
+    let v: serde_json::Value = client
+        .decrypt_ecpg_callback(&envelope(&ecpg_payload))
+        .unwrap();
+    assert_eq!(v["RtnCode"], 1);
+    let v: serde_json::Value = client
+        .decrypt_logistics_callback(&envelope(&logistics_payload))
+        .unwrap();
+    assert_eq!(v["RtnCode"], "1");
+    // Cross-pair payloads must NOT decrypt, and decrypt_temp_trade_established
+    // (form-decode + logistics keys) round-trips too.
+    assert!(client
+        .decrypt_ecpg_callback::<serde_json::Value>(&envelope(&logistics_payload))
+        .is_err());
+    assert!(client
+        .decrypt_logistics_callback::<serde_json::Value>(&envelope(&ecpg_payload))
+        .is_err());
+    let v: serde_json::Value = client
+        .decrypt_temp_trade_established(&envelope(&logistics_payload))
+        .unwrap();
+    assert_eq!(v["RtnCode"], "1");
+}

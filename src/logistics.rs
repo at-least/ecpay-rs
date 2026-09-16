@@ -813,7 +813,11 @@ impl Ecpay {
     /// 解密全方位物流 v2 `ClientReplyURL` 的 `ResultData` 欄位
     /// (TempTradeEstablishedResponse)。前端 form POST 會把 AES JSON 信封
     /// urlencode 進 `ResultData`,此處先做 form 解碼再拆信封、驗 TransCode、
-    /// 解密 `Data`。
+    /// 解密 `Data`。錯誤形狀與 [`Self::decrypt_logistics_callback`] 相同:
+    /// 內容相關的解密失敗收斂為同一則固定訊息(padding oracle 防護);
+    /// form 解碼失敗(`ResultData` 本身的 % 轉義)回
+    /// [`crate::Error::UrlEscape`]——該字串由送出方原樣寫下,攻擊者已知,
+    /// 不洩漏明文資訊。
     pub fn decrypt_temp_trade_established<T: serde::de::DeserializeOwned>(
         &self,
         result_data: &str,
