@@ -239,10 +239,7 @@ async fn undecodable_data_is_an_error() {
         .await
         .expect_err("Data under the wrong key must not decode");
     assert!(
-        matches!(
-            err,
-            Error::PaddingValue(_) | Error::PaddingBytes | Error::Message(_)
-        ),
+        matches!(err, Error::Padding | Error::Message(_)),
         "a wrong-key decrypt must fail at unpad or UTF-8, got {err:?}"
     );
 

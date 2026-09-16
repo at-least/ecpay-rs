@@ -743,13 +743,24 @@ impl Ecpay {
     ///    刻意不做業務層判斷；
     /// 5. 回應**純文字** `1|OK`（精確格式，含引號/小寫/換行都會觸發重送）。
     ///
+    /// # 錯誤形狀（padding oracle 防護）
+    ///
+    /// 此端點解密的是攻擊者可篡改的 CBC 密文，而信封不認證 `Data`，因此
+    /// 解密失敗的**內容相關**分支（padding/UTF-8/JSON/URL-escape）一律收斂
+    /// 為同一則固定訊息 [`crate::Error::Message`]（"callback payload failed
+    /// to decrypt or parse"），讓 oracle 無從區分；僅 base64/長度/金鑰長度
+    /// 這類只取決於攻擊者已輸入資訊的錯誤保持原樣。**呼叫端（商戶
+    /// handler）也必須配合**：對所有回呼錯誤回同一個 HTTP 回應、加
+    /// rate limit、絕不把 `Error` 的 Display 原文回進 response —— 見
+    /// README 的回呼處理清單。
+    ///
     /// 與物流側的 [`Ecpay::decrypt_logistics_callback`] 對稱：差別只在金鑰
     /// （ECPG 用 PAYMENT 組、物流用 LOGISTICS 組）。
     pub fn decrypt_ecpg_callback<T: serde::de::DeserializeOwned>(
         &self,
         posted_json: &str,
     ) -> Result<T> {
-        Self::decode_envelope(
+        Self::decode_envelope_opaque(
             posted_json,
             self.hash_key.as_bytes(),
             self.hash_iv.as_bytes(),

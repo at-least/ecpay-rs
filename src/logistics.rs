@@ -777,13 +777,17 @@ impl Ecpay {
     /// 錯誤形狀:body 不是帶 `TransCode` 鍵的 JSON 物件(或鍵存在但值不符
     /// 信封型別)時回 [`crate::Error::Message`]——訊息只引用有界、跳脫過的
     /// body 節錄,回呼 body 來自公開端點,不可原樣回灌到 log;`TransCode != 1`
-    /// 回 [`crate::Error::TransCode`];解密/解析失敗回各自的錯誤。
+    /// 回 [`crate::Error::TransCode`];解密失敗的**內容相關**分支
+    /// (padding/UTF-8/JSON/URL-escape)一律收斂為同一則固定訊息(防 CBC
+    /// padding oracle——此端點解密攻擊者可篡改的密文,詳見
+    /// [`crate::crypto`] 與 README 回呼處理清單;商戶 handler 應對所有錯誤
+    /// 回同一回應並加 rate limit);僅 base64/長度/金鑰長度錯誤保持原樣。
     pub fn decrypt_logistics_callback<T: serde::de::DeserializeOwned>(
         &self,
         posted_json: &str,
     ) -> Result<T> {
         let (key, iv) = self.logistics_keys();
-        Self::decode_envelope(posted_json, key, iv)
+        Self::decode_envelope_opaque(posted_json, key, iv)
     }
 
     /// 全方位物流 v2 狀態通知的應答體:綠界要求以同格式(AES 加密 JSON)

@@ -413,7 +413,11 @@ fn pad_pkcs7(ciphertext: &[u8], block_size: usize) -> Vec<u8> {
     out
 }
 
-/// Go `unpadPKCS7`, with the same error branches.
+/// Go `unpadPKCS7`, with the same error BRANCHES but one opaque error:
+/// both padding failure modes (a pad value out of range, and pad bytes that
+/// do not match the claimed count) collapse into [`Error::Padding`] with no
+/// detail, because `decrypt` runs on attacker-tampered callback ciphertext
+/// and a distinguishable padding failure is a CBC padding oracle.
 fn unpad_pkcs7(ciphertext: &[u8]) -> Result<&[u8]> {
     let length = ciphertext.len();
     if length == 0 {
@@ -421,14 +425,40 @@ fn unpad_pkcs7(ciphertext: &[u8]) -> Result<&[u8]> {
     }
     let unpadding = ciphertext[length - 1];
     if unpadding == 0 || unpadding as usize > AES_BLOCK_SIZE || unpadding as usize > length {
-        return Err(Error::PaddingValue(unpadding));
+        return Err(Error::Padding);
     }
     for &b in &ciphertext[length - unpadding as usize..] {
         if b != unpadding {
-            return Err(Error::PaddingBytes);
+            return Err(Error::Padding);
         }
     }
     Ok(&ciphertext[..length - unpadding as usize])
+}
+
+/// [`decrypt_data`] for attacker-reachable callback bodies
+/// (`decrypt_ecpg_callback` / `decrypt_logistics_callback` /
+/// `decrypt_temp_trade_established`). The AES envelope authenticates no
+/// `Data`, so a distinguishable failure between "bad padding" and a later
+/// stage (UTF-8, JSON, URL-escape) would let a caller on a public endpoint
+/// forge payload encryption without the key (CBC padding oracle / CBC-R).
+/// ALLOWLIST the errors that depend only on inputs the attacker already
+/// knows — their own ciphertext's base64 shape and the configured key/IV
+/// sizes — and collapse EVERYTHING else into one fixed message, so a future
+/// variant fails closed instead of silently reopening the oracle. The
+/// accepted residual is timing (padding fails before parsing); handlers must
+/// additionally answer every callback error uniformly (see README).
+pub(crate) fn decrypt_payload_uniform<T: DeserializeOwned>(
+    data: &str,
+    hash_key: &[u8],
+    hash_iv: &[u8],
+) -> Result<T> {
+    decrypt_data(data, hash_key, hash_iv).map_err(|e| match e {
+        Error::Base64(_)
+        | Error::AesKeySize(_)
+        | Error::InvalidIvLength { .. }
+        | Error::InvalidCiphertextLength(_) => e,
+        _ => Error::Message("ecpay: callback payload failed to decrypt or parse".into()),
+    })
 }
 
 /// serde helper for the AES-JSON money fields (ItemCount/ItemPrice/

@@ -443,6 +443,33 @@ impl Ecpay {
         Self::decode_aes_response(res, key, iv)
     }
 
+    /// [`Self::decode_envelope`] for the attacker-reachable callback
+    /// endpoints: identical except that every payload-content-dependent
+    /// failure (padding, UTF-8, JSON, URL-escape) collapses into one fixed
+    /// message via `decrypt_payload_uniform`, closing the CBC padding oracle.
+    /// The non-envelope body error keeps its bounded excerpt — whether the
+    /// body parses as an envelope at all depends only on bytes the sender
+    /// already knows.
+    pub(crate) fn decode_envelope_opaque<O: DeserializeOwned>(
+        body: &str,
+        key: &[u8],
+        iv: &[u8],
+    ) -> Result<O> {
+        let res = Self::parse_envelope(body).ok_or_else(|| {
+            Error::Message(format!(
+                "ecpay: body is not an AES-JSON envelope: {}",
+                body_excerpt(body)
+            ))
+        })?;
+        if res.trans_code != 1 {
+            return Err(Error::TransCode {
+                code: res.trans_code,
+                msg: res.trans_msg,
+            });
+        }
+        crate::crypto::decrypt_payload_uniform(&res.data, key, iv)
+    }
+
     /// The two v2 browser-flow endpoints (`PrintTradeDocument`,
     /// `RedirectToLogisticsSelection`) answer with a raw **text/html**
     /// auto-submitting form instead of an AES envelope (live-captured

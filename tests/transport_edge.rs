@@ -408,3 +408,82 @@ async fn status_error_display_is_bounded_but_the_field_keeps_the_body() {
         rendered.len()
     );
 }
+
+/// The callback boundary (`decrypt_ecpg_callback`, `decrypt_logistics_callback`,
+/// `decrypt_temp_trade_established`) decrypts attacker-tampered CBC ciphertext
+/// on public endpoints, and the AES envelope authenticates no `Data`. A
+/// padding oracle — any distinguishable difference between a payload that
+/// failed padding and one that failed a later stage — lets an attacker forge
+/// payload encryption (CBC-R) without the key. Every payload-content-dependent
+/// failure must therefore collapse into ONE fixed message. Base64/length/key
+/// errors stay distinct: they depend only on inputs the attacker already
+/// knows (their own ciphertext's shape), so they carry no plaintext signal.
+#[test]
+fn callback_payload_failures_are_indistinguishable() {
+    use base64::Engine;
+    let client = Ecpay {
+        hash_key: "0123456789abcdef".into(),
+        hash_iv: "0123456789abcdef".into(),
+        ..Default::default()
+    };
+    let key = b"0123456789abcdef";
+    let iv = b"0123456789abcdef";
+    let envelope = |data: &str| format!(r#"{{"TransCode":1,"TransMsg":"","Data":"{data}"}}"#);
+
+    // (1) Valid padding, valid UTF-8, not JSON.
+    let not_json = ecpay::encrypt(b"not json payload!!!", key, iv).unwrap();
+    // (2) Valid padding, not UTF-8.
+    let not_utf8 = ecpay::encrypt(&[0xFF; 19], key, iv).unwrap();
+    // (3) Invalid padding: flip the last ciphertext byte of (1) until decrypt
+    //     reports a padding failure (nearly every flip does; loop so the test
+    //     is deterministic).
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(&not_json)
+        .unwrap();
+    let mut bad_padding = String::new();
+    for flip in 1..=255u8 {
+        let mut r = raw.clone();
+        *r.last_mut().unwrap() ^= flip;
+        let ct = base64::engine::general_purpose::STANDARD.encode(&r);
+        if let Err(e) = ecpay::decrypt(&ct, key, iv) {
+            if e.to_string().contains("padding") {
+                bad_padding = ct;
+                break;
+            }
+        }
+    }
+    assert!(!bad_padding.is_empty(), "no flip produced invalid padding");
+    // (4) Valid padding, valid UTF-8, malformed URL escape (%zz).
+    let bad_escape = ecpay::encrypt(b"percent %zz tail!!!!!", key, iv).unwrap();
+
+    let errs: Vec<String> = [&not_json, &not_utf8, &bad_padding, &bad_escape]
+        .iter()
+        .map(|data| {
+            client
+                .decrypt_ecpg_callback::<serde_json::Value>(&envelope(data))
+                .expect_err("all four payloads must fail")
+                .to_string()
+        })
+        .collect();
+    for e in &errs {
+        assert_eq!(e, &errs[0], "padding oracle: payload failures differ");
+        let low = e.to_lowercase();
+        for word in ["padding", "utf", "json", "escape"] {
+            assert!(!low.contains(word), "leaky message {e:?} mentions {word}");
+        }
+    }
+    // The logistics callback and the temp-trade form callback must route
+    // through the same boundary.
+    for e in [
+        client
+            .decrypt_logistics_callback::<serde_json::Value>(&envelope(&not_utf8))
+            .expect_err("must fail")
+            .to_string(),
+        client
+            .decrypt_temp_trade_established::<serde_json::Value>(&envelope(&bad_padding))
+            .expect_err("must fail")
+            .to_string(),
+    ] {
+        assert_eq!(e, errs[0], "callback decoders must share one uniform error");
+    }
+}

@@ -82,10 +82,12 @@ pub enum Error {
     InvalidCiphertextLength(usize),
     /// Go: `empty ciphertext`.
     EmptyCiphertext,
-    /// Go: `invalid PKCS7 padding value: %d`.
-    PaddingValue(u8),
-    /// Go: `invalid PKCS7 padding bytes`.
-    PaddingBytes,
+    /// Invalid PKCS7 padding. One opaque variant for every padding failure:
+    /// the value and shape of the bad padding is **not** reported, because
+    /// these errors surface on attacker-reachable callback endpoints and a
+    /// distinguishable padding failure would give a CBC padding oracle
+    /// (see `crate::crypto`).
+    Padding,
     /// Go: `url.EscapeError` — `invalid URL escape "%zz"`.
     UrlEscape(String),
     /// Go: `invalid semicolon separator in query` (url.ParseQuery).
@@ -130,8 +132,7 @@ impl fmt::Display for Error {
             }
             Error::InvalidCiphertextLength(n) => write!(f, "invalid ciphertext length: {n}"),
             Error::EmptyCiphertext => write!(f, "empty ciphertext"),
-            Error::PaddingValue(v) => write!(f, "invalid PKCS7 padding value: {v}"),
-            Error::PaddingBytes => write!(f, "invalid PKCS7 padding bytes"),
+            Error::Padding => write!(f, "invalid PKCS7 padding"),
             Error::UrlEscape(esc) => write!(f, "invalid URL escape {esc:?}"),
             Error::SemicolonInQuery => write!(f, "invalid semicolon separator in query"),
             Error::UnsupportedEncryptType(n) => write!(f, "unsupported EncryptType: {n}"),

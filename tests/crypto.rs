@@ -134,14 +134,14 @@ fn test_decrypt_invalid_padding_value() {
     let block = [0u8; 16]; // all zero -> trailing byte 0
     let err = decrypt(&raw_cbc_encrypt(&block), CRYPTO_KEY, CRYPTO_IV)
         .expect_err("Decrypt should reject a zero padding value");
-    assert!(matches!(err, ecpay::Error::PaddingValue(0)), "{err:?}");
+    assert!(matches!(err, ecpay::Error::Padding), "{err:?}");
 
     // Last byte 0x20 (32) exceeds the AES block size -> invalid.
     let mut block2 = [0u8; 16];
     block2[15] = 0x20;
     let err = decrypt(&raw_cbc_encrypt(&block2), CRYPTO_KEY, CRYPTO_IV)
         .expect_err("Decrypt should reject a padding value larger than the block size");
-    assert!(matches!(err, ecpay::Error::PaddingValue(0x20)), "{err:?}");
+    assert!(matches!(err, ecpay::Error::Padding), "{err:?}");
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn test_decrypt_invalid_padding_bytes() {
     block[13] = 0x01; // wrong
     let err = decrypt(&raw_cbc_encrypt(&block), CRYPTO_KEY, CRYPTO_IV)
         .expect_err("Decrypt should reject inconsistent PKCS7 padding bytes");
-    assert!(matches!(err, ecpay::Error::PaddingBytes), "{err:?}");
+    assert!(matches!(err, ecpay::Error::Padding), "{err:?}");
 }
 
 #[test]
