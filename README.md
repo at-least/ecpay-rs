@@ -132,6 +132,32 @@ async fn return_url(params: HashMap<String, String>) -> &'static str {
 }
 ```
 
+#### 回呼處理清單(金流安全必讀)
+
+`verify_check_mac_value` 只證明「這個通知來自綠界、內容未被竄改」——它**不**
+證明通知是新鮮的,也**不**證明金額與你的訂單一致。收到回呼後,視為
+「付款成功」之前必須全部通過:
+
+1. **驗 MAC**:`verify_check_mac_value`(金流)或
+   `verify_logistics_check_mac_value`(國內物流,MD5);AES 信封服務用
+   `decrypt_ecpg_callback` / `decrypt_logistics_callback`(先驗 `TransCode`,
+   內層 `RtnCode` 自行檢查)。
+2. **去重**:以 `MerchantTradeNo`(或 `TradeNo`)查詢是否已處理過——綠界
+   會重送通知,同一筆通知可能抵達多次;冪等處理,勿重複出貨/開發票。
+3. **金額綁定**:將回呼的 `TradeAmt`(或 `EncryptTradeAmt`)與**你資料庫裡
+   的訂單金額**比對,不是只看 `RtnCode=1`。不要信任回呼自帶的金額作為
+   出貨依據。
+4. **以查詢確認為準(建議)**:高價值訂單在出貨前用 `order_search` /
+   `query_trade_info` 主動向綠界查詢一次交易狀態,回呼只作為觸發。
+5. **錯誤一律回同一個 HTTP 回應**:AES 回呼解密器對內容相關的解密失敗
+   (padding/UTF-8/JSON)刻意回同一則固定訊息(防 CBC padding oracle,
+   見 `decrypt` 的文件),你的 handler 也必須配合——所有驗證失敗回同一
+   status/body、**絕不**把 `Error` 的 Display 原文回進 response、加上
+   rate limit。金流回呼的回應體依規格:成功 `1|OK`(精確格式)、失敗
+   `0|...`。
+6. **Log 洩漏**:回呼參數與錯誤內容寫 log 時注意節制——回呼端點是公開
+   的,log 常常比資料庫更容易被讀到。
+
 ### 查詢訂單、關帳退刷
 
 ```rust
