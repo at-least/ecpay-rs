@@ -192,6 +192,58 @@ async fn get_token_by_trade_round_trips_the_proven_envelope() {
     assert_eq!(*seen_path.lock().unwrap(), "/Merchant/GetTokenbyTrade");
 }
 
+/// The encrypted `Data` plaintext must keep the STRUCT's field-declaration
+/// order (the Go/PHP reference wire), not a `serde_json::Value`'s
+/// alphabetical BTreeMap order: the envelope helper's MerchantID guard must
+/// never reorder the JSON it encrypts. The Value-based assertions above
+/// cannot see key order at all — this pins the exact plaintext text, so a
+/// serialize-via-Value refactor fails here instead of on the stage server.
+#[tokio::test]
+async fn data_plaintext_keeps_the_struct_field_order() {
+    let srv = spawn_http_server(|_p, body| {
+        let req: Value = serde_json::from_slice(body).expect("envelope is JSON");
+        // AES-decrypt Data, then undo aesURLEncode (%XX decode, `+` -> space)
+        // to recover the exact compact JSON text that was encrypted. The
+        // encoded form is pure ASCII, so byte-wise decoding is safe; the
+        // decoded bytes are valid UTF-8 (they were a JSON string).
+        let encoded = ecpay::decrypt(req["Data"].as_str().unwrap(), KEY, IV).unwrap();
+        let b = encoded.as_bytes();
+        let mut plain: Vec<u8> = Vec::with_capacity(b.len());
+        let hex = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+        let mut i = 0;
+        while i < b.len() {
+            match b[i] {
+                b'+' => {
+                    plain.push(b' ');
+                    i += 1;
+                }
+                b'%' => {
+                    let hi = hex(b[i + 1]).expect("encoder always writes 2 hex digits");
+                    let lo = hex(b[i + 2]).expect("encoder always writes 2 hex digits");
+                    plain.push(hi * 16 + lo);
+                    i += 3;
+                }
+                c => {
+                    plain.push(c);
+                    i += 1;
+                }
+            }
+        }
+        let plaintext = String::from_utf8(plain).expect("decoded Data is UTF-8 JSON");
+        assert_eq!(
+            plaintext,
+            serde_json::to_string(&token_input()).unwrap(),
+            "Data plaintext must be the struct serialized in field-declaration order"
+        );
+        envelope_reply(json!({"RtnCode": 1, "RtnMsg": "", "Token": "t", "TokenExpireDate": "e"}))
+    });
+    let out = client(srv, "http://unused/".into())
+        .get_token_by_trade(&token_input())
+        .await
+        .expect("call succeeds");
+    assert_eq!(out.rtn_code, 1);
+}
+
 /// Optional sub-objects and fields ride `Option` and must be OMITTED from
 /// the decrypted Data when unset (the PHP examples omit them — sending an
 /// empty object or null is a deviation), and a present sub-object omits its
