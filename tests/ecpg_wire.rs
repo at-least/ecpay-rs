@@ -558,25 +558,26 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
     .await
     .unwrap();
 
-    let d = datas.lock().unwrap();
-    let keys: Vec<&str> = d[0]
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(|k| k.as_str())
-        .collect();
-    assert_eq!(
-        keys,
-        ["MerchantTradeNo"],
-        "unset PlatformID/MerchantID must be omitted, got {keys:?}"
-    );
-    assert_eq!(d[0]["MerchantTradeNo"], "no-1");
-    assert_eq!(d[1]["PlatformID"], "platform-id");
-    assert_eq!(d[1]["MerchantID"], MERCHANT);
-    assert_eq!(d[2]["TradeNo"], "ecpay-trade-no");
-    assert_eq!(d[2]["Action"], "R");
-    assert_eq!(d[2]["TotalAmount"], 100);
-    drop(d);
+    {
+        let d = datas.lock().unwrap();
+        let keys: Vec<&str> = d[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        assert_eq!(
+            keys,
+            ["MerchantTradeNo"],
+            "unset PlatformID/MerchantID must be omitted, got {keys:?}"
+        );
+        assert_eq!(d[0]["MerchantTradeNo"], "no-1");
+        assert_eq!(d[1]["PlatformID"], "platform-id");
+        assert_eq!(d[1]["MerchantID"], MERCHANT);
+        assert_eq!(d[2]["TradeNo"], "ecpay-trade-no");
+        assert_eq!(d[2]["Action"], "R");
+        assert_eq!(d[2]["TotalAmount"], 100);
+    }
 
     // 4) A set-but-mismatched Data MerchantID never leaves the process:
     // port 1 is reserved, so an outbound request would fail with
