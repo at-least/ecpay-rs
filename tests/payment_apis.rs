@@ -82,6 +82,50 @@ async fn order_search_verifies_the_response_mac() {
     assert!(!got.contains_key("CheckMacValue"));
 }
 
+/// The verification digest is the one the REQUEST was signed under (the
+/// request builders here never send EncryptType, so SHA-256) — a response
+/// must not choose its own verification algorithm. A body carrying
+/// EncryptType=0 plus a VALID MD5 MAC is therefore rejected.
+#[tokio::test]
+async fn order_search_ignores_a_response_chosen_encrypt_type() {
+    let mut respond = map(&[
+        ("MerchantID", MERCHANT_ID),
+        ("MerchantTradeNo", "order_abc"),
+        ("TradeStatus", "1"),
+        ("EncryptType", "0"),
+    ]);
+    let md5 = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 0).unwrap();
+    respond.insert("CheckMacValue".to_owned(), md5);
+    let srv = spawn_http_server(move |_path, _body| {
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            respond
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("&")
+                .into_bytes(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    let err = client
+        .order_search(&ecpay::payment::OrderSearchParams {
+            merchant_trade_no: "order_abc".into(),
+            time_stamp: 1_700_000_000,
+            platform_id: None,
+        })
+        .await
+        .expect_err("a message-chosen digest must not verify the response");
+    assert!(
+        matches!(err, ecpay::Error::CheckMacValueMismatch),
+        "{err:?}"
+    );
+}
+
 #[tokio::test]
 async fn order_search_rejects_a_tampered_response_mac() {
     let srv = spawn_http_server(move |_path, _body| {

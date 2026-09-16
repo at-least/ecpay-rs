@@ -408,6 +408,12 @@ impl Ecpay {
         endpoint: &str,
         mut m: HashMap<String, String>,
     ) -> Result<BTreeMap<String, String>> {
+        // Verify with the digest the REQUEST was signed under (its own
+        // EncryptType field, defaulting to SHA-256) — never the response's:
+        // a verifier must not take its algorithm selector from the very
+        // message it is verifying.
+        let encrypt_type =
+            crate::crypto::parse_encrypt_type(m.get("EncryptType").map(String::as_str));
         let mac = self.generate_check_value(&m)?;
         m.insert("CheckMacValue".to_owned(), mac);
 
@@ -428,8 +434,6 @@ impl Ecpay {
         // signed, a false-positive CheckMacValueMismatch that order_search's
         // equivalent "not found" reply never exposed only because it happens
         // to echo the real MerchantID back.
-        let encrypt_type =
-            crate::crypto::parse_encrypt_type(query.get("EncryptType").map(String::as_str));
         if !crate::crypto::verify_mac(
             &got,
             crate::crypto::str_pairs(&query),
