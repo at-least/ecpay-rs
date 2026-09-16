@@ -515,8 +515,10 @@ async fn every_method_hits_its_exact_dual_domain_path() {
 }
 
 /// Query-family inputs: `PlatformID`/`MerchantID` are omitted from Data when
-/// `None` (the envelope MerchantID stands in), and ride along when `Some`;
-/// DoAction carries its required fields verbatim.
+/// `None` (the envelope MerchantID stands in), and ride along when `Some`
+/// (the client's own ID); DoAction carries its required fields verbatim. A
+/// set-but-mismatched Data MerchantID is rejected locally by the shared
+/// envelope guard instead of surfacing as ECPay's opaque `RtnCode != 1`.
 #[tokio::test]
 async fn query_inputs_omit_unset_platform_and_merchant_ids() {
     let datas: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
@@ -535,10 +537,10 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
     .await
     .unwrap();
 
-    // 2) Both ids set → they ride the Data.
+    // 2) Both ids set → they ride the Data (MerchantID = the client's own).
     ec.ecpg_query_trade(&EcpgTradeRefInput {
         platform_id: Some("platform-id".to_owned()),
-        merchant_id: Some("sub-merchant".to_owned()),
+        merchant_id: Some(MERCHANT.to_owned()),
         merchant_trade_no: "no-2".to_owned(),
     })
     .await
@@ -570,10 +572,29 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
     );
     assert_eq!(d[0]["MerchantTradeNo"], "no-1");
     assert_eq!(d[1]["PlatformID"], "platform-id");
-    assert_eq!(d[1]["MerchantID"], "sub-merchant");
+    assert_eq!(d[1]["MerchantID"], MERCHANT);
     assert_eq!(d[2]["TradeNo"], "ecpay-trade-no");
     assert_eq!(d[2]["Action"], "R");
     assert_eq!(d[2]["TotalAmount"], 100);
+    drop(d);
+
+    // 4) A set-but-mismatched Data MerchantID never leaves the process:
+    // port 1 is reserved, so an outbound request would fail with
+    // Error::Http — Error::Message proves the local guard fired.
+    let offline = client(
+        "http://127.0.0.1:1/Merchant/".to_owned(),
+        "http://127.0.0.1:1/1.0.0/".to_owned(),
+    );
+    let err = offline
+        .ecpg_query_trade(&EcpgTradeRefInput {
+            platform_id: None,
+            merchant_id: Some("sub-merchant".to_owned()),
+            merchant_trade_no: "no-4".to_owned(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Message(_)), "{err:?}");
+    assert!(err.to_string().contains("Data MerchantID"), "{err}");
 }
 
 /// Live stage probe: the TYPED `get_token_by_trade` wire bytes against the

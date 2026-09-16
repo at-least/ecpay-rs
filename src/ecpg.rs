@@ -480,7 +480,9 @@ impl Ecpay {
     /// PlatformID — 在此現狀下「Data MerchantID ≠ 信封」的請求只會被
     /// stage 以空訊息拒絕，本機先擋不會擋掉任何原本可行的流程。查詢家族
     /// （`EcpgTradeRefInput`/`EcpgPeriodActionInput`/`EcpgDoActionInput`）
-    /// 的 `MerchantID` 是 `Option`，省略時以信封為準，**不經此檢查**。
+    /// 的 `MerchantID` 是 `Option`：省略時以信封為準；帶了值則同樣會被
+    /// 共用 serializer 的 Data-MerchantID 防呆（`encrypt_checked`）在出網
+    /// 前比對。
     fn require_data_merchant_id(&self, data_merchant_id: &str) -> Result<()> {
         self.require_data_merchant_id_with(
             data_merchant_id,

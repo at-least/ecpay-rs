@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{decrypt_data, encrypt_data, query_unescape};
+use crate::crypto::{aes_url_encode, decrypt_data, encrypt, query_unescape};
 use crate::error::{Error, Result};
 use crate::Ecpay;
 
@@ -71,6 +71,41 @@ pub struct RqHeaderResponse {
 }
 
 impl Ecpay {
+    /// Serialize `input` to its exact wire JSON, enforce the Data-level
+    /// MerchantID contract, then encrypt. The single serializer behind every
+    /// AES-JSON envelope.
+    ///
+    /// The MerchantID contract: whenever the serialized `Data` carries a
+    /// top-level string `MerchantID` (B2C invoice, logistics v2/cross-border,
+    /// and the ECPG/B2B Data structs all do), a SET value must equal the
+    /// client's [`Ecpay::merchant_id`] — ECPay wants the ID in BOTH the
+    /// envelope and `Data`, and rejects a mismatch opaquely (`RtnCode != 1`,
+    /// no message). The check runs before any bytes go out. An empty value
+    /// passes through unchanged (legacy wire behavior; whether ECPay accepts
+    /// it is service-specific — the ECPG/B2B modules keep their earlier,
+    /// stricter field-level guard which rejects empty too). Inputs without a
+    /// Data-level MerchantID (key absent, or not a string) pass through.
+    fn encrypt_checked<T: Serialize + ?Sized>(
+        &self,
+        input: &T,
+        key: &[u8],
+        iv: &[u8],
+    ) -> Result<String> {
+        let json = serde_json::to_string(input)?;
+        let value: serde_json::Value = serde_json::from_str(&json)?;
+        if let Some(mid) = value.get("MerchantID").and_then(serde_json::Value::as_str) {
+            if !mid.is_empty() && mid != self.merchant_id {
+                return Err(Error::Message(format!(
+                    "ecpay: Data MerchantID must equal the client's MerchantID \
+                     (got {mid:?}, client has {:?}); ECPay rejects a mismatch opaquely \
+                     with RtnCode != 1 and no message",
+                    self.merchant_id
+                )));
+            }
+        }
+        encrypt(aes_url_encode(&json).as_bytes(), key, iv)
+    }
+
     /// Shared by the ECPG (站內付 2.0) and B2B invoice modules: ECPay wants
     /// the MerchantID in BOTH the AES envelope and inside the encrypted
     /// `Data`, and rejects a mismatch opaquely (RtnCode != 1, no message) —
@@ -420,7 +455,7 @@ impl Ecpay {
         key: &[u8],
         iv: &[u8],
     ) -> Result<String> {
-        let data = encrypt_data(input, key, iv)?;
+        let data = self.encrypt_checked(input, key, iv)?;
         let envelope = serde_json::json!({
             "MerchantID": merchant_id,
             "RqHeader": rq_header,
@@ -445,7 +480,8 @@ impl Ecpay {
     /// logistics v2, CrossBorder, B2B invoice): builds
     /// `{MerchantID, RqHeader, Data}` — deliberately without PlatformID, the
     /// shape the official PHP examples wire for these services — encrypts
-    /// `input` into `Data`, POSTs, gates on TransCode, decrypts into `O`.
+    /// `input` into `Data` (with [`Self::encrypt_checked`]'s Data-level
+    /// MerchantID guard), POSTs, gates on TransCode, decrypts into `O`.
     /// The B2C invoice envelope (`call_invoice_api`) keeps its own Go-port
     /// path because it always sends PlatformID and pins `Revision: "3.0.0"`.
     pub(crate) async fn post_aes_json<I: Serialize, O: DeserializeOwned>(
@@ -457,7 +493,7 @@ impl Ecpay {
         key: &[u8],
         iv: &[u8],
     ) -> Result<O> {
-        let data = encrypt_data(input, key, iv)?;
+        let data = self.encrypt_checked(input, key, iv)?;
         let envelope = serde_json::json!({
             "MerchantID": merchant_id,
             "RqHeader": rq_header,
@@ -487,7 +523,8 @@ impl Ecpay {
         Self::decode_envelope(&body, key, iv)
     }
 
-    /// Go `CallInvoiceAPI`: encrypt the input into the AES-JSON envelope, POST
+    /// Go `CallInvoiceAPI`: encrypt the input into the AES-JSON envelope
+    /// (with [`Self::encrypt_checked`]'s Data-level MerchantID guard), POST
     /// it, gate on TransCode, and decrypt Data into the typed output.
     pub async fn call_invoice_api<I: Serialize, O: DeserializeOwned>(
         &self,
@@ -497,7 +534,7 @@ impl Ecpay {
         let base = self.invoice_base_url();
         let endpoint = format!("{base}{name}");
         let (key, iv) = self.invoice_keys();
-        let data = encrypt_data(input, key, iv)?;
+        let data = self.encrypt_checked(input, key, iv)?;
         let req = Request {
             platform_id: self.platform_id.clone(),
             merchant_id: self.merchant_id.clone(),

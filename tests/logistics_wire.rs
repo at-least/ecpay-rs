@@ -1332,3 +1332,21 @@ async fn crossborder_query_and_print_share_the_ref_input_shape() {
         assert_eq!(out["RtnCode"], 1);
     }
 }
+
+/// The AES-JSON v2 envelope's Data-level MerchantID contract: an input
+/// carrying a mismatched Data MerchantID is rejected locally (before any
+/// bytes go out; the unreachable base URL is never touched) instead of
+/// surfacing as ECPay's opaque `RtnCode != 1`.
+#[tokio::test]
+async fn allinone_v2_inputs_carrying_a_mismatched_data_merchant_id_are_rejected_locally() {
+    let client = logistics_sdk("http://127.0.0.1:1/".to_owned());
+    let err = client
+        .allinone_query_logistics_trade_info(&AllInOneQueryInput {
+            merchant_id: "someone_else".into(),
+            logistics_id: "1".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ecpay::Error::Message(_)), "{err:?}");
+    assert!(err.to_string().contains("Data MerchantID"), "{err}");
+}

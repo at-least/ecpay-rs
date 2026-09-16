@@ -17,7 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{api_error, Result};
+use crate::error::{api_error, Error, Result};
 use crate::wire::wire_enum;
 use crate::Ecpay;
 
@@ -330,11 +330,28 @@ pub struct VoidWithReIssueOutput {
 impl Ecpay {
     /// VoidWithReIssue (作廢重開) is a command like Issue/Invalid, so a
     /// non-success RtnCode is surfaced as [`crate::ApiError`] rather than
-    /// swallowed.
+    /// swallowed. Its Data nests TWO MerchantIDs (`VoidModel` and
+    /// `IssueModel`) below the top level, so the shared envelope guard
+    /// ([`crate::Ecpay::encrypt_checked`], top-level only) cannot see them —
+    /// both are checked here with the same rule (a SET value must equal the
+    /// client's MerchantID; empty passes through), before any bytes go out.
     pub async fn void_with_reissue(
         &self,
         input: &VoidWithReIssueInput,
     ) -> Result<VoidWithReIssueOutput> {
+        for (label, mid) in [
+            ("VoidModel.MerchantID", &input.void_model.merchant_id),
+            ("IssueModel.MerchantID", &input.issue_model.merchant_id),
+        ] {
+            if !mid.is_empty() && mid != &self.merchant_id {
+                return Err(Error::Message(format!(
+                    "ecpay: {label} must equal the client's MerchantID \
+                     (got {mid:?}, client has {:?}); ECPay rejects a mismatch opaquely \
+                     with RtnCode != 1 and no message",
+                    self.merchant_id
+                )));
+            }
+        }
         let output: VoidWithReIssueOutput = self.call_invoice_api("VoidWithReIssue", input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
         Ok(output)

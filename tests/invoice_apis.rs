@@ -5,7 +5,10 @@
 
 use std::sync::{Arc, Mutex};
 
-use ecpay::{encrypt, encrypt_data, ApiError, Ecpay, Error, IssueInput};
+use ecpay::{
+    encrypt, encrypt_data, ApiError, Ecpay, Error, IssueInput, IssueModel, VoidModel,
+    VoidWithReIssueInput,
+};
 
 mod common;
 use common::spawn_http_server;
@@ -302,4 +305,48 @@ async fn envelope_carries_the_platform_id() {
         *captured.lock().unwrap(),
         vec![String::new(), "3002599".to_owned()]
     );
+}
+
+/// The Data-level MerchantID contract covers B2C invoice inputs too: a
+/// set-but-mismatched Data MerchantID is rejected locally — before any
+/// bytes go out (the unreachable base URL below is never touched) —
+/// instead of surfacing as ECPay's opaque `RtnCode != 1`. An EMPTY value is
+/// deliberately passed through unchanged (legacy wire behavior; whether
+/// ECPay accepts it is service-specific and unproven for B2C).
+/// `VoidWithReIssue` nests its two MerchantIDs below the top level and is
+/// checked field-by-field (`IssueModel` fails even with a valid `VoidModel`).
+#[tokio::test]
+async fn b2c_inputs_carrying_a_mismatched_data_merchant_id_are_rejected_locally() {
+    // Port 1 is reserved and never served; an outbound request would fail
+    // with Error::Http, so matching Error::Message proves the local guard.
+    let client = client("http://127.0.0.1:1/B2CInvoice/".to_owned());
+
+    let mismatch = IssueInput {
+        merchant_id: "someone_else".into(),
+        ..Default::default()
+    };
+    let err = client.issue(&mismatch).await.unwrap_err();
+    assert!(matches!(err, Error::Message(_)), "{err:?}");
+    assert!(err.to_string().contains("Data MerchantID"), "{err}");
+
+    // Empty passes through to the wire (fails here only as the transport).
+    let empty = IssueInput {
+        merchant_id: String::new(),
+        ..Default::default()
+    };
+    let err = client.issue(&empty).await.unwrap_err();
+    assert!(matches!(err, Error::Http(_)), "{err:?}");
+
+    let nested = VoidWithReIssueInput {
+        void_model: VoidModel {
+            merchant_id: "2000132".into(),
+            ..Default::default()
+        },
+        issue_model: IssueModel {
+            merchant_id: "someone_else".into(),
+            ..Default::default()
+        },
+    };
+    let err = client.void_with_reissue(&nested).await.unwrap_err();
+    assert!(err.to_string().contains("IssueModel.MerchantID"), "{err}");
 }
