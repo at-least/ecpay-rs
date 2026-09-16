@@ -332,7 +332,7 @@ impl Ecpay {
     /// non-success RtnCode is surfaced as [`crate::ApiError`] rather than
     /// swallowed. Its Data nests TWO MerchantIDs (`VoidModel` and
     /// `IssueModel`) below the top level, so the shared envelope guard
-    /// ([`crate::Ecpay::encrypt_checked`], top-level only) cannot see them —
+    /// (`encrypt_checked`, top-level only) cannot see them —
     /// both are checked here with the same rule (a SET value must equal the
     /// client's MerchantID; empty passes through), before any bytes go out.
     pub async fn void_with_reissue(

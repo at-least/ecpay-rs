@@ -524,7 +524,7 @@ impl Ecpay {
     }
 
     /// Go `CallInvoiceAPI`: encrypt the input into the AES-JSON envelope
-    /// (with [`Self::encrypt_checked`]'s Data-level MerchantID guard), POST
+    /// (with `encrypt_checked`'s Data-level MerchantID guard), POST
     /// it, gate on TransCode, and decrypt Data into the typed output.
     pub async fn call_invoice_api<I: Serialize, O: DeserializeOwned>(
         &self,

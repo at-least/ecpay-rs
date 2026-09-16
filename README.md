@@ -49,9 +49,6 @@ B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
     攤平的單一物件,不是規格頁講的 `AllowanceInfo` 陣列。
   - ⚠️ 取消線上折讓是獨立端點 `AllowanceInvalidByCollegiate`(規格頁
     7913.md),官方 PHP SDK 沒有對應範例,容易誤用 `AllowanceInvalid`。
-- **以官方實作為測試基準**:測試向量由「真的」官方 Python SDK 執行產生
-  (17 種 `create_order` 情境逐欄位比對、11 條驗證錯誤訊息原樣比對、
-  CheckMacValue SHA-256/MD5、AES-CBC 官方向量、.NET UrlEncode 契約)。
 - **typed API + 逃生口**: `AioCheckOutParams` 型別化參數(必填欄位為
   非 `Option` 型別;空值/長度以官方 SDK 同款訊息在執行期驗證),另有
   `extra: BTreeMap<String, String>` 收容未模型化的新參數;
@@ -195,6 +192,7 @@ let client = Ecpay {
 | `credit_card_period_action` | `Ecpay::credit_card_period_action` |
 | `gen_html_post_form` | `AioCheckOut::html_form`(屬性值已做 HTML escape) |
 | `generate_check_value` | `Ecpay::generate_check_value` / 自由函式 `check_mac_value` |
+| —(Go 版移植,0.4 起補齊驗證) | `Ecpay::query_trade_info`(typed 查詢,驗證回應 CheckMacValue,請求驗證同 `order_search`) |
 | —(Go 版移植) | 發票:`issue`、`void_with_reissue`、`invalid`、`get_issue`、`get_invalid`、`invoice_notify`、`check_barcode`、`check_love_code`、`get_company_name_by_tax_id`、`get_gov_invoice_word_setting`、`get_invoice_word_setting` |
 | —(比對 `ECPay/SDK_PHP` 官方範例/規格頁後新增) | 發票延遲開立:`delay_issue`、`trigger_issue`、`cancel_delay_issue`;折讓:`allowance`、`allowance_invalid`、`allowance_by_collegiate`、`allowance_invalid_by_collegiate`、`get_allowance`、`get_allowance_invalid` |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **ECPG 站內付 2.0**(`ecpay::ecpg`):`get_token_by_trade`、`create_payment`、綁卡 6 支、查詢/請款動作 6 支,共 14 支 |
