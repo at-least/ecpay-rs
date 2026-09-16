@@ -45,6 +45,21 @@ _非破壞性：_
   （改回 `false` / 空 MAC + `debug_assert`）；`logistics_keys` 回傳
   `(&str, &str)`，刪除不可達的 UTF-8 錯誤路徑；CheckMacValue 前像改以
   `write!` 組字串（少一次 per-pair 配置）。
+- **國內物流錯誤訊息文字加上界**（全庫審查）：`0|<訊息>` 業務拒絕與
+  「2xx 非簽章 query（HTML 錯誤頁）」兩條 `Error::Message` 路徑，先前把
+  回應 body 原文（上限 1 MiB）整段塞進錯誤字串；現在分別以
+  `truncate_for_display`（verbatim-but-bounded，與 `PaymentStatus`/
+  `InvoiceStatus` 的 Display 同一 512 字元契約）與 `body_excerpt`
+  （有界 + 跳脫，與 AES-JSON "not an envelope" 錯誤同款）截斷——錯誤
+  訊息不再可能被單一回應灌爆 log 行。
+- **`LogisticsForm` 欄位順序確定性**（全庫審查）：六個瀏覽器表單建構點
+  改走統一的排序建構（鍵 bytewise 排序，同 `AioCheckOut`）。簽章本就算
+  在 map 上、欄位順序對 wire 無差異，但先前 `HashMap` 迭代順序讓每次
+  render 的 hidden input 順序隨機——無法測試、diff 噪音大。
+- 新增 wire 釘序測試：ECPG `Data` 明文必須保持 struct 欄位宣告順序
+  （`serde_json::Value` 的 BTreeMap 會重排金鑰——先前嘗試把
+  `encrypt_checked` 改走 `to_value` 即因此改變加密位元組，已撤銷；
+  舊測試解密成 Value 比對看不見順序，此測試釘住明文全文）。
 
 ## 0.4.0 — 2026-09-16
 
