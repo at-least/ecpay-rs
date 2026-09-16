@@ -760,3 +760,59 @@ fn reply_payment_type_maps_known_codes_only() {
     );
     assert_eq!(reply_payment_type(""), None);
 }
+
+/// Optional extend fields carry the spec's max lengths, like the base
+/// optional fields always have. The official SDK length-checks only its
+/// REQUIRED strings (`check_required_parameter`); this crate is deliberately
+/// stricter — and with this test uniformly so: every field whose spec
+/// declares a max now fails client-side with the SDK's message instead of
+/// leaking an overlong value to ECPay's server-side rejection.
+#[test]
+fn optional_extend_fields_reject_overlong_values() {
+    fn over(_p: &mut AioCheckOutParams, n: usize) -> String {
+        "x".repeat(n)
+    }
+    type Case = (&'static str, fn(&mut AioCheckOutParams), &'static str);
+    let cases: &[Case] = &[
+        ("Language", |p| p.language = Some(over(p, 4)), "3"),
+        (
+            "MerchantMemberID",
+            |p| p.merchant_member_id = Some(over(p, 31)),
+            "30",
+        ),
+        ("Redeem", |p| p.redeem = Some(over(p, 2)), "1"),
+        (
+            "PeriodReturnURL",
+            |p| {
+                p.credit_installment = Some("3".into());
+                p.period_return_url = Some(over(p, 201));
+            },
+            "200",
+        ),
+        (
+            "PaymentInfoURL",
+            |p| p.payment_info_url = Some(over(p, 201)),
+            "200",
+        ),
+        (
+            "ClientRedirectURL",
+            |p| p.client_redirect_url = Some(over(p, 201)),
+            "200",
+        ),
+        ("Desc_1", |p| p.desc_1 = Some(over(p, 21)), "20"),
+        ("Desc_4", |p| p.desc_4 = Some(over(p, 21)), "20"),
+    ];
+    for (name, set, want_max) in cases {
+        let mut p = base(ChoosePayment::Credit);
+        set(&mut p);
+        let err = sdk()
+            .aio_check_out(&p)
+            .err()
+            .unwrap_or_else(|| panic!("{name} overlong must be rejected"));
+        let err = match err {
+            Error::Validation(m) => m,
+            other => panic!("expected Error::Validation, got {other:?}"),
+        };
+        assert_eq!(err, format!("{name} max langth is {want_max}."), "{name}");
+    }
+}

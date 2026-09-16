@@ -340,6 +340,20 @@ impl Ecpay {
         optional_str("CustomField2", &p.custom_field2, 50)?;
         optional_str("CustomField3", &p.custom_field3, 50)?;
         optional_str("CustomField4", &p.custom_field4, 50)?;
+        // 延伸參數的長度上限（官方 SDK 的 check_required_parameter 只驗
+        // required 字串，這些 optional 欄位它從不驗；本 crate 對基本
+        // optional 欄位一律驗長度，這裡補齊同一標準——過長值在客戶端就
+        // 擋下，而不是流到綠界換一個伺服器端錯誤）。
+        optional_str("Redeem", &p.redeem, 1)?;
+        optional_str("MerchantMemberID", &p.merchant_member_id, 30)?;
+        optional_str("PaymentInfoURL", &p.payment_info_url, 200)?;
+        optional_str("ClientRedirectURL", &p.client_redirect_url, 200)?;
+        optional_str("Desc_1", &p.desc_1, 20)?;
+        optional_str("Desc_2", &p.desc_2, 20)?;
+        optional_str("Desc_3", &p.desc_3, 20)?;
+        optional_str("Desc_4", &p.desc_4, 20)?;
+        optional_str("Language", &p.language, 3)?;
+        optional_str("PeriodReturnURL", &p.period_return_url, 200)?;
 
         // 付款子方式 WebATM 大眾銀行跟永豐銀行已經無法使用
         if let Some(sub) = &p.choose_sub_payment {
