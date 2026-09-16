@@ -150,13 +150,14 @@ pub(crate) fn str_pairs<'a>(
 fn sorted_pairs<'a>(
     pairs: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> Vec<(&'a str, &'a str)> {
-    let mut pairs: Vec<(&str, &str)> = pairs.into_iter().collect();
-    pairs.sort_by(|a, b| {
-        a.0.to_lowercase()
-            .cmp(&b.0.to_lowercase())
-            .then_with(|| a.0.cmp(b.0))
-    });
-    pairs
+    // Decorate-sort-undecorate: lowercase each key once (O(n) allocations)
+    // instead of on every comparison.
+    let mut decorated: Vec<(String, &str, &str)> = pairs
+        .into_iter()
+        .map(|(k, v)| (k.to_lowercase(), k, v))
+        .collect();
+    decorated.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    decorated.into_iter().map(|(_, k, v)| (k, v)).collect()
 }
 
 /// Go `HashMac`: the "k=v" pairs (joined by &, wrapped in HashKey/HashIV)
