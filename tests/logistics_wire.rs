@@ -1402,3 +1402,158 @@ async fn empty_data_merchant_id_is_refused_before_any_bytes_go_out() {
         "no bytes may reach the wire without a Data MerchantID"
     );
 }
+
+/// A `0|` rejection whose message text is huge (a hostile or misbehaving
+/// endpoint behind the configured logistics URL) must not be able to push
+/// megabytes of text into one error string: like every other server-body
+/// echo in this crate (`PaymentStatus`/`InvoiceStatus` Display), the
+/// message carries at most [`ecpay`] BODY_EXCERPT_CHARS (512) chars
+/// verbatim plus the truncation notice with the total size.
+#[tokio::test]
+async fn oversized_status_rejection_text_is_bounded() {
+    let server = spawn_http_server(move |_path, _body| {
+        (
+            200,
+            "text/plain".into(),
+            format!("0|{}", "x".repeat(4096)).into_bytes(),
+        )
+    });
+    let err = logistics_sdk(server)
+        .logistics_query_logistics_trade_info(&DomesticQueryInput {
+            all_pay_logistics_id: "1".into(),
+            time_stamp: None,
+        })
+        .await
+        .expect_err("0| must fail");
+    match &err {
+        ecpay::Error::Message(m) => {
+            assert!(m.starts_with("ecpay logistics: status 0: "), "{m}");
+            assert!(
+                m.contains("(truncated; 4096 bytes total)"),
+                "the truncation notice with the total size must ride along: {m}"
+            );
+            assert!(m.len() < 1024, "message must be bounded: {} chars", m.len());
+        }
+        other => panic!("expected Error::Message, got {other:?}"),
+    }
+}
+
+/// The "response is not a signed query" branch (an HTML/text error page on
+/// a 2xx) must be bounded AND escaped: the body goes into a log line, so a
+/// 4096-byte page cannot flood it and a raw newline cannot forge one —
+/// same contract as `body_excerpt` on the AES-JSON "not an envelope" path.
+#[tokio::test]
+async fn oversized_non_query_body_error_is_bounded_and_escaped() {
+    let page = format!("<html>\n{}\n</html>", "x".repeat(4096));
+    let server =
+        spawn_http_server(move |_path, _body| (200, "text/html".into(), page.as_bytes().to_vec()));
+    let err = logistics_sdk(server)
+        .logistics_query_logistics_trade_info(&DomesticQueryInput {
+            all_pay_logistics_id: "1".into(),
+            time_stamp: None,
+        })
+        .await
+        .expect_err("a 2xx non-query must fail");
+    match &err {
+        ecpay::Error::Message(m) => {
+            assert!(m.contains("not a signed query"), "{m}");
+            // body_excerpt's documented shape: `… (N bytes total)`.
+            assert!(
+                m.contains("bytes total)"),
+                "the truncation notice with the total size must ride along: {m}"
+            );
+            assert!(m.len() < 1024, "message must be bounded: {} chars", m.len());
+            assert!(!m.contains('\n'), "newlines must be escaped: {m:?}");
+            // The excerpt is Debug-quoted (body_excerpt): the opening quote
+            // proves the escaping wrapper, not just absence of newlines.
+            assert!(
+                m.contains(": \"<html>"),
+                "the body excerpt must be Debug-quoted: {m:?}"
+            );
+        }
+        other => panic!("expected Error::Message, got {other:?}"),
+    }
+}
+
+/// The rendered logistics forms must be deterministic across calls, like
+/// `AioCheckOut` (transport_edge's `aio_check_out_is_deterministic`): the
+/// MAC is computed over the map, so field ORDER is wire-irrelevant — but a
+/// form whose hidden inputs reshuffle on every render is untestable and
+/// diffs badly. ALL six browser-form builders must render one stable HTML
+/// string, with the hidden inputs in sorted key order.
+#[test]
+fn logistics_forms_render_deterministically() {
+    let sdk = logistics_sdk("https://logistics-stage.ecpay.com.tw/".into());
+    let build_all = || -> Vec<(String, String)> {
+        let forms: Vec<(&str, ecpay::logistics::LogisticsForm)> = vec![
+            (
+                "create",
+                sdk.logistics_create_form(&LogisticsCreateInput {
+                    client_reply_url: Some("https://example.com/client".into()),
+                    ..sample_create()
+                })
+                .unwrap(),
+            ),
+            (
+                "map",
+                sdk.logistics_map_form(&MapInput {
+                    merchant_trade_no: "WIRE0000001".into(),
+                    logistics_type: "CVS".into(),
+                    logistics_sub_type: "FAMI".into(),
+                    is_collection: "N".into(),
+                    server_reply_url: "https://example.com/reply".into(),
+                })
+                .unwrap(),
+            ),
+            (
+                "test_data",
+                sdk.logistics_create_test_data_form("FAMI", "https://example.com/client")
+                    .unwrap(),
+            ),
+            (
+                "print_doc",
+                sdk.logistics_print_trade_document_form("1717876").unwrap(),
+            ),
+            (
+                "print_c2c",
+                sdk.logistics_print_c2c_form(
+                    PrintC2c::UniMart,
+                    "1717812",
+                    "C9680734",
+                    Some("4551"),
+                )
+                .unwrap(),
+            ),
+            (
+                "crossborder_map",
+                sdk.crossborder_map_form(&CrossBorderMapInput {
+                    merchant_trade_no: "WIRE0000001".into(),
+                    logistics_type: "CB".into(),
+                    logistics_sub_type: "UNIMARTCBCVS".into(),
+                    destination: "SG".into(),
+                    server_reply_url: "https://example.com/reply".into(),
+                })
+                .unwrap(),
+            ),
+        ];
+        forms
+            .into_iter()
+            .map(|(label, form)| {
+                let keys: Vec<&str> = form.pairs().iter().map(|(k, _)| k.as_str()).collect();
+                assert!(
+                    keys.windows(2).all(|w| w[0] < w[1]),
+                    "{label}: pairs must be sorted by key, got {keys:?}"
+                );
+                (label.to_owned(), form.html_form())
+            })
+            .collect()
+    };
+    let first = build_all();
+    for _ in 0..20 {
+        assert_eq!(
+            build_all(),
+            first,
+            "every builder must render one stable HTML"
+        );
+    }
+}

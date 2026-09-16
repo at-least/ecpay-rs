@@ -33,7 +33,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::client::{render_auto_submit_form, unix_now};
+use crate::client::{body_excerpt, render_auto_submit_form, truncate_for_display, unix_now};
 use crate::crypto::{check_mac_value, verify_mac};
 use crate::error::{Error, Result};
 use crate::Ecpay;
@@ -51,6 +51,17 @@ pub struct LogisticsForm {
 }
 
 impl LogisticsForm {
+    /// Build from the signed params map, the pairs sorted by key (bytewise,
+    /// like [`crate::payment::AioCheckOut`]): field order is wire-irrelevant
+    /// (the MAC was computed over the map), but a form whose hidden inputs
+    /// reshuffle on every render is untestable — the rendered HTML must be
+    /// deterministic across calls.
+    fn new(action: String, params: HashMap<String, String>) -> Self {
+        let mut pairs: Vec<(String, String)> = params.into_iter().collect();
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        Self { action, pairs }
+    }
+
     /// The endpoint the form POSTs to.
     pub fn action(&self) -> &str {
         &self.action
@@ -129,7 +140,7 @@ impl Ecpay {
             let status = status.unwrap_or_default();
             return Err(Error::Message(format!(
                 "ecpay logistics: status {status}: {}",
-                query.trim()
+                truncate_for_display(query.trim())
             )));
         }
         if !(200..300).contains(&http_status) {
@@ -140,10 +151,12 @@ impl Ecpay {
         }
         // An HTML/text error page on a 2xx has no status prefix and no '='
         // (parse_qsl would read it as one valueless key and the missing MAC
-        // would then look like a mismatch) — surface the raw body instead.
+        // would then look like a mismatch) — surface it bounded and escaped
+        // (body_excerpt), like the AES-JSON "not an envelope" error.
         if !query.contains('=') {
             return Err(Error::Message(format!(
-                "ecpay logistics: response is not a signed query: {text:?}"
+                "ecpay logistics: response is not a signed query: {}",
+                body_excerpt(&text)
             )));
         }
         let mut fields = crate::client::parse_qsl(query);
@@ -687,10 +700,10 @@ impl Ecpay {
     pub fn logistics_create_form(&self, input: &LogisticsCreateInput) -> Result<LogisticsForm> {
         let mut m = self.domestic_base_params(input)?;
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm {
-            action: format!("{}Express/Create", self.logistics_base_url()),
-            pairs: m.into_iter().collect(),
-        })
+        Ok(LogisticsForm::new(
+            format!("{}Express/Create", self.logistics_base_url()),
+            m,
+        ))
     }
 
     /// 電子地圖選店 (`Express/map`)。消費者選完門市後,綠界 POST 回
@@ -711,10 +724,10 @@ impl Ecpay {
         m.insert("IsCollection".to_owned(), input.is_collection.clone());
         m.insert("ServerReplyURL".to_owned(), input.server_reply_url.clone());
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm {
-            action: format!("{}Express/map", self.logistics_base_url()),
-            pairs: m.into_iter().collect(),
-        })
+        Ok(LogisticsForm::new(
+            format!("{}Express/map", self.logistics_base_url()),
+            m,
+        ))
     }
 
     /// 產生 B2C 測試資料 (`Express/CreateTestData`,僅測試環境):
@@ -729,10 +742,10 @@ impl Ecpay {
         m.insert("LogisticsSubType".to_owned(), logistics_sub_type.to_owned());
         m.insert("ClientReplyURL".to_owned(), client_reply_url.to_owned());
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm {
-            action: format!("{}Express/CreateTestData", self.logistics_base_url()),
-            pairs: m.into_iter().collect(),
-        })
+        Ok(LogisticsForm::new(
+            format!("{}Express/CreateTestData", self.logistics_base_url()),
+            m,
+        ))
     }
 
     /// 列印 B2C 紙本出貨單 (`helper/printTradeDocument`,路徑大小寫依官方範例)。
@@ -747,10 +760,10 @@ impl Ecpay {
             all_pay_logistics_id.to_owned(),
         );
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm {
-            action: format!("{}helper/printTradeDocument", self.logistics_base_url()),
-            pairs: m.into_iter().collect(),
-        })
+        Ok(LogisticsForm::new(
+            format!("{}helper/printTradeDocument", self.logistics_base_url()),
+            m,
+        ))
     }
 
     /// 列印 C2C 交貨便標籤(全家/萊爾富/統一/OK 四個端點由 [`PrintC2c`]
@@ -773,10 +786,10 @@ impl Ecpay {
             m.insert("CVSValidationNo".to_owned(), v.to_owned());
         }
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm {
-            action: format!("{}{}", self.logistics_base_url(), target.path()),
-            pairs: m.into_iter().collect(),
-        })
+        Ok(LogisticsForm::new(
+            format!("{}{}", self.logistics_base_url(), target.path()),
+            m,
+        ))
     }
 
     // --- Callbacks ---
@@ -1346,9 +1359,9 @@ impl Ecpay {
         );
         m.insert("Destination".to_owned(), input.destination.clone());
         m.insert("ServerReplyURL".to_owned(), input.server_reply_url.clone());
-        Ok(LogisticsForm {
-            action: format!("{}CrossBorder/Map", self.logistics_base_url()),
-            pairs: m.into_iter().collect(),
-        })
+        Ok(LogisticsForm::new(
+            format!("{}CrossBorder/Map", self.logistics_base_url()),
+            m,
+        ))
     }
 }

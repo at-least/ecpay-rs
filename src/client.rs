@@ -633,7 +633,7 @@ pub(crate) const BODY_EXCERPT_CHARS: usize = 512;
 /// status errors (`Error::PaymentStatus`/`InvoiceStatus`) instead render
 /// their bodies through [`truncate_for_display`] — verbatim-but-bounded,
 /// keeping the Go-parity `body=%s` shape for normal server responses.
-fn body_excerpt(body: &str) -> String {
+pub(crate) fn body_excerpt(body: &str) -> String {
     let mut chars = body.chars();
     let head: String = chars.by_ref().take(BODY_EXCERPT_CHARS).collect();
     if chars.next().is_some() {
