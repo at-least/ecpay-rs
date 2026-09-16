@@ -173,11 +173,20 @@ impl Ecpay {
     /// `Timestamp` + `Revision: "1.0.0"`, signed with the logistics keys.
     /// `path` is appended to the logistics base verbatim, e.g.
     /// `Express/v2/QueryLogisticsTradeInfo` or `CrossBorder/Create`.
+    /// `data_merchant_id` is the input's own `MerchantID` field when its
+    /// struct carries one (the official-examples convention): empty or
+    /// envelope-mismatched values are refused locally, because ECPay answers
+    /// them with an opaque `RtnCode != 1` and no message. Inputs without a
+    /// `MerchantID` field pass `None`.
     pub(crate) async fn post_logistics_aes<I: Serialize, O: DeserializeOwned>(
         &self,
         path: &str,
+        data_merchant_id: Option<&str>,
         input: &I,
     ) -> Result<O> {
+        if let Some(mid) = data_merchant_id {
+            self.require_data_merchant_id_with(mid, "")?;
+        }
         let endpoint = format!("{}{}", self.logistics_base_url(), path);
         let rq_header = serde_json::json!({
             "Timestamp": unix_now(),
@@ -190,11 +199,16 @@ impl Ecpay {
 
     /// The two v2 BROWSER-flow endpoints answer raw text/html (live-captured
     /// 2026-09), not an AES envelope — see [`Self::post_aes_json_raw`].
+    /// `data_merchant_id` follows [`Self::post_logistics_aes`].
     pub(crate) async fn post_logistics_aes_raw(
         &self,
         path: &str,
+        data_merchant_id: Option<&str>,
         input: &impl Serialize,
     ) -> Result<String> {
+        if let Some(mid) = data_merchant_id {
+            self.require_data_merchant_id_with(mid, "")?;
+        }
         let endpoint = format!("{}{}", self.logistics_base_url(), path);
         let rq_header = serde_json::json!({
             "Timestamp": unix_now(),
@@ -1019,7 +1033,7 @@ impl Ecpay {
         &self,
         input: &CreateByTempTradeInput,
     ) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/CreateByTempTrade", input)
+        self.post_logistics_aes("Express/v2/CreateByTempTrade", None, input)
             .await
     }
 
@@ -1028,7 +1042,7 @@ impl Ecpay {
         &self,
         input: &AllInOneCreateTestDataInput,
     ) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/CreateTestData", input)
+        self.post_logistics_aes("Express/v2/CreateTestData", Some(&input.merchant_id), input)
             .await
     }
 
@@ -1037,13 +1051,17 @@ impl Ecpay {
         &self,
         input: &AllInOneQueryInput,
     ) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/QueryLogisticsTradeInfo", input)
-            .await
+        self.post_logistics_aes(
+            "Express/v2/QueryLogisticsTradeInfo",
+            Some(&input.merchant_id),
+            input,
+        )
+        .await
     }
 
     /// 更新暫存物流訂單 (`Express/v2/UpdateTempTrade`)。
     pub async fn allinone_update_temp_trade(&self, input: &UpdateTempTradeInput) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/UpdateTempTrade", input)
+        self.post_logistics_aes("Express/v2/UpdateTempTrade", None, input)
             .await
     }
 
@@ -1052,8 +1070,12 @@ impl Ecpay {
         &self,
         input: &AllInOneUpdateShipmentInfoInput,
     ) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/UpdateShipmentInfo", input)
-            .await
+        self.post_logistics_aes(
+            "Express/v2/UpdateShipmentInfo",
+            Some(&input.merchant_id),
+            input,
+        )
+        .await
     }
 
     /// C2C 更新門市資訊 (`Express/v2/UpdateStoreInfo`)。
@@ -1061,19 +1083,24 @@ impl Ecpay {
         &self,
         input: &AllInOneUpdateStoreInfoInput,
     ) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/UpdateStoreInfo", input)
-            .await
+        self.post_logistics_aes(
+            "Express/v2/UpdateStoreInfo",
+            Some(&input.merchant_id),
+            input,
+        )
+        .await
     }
 
     /// C2C 取消物流訂單 (`Express/v2/CancelC2COrder`)。
     pub async fn allinone_cancel_c2c_order(&self, input: &AllInOneCancelC2cInput) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/CancelC2COrder", input)
+        self.post_logistics_aes("Express/v2/CancelC2COrder", Some(&input.merchant_id), input)
             .await
     }
 
     /// 全家逆物流退貨 (`Express/v2/ReturnCVS`)。
     pub async fn allinone_return_cvs(&self, input: &AllInOneReturnCvsInput) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/ReturnCVS", input).await
+        self.post_logistics_aes("Express/v2/ReturnCVS", Some(&input.merchant_id), input)
+            .await
     }
 
     /// 萊爾富逆物流退貨 (`Express/v2/ReturnHilifeCVS`)。
@@ -1081,8 +1108,12 @@ impl Ecpay {
         &self,
         input: &AllInOneReturnCvsInput,
     ) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/ReturnHilifeCVS", input)
-            .await
+        self.post_logistics_aes(
+            "Express/v2/ReturnHilifeCVS",
+            Some(&input.merchant_id),
+            input,
+        )
+        .await
     }
 
     /// 統一超商逆物流退貨 (`Express/v2/ReturnUniMartCVS`)。
@@ -1090,13 +1121,17 @@ impl Ecpay {
         &self,
         input: &AllInOneReturnCvsInput,
     ) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/ReturnUniMartCVS", input)
-            .await
+        self.post_logistics_aes(
+            "Express/v2/ReturnUniMartCVS",
+            Some(&input.merchant_id),
+            input,
+        )
+        .await
     }
 
     /// 宅配逆物流退貨 (`Express/v2/ReturnHome`)。
     pub async fn allinone_return_home(&self, input: &AllInOneReturnHomeInput) -> Result<Value> {
-        self.post_logistics_aes("Express/v2/ReturnHome", input)
+        self.post_logistics_aes("Express/v2/ReturnHome", Some(&input.merchant_id), input)
             .await
     }
 
@@ -1109,8 +1144,12 @@ impl Ecpay {
         &self,
         input: &AllInOnePrintTradeDocumentInput,
     ) -> Result<String> {
-        self.post_logistics_aes_raw("Express/v2/PrintTradeDocument", input)
-            .await
+        self.post_logistics_aes_raw(
+            "Express/v2/PrintTradeDocument",
+            Some(&input.merchant_id),
+            input,
+        )
+        .await
     }
 
     /// 物流選擇頁 (`Express/v2/RedirectToLogisticsSelection`)。⚠ server
@@ -1124,7 +1163,7 @@ impl Ecpay {
         &self,
         input: &AllInOneRedirectInput,
     ) -> Result<String> {
-        self.post_logistics_aes_raw("Express/v2/RedirectToLogisticsSelection", input)
+        self.post_logistics_aes_raw("Express/v2/RedirectToLogisticsSelection", None, input)
             .await
     }
 }
@@ -1249,7 +1288,8 @@ pub struct CrossBorderMapInput {
 impl Ecpay {
     /// 建立跨境物流訂單 (`CrossBorder/Create`)。
     pub async fn crossborder_create(&self, input: &CrossBorderCreateInput) -> Result<Value> {
-        self.post_logistics_aes("CrossBorder/Create", input).await
+        self.post_logistics_aes("CrossBorder/Create", Some(&input.merchant_id), input)
+            .await
     }
 
     /// 產生跨境物流測試資料 (`CrossBorder/CreateTestData`,僅測試環境)。
@@ -1257,8 +1297,12 @@ impl Ecpay {
         &self,
         input: &CrossBorderCreateTestDataInput,
     ) -> Result<Value> {
-        self.post_logistics_aes("CrossBorder/CreateTestData", input)
-            .await
+        self.post_logistics_aes(
+            "CrossBorder/CreateTestData",
+            Some(&input.merchant_id),
+            input,
+        )
+        .await
     }
 
     /// 查詢跨境物流訂單 (`CrossBorder/QueryLogisticsTradeInfo`)。
@@ -1266,13 +1310,18 @@ impl Ecpay {
         &self,
         input: &CrossBorderRefInput,
     ) -> Result<Value> {
-        self.post_logistics_aes("CrossBorder/QueryLogisticsTradeInfo", input)
-            .await
+        self.post_logistics_aes(
+            "CrossBorder/QueryLogisticsTradeInfo",
+            Some(&input.merchant_id),
+            input,
+        )
+        .await
     }
 
     /// 列印跨境物流標籤 (`CrossBorder/Print`)。
     pub async fn crossborder_print(&self, input: &CrossBorderRefInput) -> Result<Value> {
-        self.post_logistics_aes("CrossBorder/Print", input).await
+        self.post_logistics_aes("CrossBorder/Print", Some(&input.merchant_id), input)
+            .await
     }
 
     /// 跨境電子地圖選店表單(`CrossBorder/Map`,**不帶 CheckMacValue**)。

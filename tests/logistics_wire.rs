@@ -1350,3 +1350,55 @@ async fn allinone_v2_inputs_carrying_a_mismatched_data_merchant_id_are_rejected_
     assert!(matches!(err, ecpay::Error::Message(_)), "{err:?}");
     assert!(err.to_string().contains("Data MerchantID"), "{err}");
 }
+
+/// AllInOne v2 / CrossBorder 的 Data 依官方範例慣例帶 `MerchantID`；留空或
+/// 與信封不一致都會換來伺服器不帶訊息的拒絕。與 ECPG/B2B 同一防呆：出網
+/// 前就地拒絕，忘填欄位時給可執行的訊息而不是啞巴失敗。每個輸入族各測
+/// 一支（v2 查詢、跨境列印），防「接錯欄位」的實作。
+#[tokio::test]
+async fn empty_data_merchant_id_is_refused_before_any_bytes_go_out() {
+    let sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sent_srv = sent.clone();
+    let server = spawn_http_server(move |path, body| {
+        sent_srv.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = (path, body);
+        (
+            200,
+            "application/json".to_owned(),
+            serde_json::json!({
+                "MerchantID": "2000132",
+                "RqHeader": {"Timestamp": 1},
+                "TransCode": 0,
+                "TransMsg": "should never be reached",
+            })
+            .to_string()
+            .into_bytes(),
+        )
+    });
+    let sdk = logistics_sdk(server);
+
+    // v2 家族：Data 內 MerchantID 留空。
+    let err = sdk
+        .allinone_query_logistics_trade_info(&AllInOneQueryInput {
+            merchant_id: String::new(),
+            logistics_id: "1".into(),
+        })
+        .await
+        .expect_err("empty Data MerchantID must be refused (v2)");
+    assert!(err.to_string().contains("Data MerchantID"), "{err}");
+
+    // 跨境家族：同規則。
+    let err = sdk
+        .crossborder_print(&ecpay::logistics::CrossBorderRefInput {
+            merchant_id: String::new(),
+            logistics_id: "1".into(),
+        })
+        .await
+        .expect_err("empty Data MerchantID must be refused (cross-border)");
+    assert!(err.to_string().contains("Data MerchantID"), "{err}");
+
+    assert!(
+        !sent.load(std::sync::atomic::Ordering::SeqCst),
+        "no bytes may reach the wire without a Data MerchantID"
+    );
+}
