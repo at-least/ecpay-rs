@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-09-16
 
 _breaking changes（0.x，未上線前的一次 Rust 慣例清理——移除為了逐字對照
 Go 參考移植而保留的形狀）：_
@@ -28,7 +28,6 @@ _非破壞性：_
 - README：安裝版本 `0.2` → `0.3`；「必填欄位編譯期檢查」的過度陳述改為
   如實描述（必填欄位是非 `Option` 型別，值仍於執行期驗證）。
 
-## Unreleased（續）
 
 _go_float 移除（wire 變更）：_
 
@@ -43,7 +42,6 @@ _go_float 移除（wire 變更）：_
 - `Cargo.toml`：移除 `ryu` 與 serde_json 的 `raw_value` feature（皆僅
   go_float 使用）。
 
-## Unreleased（續）
 
 _金鑰型別統一：_
 
@@ -52,7 +50,6 @@ _金鑰型別統一：_
   一致（呼叫端從 `b"...".to_vec()` 變成 `"...".into()`）；`as_bytes()`
   收斂到單一私有存取點 `invoice_keys()` / `logistics_keys()`。
 
-## Unreleased（續）
 
 _HTTP client 注入：_
 
