@@ -1,8 +1,9 @@
 //! Live B2B e-invoice tests against the ECPay stage server. The public test
 //! account 2000132 IS B2B-enabled (proven by the stage probes, commit
 //! ed87553: `RtnCode=1 發票開立成功`), so a full issue → query → void
-//! lifecycle runs unattended. Like `tests/sandbox.rs` this needs outbound
-//! network, and every run consumes one stage 字軌 number.
+//! lifecycle runs unattended. Like `tests/sandbox.rs` every test is
+//! `#[ignore]`d (run with `-- --ignored`): this needs outbound network,
+//! and every run consumes one stage 字軌 number.
 
 use ecpay::invoice_b2b::{GetIssueInput, InvalidInput, IssueB2bInput};
 use ecpay::Ecpay;
@@ -78,6 +79,7 @@ fn sample_issue(relate_number: String) -> IssueB2bInput {
 }
 
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_b2b -- --ignored --nocapture"]
 async fn b2b_issue_then_get_then_invalid_roundtrip() {
     let client = sdk();
 
@@ -131,6 +133,7 @@ async fn b2b_issue_then_get_then_invalid_roundtrip() {
 /// the same unknown invoice is `6070004 發票號碼或日期錯誤` (captured
 /// 2026-09). Stateless — nothing is issued.
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_b2b -- --ignored --nocapture"]
 async fn b2b_invalid_reason_length_is_checked_before_the_lookup() {
     let client = sdk();
     let unknown = InvalidInput {
@@ -152,6 +155,7 @@ async fn b2b_invalid_reason_length_is_checked_before_the_lookup() {
 }
 
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_b2b -- --ignored --nocapture"]
 async fn b2b_get_invoice_word_setting_answers() {
     // 民國年 for 2026 is 115; term/use/category follow the official example's
     // shape (InvoiceCategory=2 is the B2B value in the PHP example).

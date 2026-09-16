@@ -353,7 +353,7 @@ ReturnURL → merchant 端用 `verify_check_mac_value` 驗證並回 `1|OK` →
 ```bash
 git clone --recurse-submodules https://github.com/at-least/ecpay-rs.git
 # 已 clone 的話:git submodule update --init
-cargo test              # 160+ 測試:官方向量、Python SDK 一致性、mock transport
+cargo test              # 全離線:官方向量、Python SDK 一致性、mock transport
 cargo test --test python_conformance   # 對官方 SDK 的逐欄位比對
 cargo clippy --all-targets
 ```
@@ -361,10 +361,18 @@ cargo clippy --all-targets
 submodule 只有 `.claude/skills/ecpay`(官方 ECPay-API-Skill,供 Claude Code
 讀規格用),不初始化也能 build 與跑測試;發佈到 crates.io 的 crate 已排除該目錄。
 
-⚠️ 上面的 `cargo test` **不是全離線**:`tests/sandbox.rs` 會打真實的 ECPay
-stage 測試環境(公開測試特店 2000132),需要對外網路,CI 上以此做端對端驗證。
-只有 `tests/stage_smoke.rs` 是刻意 `#[ignore]`(見上方「Staging 煙霧測試」),
-離線環境跑 `cargo test` 時 `tests/sandbox.rs` 會因連不到網路而失敗。
+`cargo test` 預設**完全離線**:四個打真實 ECPay stage 的套件
+(`tests/sandbox.rs`、`tests/sandbox_b2b.rs`、`tests/sandbox_logistics.rs`、
+`tests/stage_smoke.rs`,以及探測用的 `tests/stage_probes.rs`)全部 `#[ignore]`,
+離線環境不會失敗。需要端對端驗證時以 `-- --ignored` 明確執行(公開測試特店
+2000132,需對外網路;每次執行會在 stage 建立並清理真實沙盒資料,CI 的
+`cargo test --test sandbox … -- --ignored` 步驟即以此做端對端驗證):
+
+```bash
+cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics -- --ignored
+cargo test --test stage_smoke -- --ignored --nocapture          # 煙霧
+cargo test --test stage_probes -- --ignored --test-threads=1    # 探測(手動)
+```
 
 `tests/fixtures/python_sdk_vectors.json` 由「真的」官方 Python SDK 執行產生
 (`requests` 以 stub 取代;產生腳本 `gen_vectors.py` 同目錄),重新產生方式見

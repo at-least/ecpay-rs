@@ -1,6 +1,7 @@
 //! Live logistics tests against the ECPay stage server (public test account
-//! 2000132). Like `tests/sandbox.rs`, these run on every `cargo test` and
-//! need outbound network; they create real stage logistics orders.
+//! 2000132). Like `tests/sandbox.rs`, every test is `#[ignore]`d — the
+//! default `cargo test` stays offline; run them with `-- --ignored` and an
+//! outbound network. They create real stage logistics orders.
 //!
 //! Wire-format facts pinned here were first captured by the probes in
 //! `tests/stage_probes.rs` (commit ed87553) and are now asserted:
@@ -38,6 +39,7 @@ fn sdk() -> Ecpay {
 }
 
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn domestic_create_then_query_roundtrip() {
     let client = sdk();
     let out = client
@@ -79,6 +81,7 @@ async fn domestic_create_then_query_roundtrip() {
 }
 
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn domestic_create_update_shipment_query_chain() {
     // One live order taken through create → UpdateShipmentInfo → query:
     // three signed round-trips against stage on the same order.
@@ -137,6 +140,7 @@ async fn domestic_create_update_shipment_query_chain() {
 }
 
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn get_store_list_answers_json() {
     let out = sdk()
         .logistics_get_store_list(&GetStoreListInput {
@@ -152,6 +156,7 @@ async fn get_store_list_answers_json() {
 }
 
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn allinone_v2_endpoints_answer_with_the_aes_envelope() {
     let client = sdk();
     // CreateTestData: the official smoke endpoint for the v2 envelope.
@@ -188,6 +193,7 @@ async fn allinone_v2_endpoints_answer_with_the_aes_envelope() {
 /// 2026-09) — never as a transport or MAC error, which is what a caller
 /// debugging their keys must see.
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn wrong_aes_key_is_answered_in_band_by_the_v2_envelope() {
     let wrong_key = Ecpay {
         logistics_hash_key: "0000000000000000".into(),
@@ -228,6 +234,7 @@ async fn wrong_aes_key_is_answered_in_band_by_the_v2_envelope() {
 /// surfaced as `PaymentStatus` and the 200 as `Message` — the same protocol
 /// error in two variants.
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn domestic_rejections_share_one_shape_on_any_http_status() {
     let query = |id: &str, ts: Option<i64>| DomesticQueryInput {
         all_pay_logistics_id: id.into(),
@@ -268,6 +275,7 @@ async fn domestic_rejections_share_one_shape_on_any_http_status() {
 }
 
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn crossborder_create_test_data_answers_with_the_aes_envelope() {
     // Server-truth (2026-09): the envelope is accepted and answered in-band,
     // but public account 2000132 gets `TransCode=128 System exception` —

@@ -13,7 +13,10 @@
 //!   非同步產生的，同一測試內無法立即取得發票號碼來作廢；
 //!   `折讓/合意折讓` 測試則反向驗證過——`allowance_invalid`/
 //!   `allowance_invalid_by_collegiate` 後，原發票可以正常 `invalid()`，
-//!   故這兩個測試都補上了清理步驟。需要對外網路。
+//!   故這兩個測試都補上了清理步驟。
+//!
+//! 每個測試皆 `#[ignore]`（預設 `cargo test` 完全離線），執行需對外網路：
+//! `cargo test --test sandbox -- --ignored --nocapture`。
 //!
 //! 付費（AIO 信用卡授權）成功路徑需要走跳轉頁輸入卡號，無法單純以
 //! HTTP 自動化，不在本檔範圍。
@@ -107,6 +110,7 @@ fn sample_issue_input(relate_number: String, merchant_id: String) -> IssueInput 
 const TRICKY_TEXT: &str = "全部!混~合*(字).-_%+&=/:'\"測試ABC123 空格";
 
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn issue_then_get_then_invalid_roundtrip() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
@@ -199,6 +203,7 @@ async fn issue_then_get_then_invalid_roundtrip() {
 /// duplicate RelateNumber, GetIssue's key-presence query mode, a second
 /// Invalid, and GetInvalid's truly-required RelateNumber.
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn issue_lifecycle_error_contracts() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
@@ -318,6 +323,7 @@ async fn issue_lifecycle_error_contracts() {
 /// format error from ECPay (captured 2026-09), so no invoice is issued and
 /// nothing needs cleanup.
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn unknown_codes_are_adjudicated_by_the_server() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
@@ -340,6 +346,7 @@ async fn unknown_codes_are_adjudicated_by_the_server() {
 /// server checks InvoiceNo first. Stateless: the refusals come before any
 /// lookup, so no allowance has to exist.
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn get_allowance_requires_allowance_no_and_invoice_no_on_every_search_type() {
     let client = stage_client();
     for (search_type, allowance_no, invoice_no, want) in [
@@ -367,6 +374,7 @@ async fn get_allowance_requires_allowance_no_and_invoice_no_on_every_search_type
 
 /// `CheckLoveCode`（捐贈碼驗證）：無狀態查詢，不依賴任何先前開立的發票。
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn check_love_code_roundtrip() {
     let client = stage_client();
     let got = client
@@ -399,6 +407,7 @@ async fn check_love_code_roundtrip() {
 /// 端點走 AES 信封、請求裡根本沒有 CheckMacValue，其斷言（回應不含
 /// "CheckMacValue" 字樣）連錯 key、空 body 都能通過，已移除。
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
@@ -485,6 +494,7 @@ async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
 /// 攤平在最外層(單筆查詢)。offline 的 conformance 測試沒辦法測出這種
 /// 「文件寫的和伺服器實際回應的形狀不一樣」的問題，只有這裡能測出來。
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn allowance_lifecycle_roundtrip() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
@@ -573,6 +583,7 @@ async fn allowance_lifecycle_roundtrip() {
 /// `AllowanceInvalid` 取消)，是規格頁(7913.md)才記載的獨立端點，這裡是
 /// 唯一驗證過它真的存在且能在客戶確認前取消的地方。
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn allowance_by_collegiate_roundtrip() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
@@ -672,6 +683,7 @@ fn sample_delay_issue_input(
 /// 指令類 API 那樣以 `1` 為成功，故 `Ecpay::trigger_issue` 不用
 /// [`ecpay::Error::Api`] 判斷，這裡直接檢查 RtnCode 屬於這兩者之一。
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn delay_issue_then_trigger_roundtrip() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
@@ -712,6 +724,7 @@ async fn delay_issue_then_trigger_roundtrip() {
 
 /// `DelayIssue` + `CancelDelayIssue`（取消延遲開立）的沙盒回合測試。
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn delay_issue_then_cancel_roundtrip() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
@@ -749,6 +762,7 @@ async fn delay_issue_then_cancel_roundtrip() {
 /// `VoidWithIssue`，打上去只會拿到 ECPay 的一般錯誤頁，見 src/invoice.rs
 /// module doc）。這兩點若配置錯，之前只用 mock transport 的測試完全測不出來。
 #[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn issue_then_void_with_reissue_roundtrip() {
     let client = stage_client();
     let merchant_id = client.merchant_id.clone();
