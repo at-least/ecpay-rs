@@ -81,10 +81,12 @@ impl Ecpay {
     /// ENVELOPE's `envelope_merchant_id` — ECPay wants the ID in BOTH the
     /// envelope and `Data`, and rejects a mismatch opaquely (`RtnCode != 1`,
     /// no message). The check runs before any bytes go out. An empty value
-    /// passes through unchanged (legacy wire behavior; whether ECPay accepts
-    /// it is service-specific — the ECPG/B2B modules keep their earlier,
-    /// stricter field-level guard which rejects empty too). Inputs without a
-    /// Data-level MerchantID (key absent, or not a string) pass through.
+    /// passes through unchanged here (legacy wire behavior), but the
+    /// ECPG/B2B and logistics v2/CrossBorder modules additionally refuse an
+    /// empty value at their field-level guards — only the B2C invoice path
+    /// still lets an empty Data MerchantID through (whether ECPay accepts it
+    /// is service-specific). Inputs without a Data-level MerchantID (key
+    /// absent, or not a string) pass through.
     fn encrypt_checked<T: Serialize + ?Sized>(
         &self,
         envelope_merchant_id: &str,
