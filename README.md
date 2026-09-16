@@ -58,7 +58,7 @@ B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
 
 ```toml
 [dependencies]
-ecpay = "0.3"
+ecpay = "0.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

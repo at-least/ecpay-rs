@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.4.0 — 2026-09-16
+
+_breaking changes（全庫審查後的安全/一致性修正）：_
+
+- `Ecpay::query_trade_info` 改為驗證回應的 CheckMacValue（原先沿襲 Go 參考
+  移植不驗證——與打同一端點、會驗的 `order_search` 並存是安靜的 footgun），
+  並補上與 `order_search` 相同的 `MerchantTradeNo` 長度驗證（≤20 字元）。
+  解析也從 Go `url.ParseQuery`（重複鍵取第一個）改為 `parse_qsl`（取最後
+  一個）——ECPay 回應為單值，實務無差。回應缺漏/不符簽名時回
+  `Error::CheckMacValueMismatch`。
+- AES-JSON 全路徑新增 Data 層 MerchantID 防呆：`Data` 內帶「非空且不等於
+  信封 MerchantID」的請求（B2C 發票、物流 v2/跨境、ECPG/B2B）改為出網前回
+  `Error::Message`——ECPay 對不一致只回不帶訊息的 `RtnCode != 1`。空值照舊
+  放行（僅 ECPG/B2B 有 stage 實證空值會被拒，兩模組保留原本較嚴的欄位級
+  檢查）。`VoidWithReIssue` 的 `VoidModel`/`IssueModel` 巢狀 MerchantID
+  同規則就地檢查。平台商/子特店式「Data 帶不同 MerchantID」的用法會被
+  本地擋下。
+- `Ecpay::call_payment_api` 現在「簽與送同一份 map」：`MerchantID` 強制為
+  client 的設定值（取代呼叫端自帶值），簽名恆覆蓋實際送出的欄位；先前是
+  呼叫端 map 原樣簽、原樣送。簽名改走 `generate_check_value`：呼叫端自帶
+  `EncryptType=0` 時改簽 MD5（與 ECPay 對 EncryptType=0 的預期一致；0.3
+  恆為 SHA-256——帶 0 卻簽 SHA-256 本來就過不了真實伺服器）。
+- `Error::PaymentStatus` / `InvoiceStatus` 的 `Display` 改為有界呈現：
+  body 最多原樣引用 512 字元後接 `… (truncated; N bytes total)`（欄位
+  本身仍保留完整 body 供程式存取）。先前會把回應體（至多 1 MiB 上限）
+  整段帶進錯誤訊息。
+
+_非破壞性：_
+
+- `post_cmv_verified`（`order_search` / `query_payment_info` /
+  `query_trade_info` 共用）的驗證摘要改由**請求**的 `EncryptType` 決定
+  （未帶即 SHA-256），不再採用回應自帶的 `EncryptType`——驗證器不應從
+  被驗證的訊息取得演算法選擇器。
+- `Ecpay::call_payment_api` 的回應仍不驗證（維持 Go port 相容面）；文件
+  明確指引需要驗證的查詢改用 `order_search` / `query_trade_info`。
+- 測試：`tests/sandbox.rs`、`tests/sandbox_b2b.rs`、
+  `tests/sandbox_logistics.rs` 全部 `#[ignore]`——預設 `cargo test` 完全
+  離線；live E2E 以 `cargo test --test sandbox --test sandbox_b2b --test
+  sandbox_logistics -- --ignored` 執行（CI 新增同一步驟，涵蓋範圍與先前
+  相同）。
+- 內部：CheckMacValue 排序改為 decorate-sort-undecorate（每鍵只小寫一次，
+  wire bytes 不變，差分向量套件釘死）；README 移除重複的「以官方實作為
+  測試基準」bullet、API 對照表補 `query_trade_info`；安裝版本 `0.3` →
+  `0.4`。
+
 ## 0.3.0 — 2026-09-16
 
 _breaking changes（0.x，未上線前的一次 Rust 慣例清理——移除為了逐字對照
