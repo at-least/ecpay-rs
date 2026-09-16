@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+_breaking changes（程式碼審查後的安全/一致性修正）：_
+
+- **CBC padding oracle 防護**：AES-JSON 回呼解密器
+  （`decrypt_ecpg_callback` / `decrypt_logistics_callback` /
+  `decrypt_temp_trade_established`）解密的是公開端點上攻擊者可篡改的 CBC
+  密文，而信封不認證 `Data`——先前 padding 失敗與後續 UTF-8/JSON 失敗可
+  區分，構成 CBC padding oracle（可用 CBC-R 在不知金鑰下偽造回呼密文）。
+  內容相關的解密失敗現在收斂為同一則固定訊息
+  （`Error::Message` "callback payload failed to decrypt or parse"）；
+  base64/長度/金鑰長度錯誤保持原樣（只取決於攻擊者已輸入的資訊）。
+  伺服器回應路徑（發票/ECPG/物流 API 呼叫）維持原有詳細錯誤。商戶 handler
+  應配合：所有回呼錯誤回同一 HTTP 回應、加 rate limit、不把 `Error`
+  Display 原文回進 response——見 README 新增的回呼處理清單。
+- **`Error::PaddingValue(u8)` 與 `Error::PaddingBytes` 移除**，合併為不透明
+  的 `Error::Padding`：padding 失敗不再區分模式、不再把 pad byte 值帶進
+  訊息（該值曾可被攻擊者觀察）。`matches!` 這兩個變體的呼叫端改比對
+  `Error::Padding`。
+- **`aio_check_out` 補齊延伸欄位長度驗證**：`Redeem`(≤1)、
+  `MerchantMemberID`(≤30)、`PaymentInfoURL`/`ClientRedirectURL`(≤200)、
+  `Desc_1..4`(≤20)、`Language`(≤3)、`PeriodReturnURL`(≤200)——過長值先前
+  會被送出、換來綠界伺服器端錯誤；現在客戶端即以
+  `Error::Validation("{name} max langth is {max}.")` 拒絕。（官方 SDK 本就
+  不驗 optional 長度；本 crate 對基本 optional 欄位一直有驗，此舉補齊同一
+  標準。）
+- **B2B 發票要求 `b2b_rq_id`**：留空時每個 B2B 呼叫在出網前回
+  `Error::Message`——wire 契約每個請求都帶 `RqHeader.RqID`（官方 PHP 範例
+  一律送出），空值是否被伺服器接受未經實測，不再賭這一把。
+- **物流 v2/跨境要求 Data 層 MerchantID**：輸入結構帶 `MerchantID` 欄位
+  者（依官方範例慣例），留空或與信封不一致時出網前回 `Error::Message`——
+  與 ECPG/B2B 模組同一防呆；先前空值會原樣送出、換來伺服器不帶訊息的
+  拒絕。無 `MerchantID` 欄位的三個結構（`CreateByTempTradeInput`、
+  `UpdateTempTradeInput`、`AllInOneRedirectInput`）不受影響。
+
+_非破壞性：_
+
+- README 新增「回呼處理清單」：MAC 只證明作者性與完整性，不證明新鮮度與
+  金額正確——去重、金額綁定、主動查詢、統一錯誤回應等六步。
+- `decrypt`/`decrypt_data` 文件警告勿用於攻擊者可達的回呼端點（詳細錯誤
+  僅適合自家 TLS 連線上的綠界回應），並指向回呼解密器。
+- 移除 `verify_check_mac_value` / `hash_mac` 內部不可達分支的 `.expect`
+  （改回 `false` / 空 MAC + `debug_assert`）；`logistics_keys` 回傳
+  `(&str, &str)`，刪除不可達的 UTF-8 錯誤路徑；CheckMacValue 前像改以
+  `write!` 組字串（少一次 per-pair 配置）。
+
 ## 0.4.0 — 2026-09-16
 
 _breaking changes（全庫審查後的安全/一致性修正）：_

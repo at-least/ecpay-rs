@@ -237,10 +237,10 @@ let client = Ecpay {
 `TaxType`、`Donation`、`PrintMark`、`CarrierType`、`ClearanceMark`、`InvType`;
 B2B(`ecpay::invoice_b2b`)的 `TaxType`、`InvType`。
 
-## 與官方 Python SDK 的三點刻意差異
+## 與官方 Python SDK 的四點刻意差異
 
-三點都記錄在測試裡(見 `tests/python_conformance.rs`),其餘行為(含驗證
-錯誤訊息原文)與官方 SDK 一致:
+四點都記錄在測試裡(見 `tests/python_conformance.rs` 與
+`tests/check_out.rs`),其餘行為(含驗證錯誤訊息原文)與官方 SDK 一致:
 
 1. **CheckMacValue 的 `~` 編碼**:官方 Python 用 `quote_plus` 把 `~` 保留為
    原字元,但綠界後端(.NET)是把 `~` 編成 `%7e` 後才雜湊 — 帶 `~` 的參數
@@ -254,9 +254,16 @@ B2B(`ecpay::invoice_b2b`)的 `TaxType`、`InvType`。
    「同時填兩種信用卡方案(一次付清/分期/定期定額)」原樣簽署送出(綠界
    拒收)。本函式庫在 `aio_check_out` 直接回 `Error::Validation`,並提供
    `extra` 欄位作為未模型化參數的逃生口(碰撞會報錯)。
+4. **選填欄位長度一律客戶端驗證**:官方 SDK 的
+   `check_required_parameter` 只對 **required** 字串驗長度,選填欄位宣告
+   了 max 也從不檢查。本函式庫對所有宣告上限的欄位(含延伸參數
+   `Language`、`MerchantMemberID`、`Desc_1..4`、`PaymentInfoURL` 等)在
+   客戶端就以 `Error::Validation("{name} max langth is {max}.")` 拒絕,
+   過長值不再流到綠界換一個伺服器端錯誤。
 
 另外 `gen_html_post_form` 的屬性值加了 HTML escape(官方版遇 `"` 會壞掉
-form,也是注入點)。
+form,也是注入點);回呼解密器的錯誤刻意統一(padding oracle 防護,見回呼
+處理清單),兩者皆為安全強化而非行為差異。
 
 ## 規格對照(官方 AI-skill 驗證)
 
