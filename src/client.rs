@@ -78,7 +78,7 @@ impl Ecpay {
     /// The MerchantID contract: whenever the serialized `Data` carries a
     /// top-level string `MerchantID` (B2C invoice, logistics v2/cross-border,
     /// and the ECPG/B2B Data structs all do), a SET value must equal the
-    /// client's [`Ecpay::merchant_id`] — ECPay wants the ID in BOTH the
+    /// ENVELOPE's `envelope_merchant_id` — ECPay wants the ID in BOTH the
     /// envelope and `Data`, and rejects a mismatch opaquely (`RtnCode != 1`,
     /// no message). The check runs before any bytes go out. An empty value
     /// passes through unchanged (legacy wire behavior; whether ECPay accepts
@@ -87,6 +87,7 @@ impl Ecpay {
     /// Data-level MerchantID (key absent, or not a string) pass through.
     fn encrypt_checked<T: Serialize + ?Sized>(
         &self,
+        envelope_merchant_id: &str,
         input: &T,
         key: &[u8],
         iv: &[u8],
@@ -94,12 +95,11 @@ impl Ecpay {
         let json = serde_json::to_string(input)?;
         let value: serde_json::Value = serde_json::from_str(&json)?;
         if let Some(mid) = value.get("MerchantID").and_then(serde_json::Value::as_str) {
-            if !mid.is_empty() && mid != self.merchant_id {
+            if !mid.is_empty() && mid != envelope_merchant_id {
                 return Err(Error::Message(format!(
-                    "ecpay: Data MerchantID must equal the client's MerchantID \
-                     (got {mid:?}, client has {:?}); ECPay rejects a mismatch opaquely \
-                     with RtnCode != 1 and no message",
-                    self.merchant_id
+                    "ecpay: Data MerchantID must equal the envelope MerchantID \
+                     (got {mid:?}, envelope has {envelope_merchant_id:?}); ECPay rejects a \
+                     mismatch opaquely with RtnCode != 1 and no message"
                 )));
             }
         }
@@ -361,23 +361,25 @@ impl Ecpay {
 
     /// Go `CallPaymentAPI`: POST the form params plus CheckMacValue (keys
     /// sorted like url.Values.Encode) and parse the response as a query
-    /// string, first value winning. The MAC is [`Self::generate_check_value`]'s
-    /// (honors the params' `EncryptType`, forces `MerchantID` to the client's
-    /// configured merchant); the response is NOT verified — callers who need
-    /// a verified query should use [`crate::Ecpay::order_search`] or
+    /// string, first value winning. The `MerchantID` entry is forced to the
+    /// client's configured merchant — and the FORCED map is both what is
+    /// signed and what is sent, so the signature always covers the wire
+    /// bytes. The MAC is [`Self::generate_check_value`]'s (it honors the
+    /// params' `EncryptType`); the response is NOT verified — callers who
+    /// need a verified query should use [`crate::Ecpay::order_search`] or
     /// [`crate::Ecpay::query_trade_info`].
     pub async fn call_payment_api(
         &self,
         name: &str,
         params: &HashMap<String, String>,
     ) -> Result<HashMap<String, String>> {
+        let mut m = params.clone();
+        m.insert("MerchantID".to_owned(), self.merchant_id.clone());
+        let mac = self.generate_check_value(&m)?;
+        m.insert("CheckMacValue".to_owned(), mac);
         let base = self.payment_base_url();
         let endpoint = format!("{base}{name}/V5");
-        let mac = self.generate_check_value(params)?;
-        let encoded = encode_query(
-            crate::crypto::str_pairs(params)
-                .chain(std::iter::once(("CheckMacValue", mac.as_str()))),
-        );
+        let encoded = encode_query(crate::crypto::str_pairs(&m));
         let mut resp = self
             .http()
             .post(endpoint)
@@ -455,7 +457,7 @@ impl Ecpay {
         key: &[u8],
         iv: &[u8],
     ) -> Result<String> {
-        let data = self.encrypt_checked(input, key, iv)?;
+        let data = self.encrypt_checked(merchant_id, input, key, iv)?;
         let envelope = serde_json::json!({
             "MerchantID": merchant_id,
             "RqHeader": rq_header,
@@ -493,7 +495,7 @@ impl Ecpay {
         key: &[u8],
         iv: &[u8],
     ) -> Result<O> {
-        let data = self.encrypt_checked(input, key, iv)?;
+        let data = self.encrypt_checked(merchant_id, input, key, iv)?;
         let envelope = serde_json::json!({
             "MerchantID": merchant_id,
             "RqHeader": rq_header,
@@ -534,7 +536,7 @@ impl Ecpay {
         let base = self.invoice_base_url();
         let endpoint = format!("{base}{name}");
         let (key, iv) = self.invoice_keys();
-        let data = self.encrypt_checked(input, key, iv)?;
+        let data = self.encrypt_checked(&self.merchant_id, input, key, iv)?;
         let req = Request {
             platform_id: self.platform_id.clone(),
             merchant_id: self.merchant_id.clone(),
@@ -614,9 +616,13 @@ fn body_excerpt(body: &str) -> String {
 
 /// A bounded rendering of a response body for error `Display`: verbatim up
 /// to [`BODY_EXCERPT_CHARS`] chars, then a truncation notice with the total
-/// size. The `PaymentStatus`/`InvoiceStatus` fields keep the full body for
-/// programmatic access; only the rendered message is bounded, so a hostile
-/// or misbehaving endpoint cannot flood a log line with megabytes of HTML.
+/// size. Unlike [`body_excerpt`] it does NOT escape control characters —
+/// keeping the Go-parity `body=%s` shape for normal server responses (these
+/// bodies arrive over the merchant's own TLS connection, not a public
+/// callback endpoint). The `PaymentStatus`/`InvoiceStatus` fields keep the
+/// full body for programmatic access; only the rendered message is bounded,
+/// so a hostile or misbehaving endpoint cannot flood a log line with
+/// megabytes of HTML.
 pub(crate) fn truncate_for_display(body: &str) -> String {
     let mut chars = body.chars();
     let head: String = chars.by_ref().take(BODY_EXCERPT_CHARS).collect();

@@ -516,6 +516,59 @@ async fn action_apis_route_and_parse() {
     );
 }
 
+/// `call_payment_api` signs and sends the SAME map: the client's MerchantID
+/// is forced into the body (replacing any caller-supplied value) and the
+/// carried CheckMacValue must verify against a server-side recompute over
+/// exactly the sent fields. Regression guard for a 0.4 window where the
+/// signature covered the forced MerchantID while the body carried the
+/// caller's — invisible to mocks that never check the signature.
+#[tokio::test]
+async fn call_payment_api_signature_covers_the_sent_fields() {
+    let captured: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let seen = captured.clone();
+    let srv = spawn_http_server(move |_path, body| {
+        *seen.lock().unwrap() = String::from_utf8_lossy(body).into_owned();
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            b"MerchantID=3002607&TradeStatus=1".to_vec(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    client
+        .call_payment_api(
+            "QueryTradeInfo",
+            &map(&[("MerchantID", "someone_else"), ("MerchantTradeNo", "no-1")]),
+        )
+        .await
+        .expect("call_payment_api");
+
+    // Recompute the MAC over exactly what went on the wire (values here are
+    // form-escape-free, so splitting on & and = reconstructs the fields).
+    let body = captured.lock().unwrap().clone();
+    let mut sent: HashMap<String, String> = body
+        .split('&')
+        .map(|pair| pair.split_once('=').unwrap_or((pair, "")))
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+    let got_mac = sent
+        .remove("CheckMacValue")
+        .expect("the request carries CheckMacValue");
+    assert_eq!(
+        sent.get("MerchantID").map(String::as_str),
+        Some(MERCHANT_ID),
+        "the forced MerchantID must be SENT, not just signed; body: {body}"
+    );
+    let want_mac = ecpay::check_mac_value(&sent, HASH_KEY, HASH_IV, 1).unwrap();
+    assert_eq!(
+        got_mac, want_mac,
+        "the signature must cover exactly the sent fields; body: {body}"
+    );
+}
+
 /// `call_payment_api` parses the reply like Go's `url.ParseQuery`: the FIRST
 /// value wins on a duplicate key (opposite of `parse_qsl`'s last-wins on
 /// the Python-flavored endpoints), a `;` is rejected, and a malformed escape
