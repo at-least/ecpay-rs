@@ -41,7 +41,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{api_error, Result};
+use crate::error::{api_error, Error, Result};
 use crate::wire::wire_enum;
 use crate::Ecpay;
 
@@ -92,6 +92,16 @@ impl Ecpay {
         data: &I,
     ) -> Result<O> {
         self.b2b_require_data_merchant_id(data_merchant_id)?;
+        // B2B 的 wire 契約每個請求都帶 `RqHeader.RqID`（官方 PHP 範例一律
+        // 送出）；空值是否被伺服器接受未經實測，與其賭一把，不如在出網
+        // 前拒絕並給出可執行的訊息。
+        if self.b2b_rq_id.is_empty() {
+            return Err(Error::Message(
+                "ecpay: B2B invoice requires Ecpay::b2b_rq_id (GUID format, \
+                 unique per request) — refusing to send an empty RqHeader.RqID"
+                    .into(),
+            ));
+        }
         let endpoint = format!("{}{}", self.b2b_base_url(), action);
         let rq_header = serde_json::json!({
             "Timestamp": crate::client::unix_now(),

@@ -747,3 +747,37 @@ b2b_wire_test!(
     ],
     call_get_reject_confirm
 );
+
+/// ECPay's B2B wire contract carries `RqHeader.RqID` (GUID format, unique
+/// per request) on every call; the official PHP examples always send one.
+/// An empty `b2b_rq_id` used to go out as `"RqID": ""` — whether the stage
+/// accepts that is unverified — so the crate now refuses locally with an
+/// actionable message instead of gambling the request.
+#[tokio::test]
+async fn empty_b2b_rq_id_is_refused_before_any_bytes_go_out() {
+    let sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sent_srv = sent.clone();
+    let srv = spawn_http_server(move |path, body| {
+        sent_srv.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = assert_envelope_and_decrypt(path, body, "Invalid");
+        aes_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "ok"}))
+    });
+    let client = Ecpay {
+        b2b_rq_id: String::new(),
+        ..b2b_client(srv)
+    };
+    let err = client
+        .invalid_b2b(&InvalidInput {
+            merchant_id: MERCHANT_ID.into(),
+            invoice_number: "AB12345678".into(),
+            invoice_date: "2026-09-01".into(),
+            reason: "test".into(),
+        })
+        .await
+        .expect_err("empty b2b_rq_id must be refused");
+    assert!(err.to_string().contains("RqID"), "{err}");
+    assert!(
+        !sent.load(std::sync::atomic::Ordering::SeqCst),
+        "no bytes may reach the wire without an RqID"
+    );
+}
