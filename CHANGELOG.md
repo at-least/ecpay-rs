@@ -101,6 +101,10 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
 
 _非破壞性：_
 
+- （pre-1.0 考量，暫緩）`check_mac_value` 的 `encrypt_type: i64` 公開參數
+  形狀：0/1 之外的值早已回 `Error::UnsupportedEncryptType`，1.0 前考慮換
+  專用 enum。國內物流仍以 MD5 簽章，變體必須保留到那時——見
+  `check_mac_value` 的 TODO(pre-1.0) 註解。
 - README 新增「回呼處理清單」：MAC 只證明作者性與完整性，不證明新鮮度與
   金額正確——去重、金額綁定、主動查詢、統一錯誤回應等六步。
 - `decrypt`/`decrypt_data` 文件警告勿用於攻擊者可達的回呼端點（詳細錯誤

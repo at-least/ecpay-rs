@@ -212,6 +212,11 @@ pub(crate) fn parse_encrypt_type(value: Option<&str>) -> i64 {
 /// [`crate::Ecpay::generate_check_value`]'s job, not this function's;
 /// `encrypt_type` is chosen by the caller (the request's own `EncryptType`
 /// field, defaulting to 1).
+///
+/// TODO(pre-1.0): `encrypt_type: i64` accepts MD5 as a public-API shape —
+/// consider a dedicated enum before 1.0 (only 0 and 1 exist; anything else
+/// is already `Error::UnsupportedEncryptType`). Domestic logistics still
+/// signs MD5, so the variant stays until then.
 pub fn check_mac_value(
     params: &HashMap<String, String>,
     hash_key: &str,

@@ -34,6 +34,9 @@ jobs:
   # Supply-chain check: RustSec advisories against the dependency graph.
   # Cargo.lock is not tracked (library crate), so resolve it first — the
   # audit then covers exactly the versions CI is about to build with.
+  # NOTE: each run resolves fresh from the version requirements, so a red
+  # audit can be a NEW upstream advisory against an OLD requirement — not
+  # necessarily a regression introduced by the PR it failed on.
   audit:
     runs-on: ubuntu-latest
     steps:
