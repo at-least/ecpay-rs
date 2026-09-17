@@ -617,11 +617,16 @@ impl Ecpay {
     /// like the official SDK's `generate_check_value`.
     pub fn generate_check_value(&self, params: &HashMap<String, String>) -> Result<String> {
         let encrypt_type =
-            crate::crypto::parse_encrypt_type(params.get("EncryptType").map(String::as_str));
+            crate::crypto::parse_encrypt_type(params.get("EncryptType").map(String::as_str))?;
         let pairs = crate::crypto::str_pairs(params)
             .filter(|(k, _)| *k != "MerchantID")
             .chain(std::iter::once(("MerchantID", self.merchant_id.as_str())));
-        crate::crypto::check_mac_value_pairs(pairs, &self.hash_key, &self.hash_iv, encrypt_type)
+        Ok(crate::crypto::check_mac_value_pairs(
+            pairs,
+            &self.hash_key,
+            &self.hash_iv,
+            encrypt_type,
+        ))
     }
 }
 

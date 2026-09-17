@@ -7,12 +7,12 @@
 
 use std::collections::HashMap;
 
-fn cmv(params: &[(&str, &str)], key: &str, iv: &str, t: i64) -> String {
+fn cmv(params: &[(&str, &str)], key: &str, iv: &str, t: ecpay::EncryptType) -> String {
     let m: HashMap<String, String> = params
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-    ecpay::check_mac_value(&m, key, iv, t).unwrap()
+    ecpay::check_mac_value(&m, key, iv, t)
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn official_skill_vectors() {
             ],
             "pwFHCqoQZGmho4w6",
             "EkRm7iFT261dpevs",
-            1
+            ecpay::EncryptType::Sha256
         ),
         "291CBA324D31FB5A4BBBFDF2CFE5D32598524753AFD4959C3BF590C5B2F57FB2"
     );
@@ -49,7 +49,7 @@ fn official_skill_vectors() {
             ],
             "5294y06JbISpM5x9",
             "v77hoKGq4kWxNNIS",
-            0
+            ecpay::EncryptType::Md5
         ),
         "545E6146FD45BDA683C88454DB34CE8D"
     );
@@ -63,7 +63,7 @@ fn official_skill_vectors() {
             ],
             "pwFHCqoQZGmho4w6",
             "EkRm7iFT261dpevs",
-            1
+            ecpay::EncryptType::Sha256
         ),
         "CF0A3D4901D99459D8641516EC57210700E8A5C9AB26B1D021301E9CB93EF78D"
     );
@@ -77,7 +77,7 @@ fn official_skill_vectors() {
             ],
             "pwFHCqoQZGmho4w6",
             "EkRm7iFT261dpevs",
-            1
+            ecpay::EncryptType::Sha256
         ),
         "CEEAE01D2F9A8E74D4AC0DCE7735B046D73F35A5EC99558A31A2EE03159DA1C9"
     );

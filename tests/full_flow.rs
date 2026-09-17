@@ -102,7 +102,7 @@ fn urlencode(s: &str) -> String {
 }
 
 fn sign(params: &HashMap<String, String>) -> String {
-    ecpay::check_mac_value(params, HASH_KEY, HASH_IV, 1).expect("simulator MAC")
+    ecpay::check_mac_value(params, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256)
 }
 
 fn respond(stream: &mut TcpStream, content_type: &str, body: &str) {

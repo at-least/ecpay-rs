@@ -270,7 +270,7 @@ async fn injected_http_client_is_used() {
         let mut respond = std::collections::HashMap::new();
         respond.insert("MerchantID".to_owned(), MERCHANT_ID.to_owned());
         respond.insert("TradeStatus".to_owned(), "1".to_owned());
-        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
         (
             200,
             "text/html; charset=utf-8".to_owned(),

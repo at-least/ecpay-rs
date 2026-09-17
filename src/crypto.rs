@@ -133,6 +133,50 @@ pub(crate) fn aes_url_encode(s: &str) -> String {
     query_escape(s).replace('~', "%7E")
 }
 
+/// The digest a CheckMacValue selects, typed: SHA-256 (`EncryptType=1`,
+/// AIO 金流) or MD5 (`EncryptType=0`, 國內物流 — the only family still on
+/// it). Deliberately closed and exhaustive: 0 and 1 are all the protocol
+/// has; a third digest would be a new ECPay protocol and a breaking
+/// release either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EncryptType {
+    /// SHA-256 (wire `EncryptType=1`).
+    Sha256,
+    /// MD5 (wire `EncryptType=0`; retired on AIO, still how 國內物流 signs).
+    Md5,
+}
+
+impl EncryptType {
+    /// The wire integer.
+    pub fn as_i64(self) -> i64 {
+        match self {
+            Self::Sha256 => 1,
+            Self::Md5 => 0,
+        }
+    }
+}
+
+impl From<EncryptType> for i64 {
+    fn from(t: EncryptType) -> i64 {
+        t.as_i64()
+    }
+}
+
+impl std::convert::TryFrom<i64> for EncryptType {
+    type Error = Error;
+
+    /// Only 0 and 1 exist; anything else is the caller bug the old i64
+    /// parameter surfaced at hashing time — same error, moved to the
+    /// conversion where it belongs.
+    fn try_from(n: i64) -> Result<Self> {
+        match n {
+            1 => Ok(Self::Sha256),
+            0 => Ok(Self::Md5),
+            n => Err(Error::UnsupportedEncryptType(n)),
+        }
+    }
+}
+
 /// Borrowed `(key, value)` view of a `HashMap`/`BTreeMap<String, String>`
 /// for the pair-iterator entry points below — a response map is hashed as
 /// received, without cloning it first.
@@ -178,51 +222,48 @@ pub fn hash_mac(params: &HashMap<String, String>, hash_key: &str, hash_iv: &str)
 /// defensively (ECPay sends uppercase, but a received value's case isn't a
 /// signal worth failing on). Empty `got` verifies as `false`;
 /// `encrypt_type` is chosen by the caller (payment responses derive it from
-/// the response's `EncryptType`, logistics hardcodes MD5 = 0, the AIO
+/// the response's `EncryptType`, logistics hardcodes MD5, the AIO
 /// callback verifies SHA-256 only).
 pub(crate) fn verify_mac<'a>(
     got: &str,
     params: impl IntoIterator<Item = (&'a str, &'a str)>,
     hash_key: &str,
     hash_iv: &str,
-    encrypt_type: i64,
-) -> Result<bool> {
+    encrypt_type: EncryptType,
+) -> bool {
     if got.is_empty() {
-        return Ok(false);
+        return false;
     }
-    let want = check_mac_value_pairs(params, hash_key, hash_iv, encrypt_type)?;
-    Ok(constant_time_eq(
-        got.to_uppercase().as_bytes(),
-        want.as_bytes(),
-    ))
+    let want = check_mac_value_pairs(params, hash_key, hash_iv, encrypt_type);
+    constant_time_eq(got.to_uppercase().as_bytes(), want.as_bytes())
 }
 
-/// Parses a params map's `EncryptType` value, defaulting to 1 (SHA-256)
-/// like the official SDK when it's missing or unparsable. Shared by
+/// Parses a params map's `EncryptType` value the way the official SDK does:
+/// missing or unparsable defaults to SHA-256; a parsable but nonexistent
+/// code is the caller bug `TryFrom<i64>` reports. Shared by
 /// [`crate::Ecpay::generate_check_value`] (signing an outbound request) and
 /// the payment-response verification path (checking an inbound one).
-pub(crate) fn parse_encrypt_type(value: Option<&str>) -> i64 {
-    value.and_then(|v| v.parse::<i64>().ok()).unwrap_or(1)
+pub(crate) fn parse_encrypt_type(value: Option<&str>) -> Result<EncryptType> {
+    let n = value.and_then(|v| v.parse::<i64>().ok()).unwrap_or(1);
+    EncryptType::try_from(n)
 }
 
 /// The hashing half of the Python SDK's `generate_check_value`: drop any
 /// existing CheckMacValue, sort by lowercased key, wrap in HashKey/HashIV,
-/// .NET-URLEncode, lowercase, then SHA-256 (EncryptType 1) or MD5
-/// (EncryptType 0) — uppercase hex. Forcing MerchantID to the client's is
-/// [`crate::Ecpay::generate_check_value`]'s job, not this function's;
-/// `encrypt_type` is chosen by the caller (the request's own `EncryptType`
-/// field, defaulting to 1).
+/// .NET-URLEncode, lowercase, then SHA-256 ([`EncryptType::Sha256`]) or
+/// MD5 ([`EncryptType::Md5`]) — uppercase hex. Forcing MerchantID to the
+/// client's is [`crate::Ecpay::generate_check_value`]'s job, not this
+/// function's.
 ///
-/// TODO(pre-1.0): `encrypt_type: i64` accepts MD5 as a public-API shape —
-/// consider a dedicated enum before 1.0 (only 0 and 1 exist; anything else
-/// is already `Error::UnsupportedEncryptType`). Domestic logistics still
-/// signs MD5, so the variant stays until then.
+/// Infallible by construction: the enum makes an unsupported digest
+/// unrepresentable (the rejection lives in `TryFrom<i64>` /
+/// `parse_encrypt_type`).
 pub fn check_mac_value(
     params: &HashMap<String, String>,
     hash_key: &str,
     hash_iv: &str,
-    encrypt_type: i64,
-) -> Result<String> {
+    encrypt_type: EncryptType,
+) -> String {
     check_mac_value_pairs(str_pairs(params), hash_key, hash_iv, encrypt_type)
 }
 
@@ -233,13 +274,12 @@ pub(crate) fn check_mac_value_pairs<'a>(
     pairs: impl IntoIterator<Item = (&'a str, &'a str)>,
     hash_key: &str,
     hash_iv: &str,
-    encrypt_type: i64,
-) -> Result<String> {
+    encrypt_type: EncryptType,
+) -> String {
     let preimage = cmv_preimage(pairs, hash_key, hash_iv);
     match encrypt_type {
-        1 => Ok(to_upper_hex(&Sha256::digest(preimage.as_bytes()))),
-        0 => Ok(to_upper_hex(&<Md5 as Digest>::digest(preimage.as_bytes()))),
-        n => Err(Error::UnsupportedEncryptType(n)),
+        EncryptType::Sha256 => to_upper_hex(&Sha256::digest(preimage.as_bytes())),
+        EncryptType::Md5 => to_upper_hex(&<Md5 as Digest>::digest(preimage.as_bytes())),
     }
 }
 
@@ -547,20 +587,16 @@ mod tests {
     }
 
     #[test]
-    fn check_mac_value_supports_md5_and_rejects_others() {
+    fn check_mac_value_supports_md5() {
         let mut params = HashMap::new();
         params.insert("MerchantID".to_owned(), "2000132".to_owned());
         params.insert("EncryptType".to_owned(), "0".to_owned());
         // EncryptType is chosen by the argument, not by reading the map.
-        let md5 = check_mac_value(&params, "k", "i", 0).unwrap();
+        let md5 = check_mac_value(&params, "k", "i", EncryptType::Md5);
         assert_eq!(md5.len(), 32, "MD5 digest is 32 hex chars");
         assert!(md5
             .chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()));
-        assert!(matches!(
-            check_mac_value(&params, "k", "i", 2),
-            Err(Error::UnsupportedEncryptType(2))
-        ));
     }
 
     #[test]
@@ -569,27 +605,65 @@ mod tests {
         params.insert("MerchantID".to_owned(), "2000132".to_owned());
         params.insert("EncryptType".to_owned(), "1".to_owned());
 
-        let sha = check_mac_value(&params, "k", "i", 1).unwrap();
-        assert!(verify_mac(&sha, str_pairs(&params), "k", "i", 1).unwrap());
+        let sha = check_mac_value(&params, "k", "i", EncryptType::Sha256);
+        assert!(verify_mac(
+            &sha,
+            str_pairs(&params),
+            "k",
+            "i",
+            EncryptType::Sha256
+        ));
         // Lowercase inbound verifies too (upper-cased before compare).
-        assert!(verify_mac(&sha.to_lowercase(), str_pairs(&params), "k", "i", 1).unwrap());
+        assert!(verify_mac(
+            &sha.to_lowercase(),
+            str_pairs(&params),
+            "k",
+            "i",
+            EncryptType::Sha256
+        ));
         // Wrong key / wrong digest type / empty got all verify as false.
-        assert!(!verify_mac(&sha, str_pairs(&params), "other", "i", 1).unwrap());
-        assert!(!verify_mac(&sha, str_pairs(&params), "k", "i", 0).unwrap());
-        assert!(!verify_mac("", str_pairs(&params), "k", "i", 1).unwrap());
+        assert!(!verify_mac(
+            &sha,
+            str_pairs(&params),
+            "other",
+            "i",
+            EncryptType::Sha256
+        ));
+        assert!(!verify_mac(
+            &sha,
+            str_pairs(&params),
+            "k",
+            "i",
+            EncryptType::Md5
+        ));
+        assert!(!verify_mac(
+            "",
+            str_pairs(&params),
+            "k",
+            "i",
+            EncryptType::Sha256
+        ));
 
         // A leftover CheckMacValue in the map is scrubbed before hashing —
         // by the public map form and the borrowed-pairs form alike.
         params.insert("CheckMacValue".to_owned(), "stale".to_owned());
-        assert_eq!(check_mac_value(&params, "k", "i", 1).unwrap(), sha);
-        assert!(verify_mac(&sha, str_pairs(&params), "k", "i", 1).unwrap());
+        assert_eq!(check_mac_value(&params, "k", "i", EncryptType::Sha256), sha);
+        assert!(verify_mac(
+            &sha,
+            str_pairs(&params),
+            "k",
+            "i",
+            EncryptType::Sha256
+        ));
 
         // MD5 (EncryptType 0) verifies against its own digest.
-        let md5 = check_mac_value(&params, "k", "i", 0).unwrap();
-        assert!(verify_mac(&md5, str_pairs(&params), "k", "i", 0).unwrap());
-        assert!(matches!(
-            verify_mac(&md5, str_pairs(&params), "k", "i", 7),
-            Err(Error::UnsupportedEncryptType(7))
+        let md5 = check_mac_value(&params, "k", "i", EncryptType::Md5);
+        assert!(verify_mac(
+            &md5,
+            str_pairs(&params),
+            "k",
+            "i",
+            EncryptType::Md5
         ));
     }
 
@@ -628,5 +702,41 @@ mod tests {
         assert!(!constant_time_eq(b"MACVALUE", b"MACVALU")); // shorter
         assert!(!constant_time_eq(b"", b"x"));
         assert!(constant_time_eq(b"", b""));
+    }
+
+    // EncryptType's whole contract in one place: the two wire values
+    // round-trip, anything else is Error::UnsupportedEncryptType, and the
+    // wire-string parse keeps the Python-SDK default (missing/garbage → 1)
+    // while rejecting parsable-but-nonexistent codes.
+    #[test]
+    fn encrypt_type_conversions_and_parse_defaults() {
+        assert_eq!(EncryptType::Sha256.as_i64(), 1);
+        assert_eq!(EncryptType::Md5.as_i64(), 0);
+        assert_eq!(i64::from(EncryptType::Sha256), 1);
+        assert_eq!(i64::from(EncryptType::Md5), 0);
+        assert_eq!(EncryptType::try_from(1).unwrap(), EncryptType::Sha256);
+        assert_eq!(EncryptType::try_from(0).unwrap(), EncryptType::Md5);
+        assert!(matches!(
+            EncryptType::try_from(2),
+            Err(Error::UnsupportedEncryptType(2))
+        ));
+        assert!(matches!(
+            EncryptType::try_from(-1),
+            Err(Error::UnsupportedEncryptType(-1))
+        ));
+        // parse: missing/blank/garbage defaults to SHA-256 (SDK parity).
+        assert_eq!(parse_encrypt_type(None).unwrap(), EncryptType::Sha256);
+        assert_eq!(parse_encrypt_type(Some("")).unwrap(), EncryptType::Sha256);
+        assert_eq!(
+            parse_encrypt_type(Some("abc")).unwrap(),
+            EncryptType::Sha256
+        );
+        assert_eq!(parse_encrypt_type(Some("1")).unwrap(), EncryptType::Sha256);
+        assert_eq!(parse_encrypt_type(Some("0")).unwrap(), EncryptType::Md5);
+        // Parsable but nonexistent: the same error TryFrom gives.
+        assert!(matches!(
+            parse_encrypt_type(Some("2")),
+            Err(Error::UnsupportedEncryptType(2))
+        ));
     }
 }

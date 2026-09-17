@@ -48,7 +48,7 @@ async fn order_search_verifies_the_response_mac() {
             ("EmptyField", ""),
             ("Dup", "last"),
         ]);
-        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
         (
             200,
             "application/x-www-form-urlencoded".to_owned(),
@@ -94,7 +94,7 @@ async fn order_search_ignores_a_response_chosen_encrypt_type() {
         ("TradeStatus", "1"),
         ("EncryptType", "0"),
     ]);
-    let md5 = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 0).unwrap();
+    let md5 = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Md5);
     respond.insert("CheckMacValue".to_owned(), md5);
     let srv = spawn_http_server(move |_path, _body| {
         (
@@ -196,7 +196,7 @@ async fn order_search_request_is_signed_and_routed() {
             ("MerchantTradeNo", "order_abc"),
             ("TradeStatus", "0"),
         ]);
-        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
         *captured2.lock().unwrap() = Some(format!("{path}|{body}"));
         (
             200,
@@ -246,7 +246,7 @@ async fn query_payment_info_verifies_the_response_mac() {
             ("vAccount", "3141592653589793"),
             ("ExpireDate", "2024/01/05"),
         ]);
-        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
         (
             200,
             "application/x-www-form-urlencoded".to_owned(),
@@ -300,7 +300,7 @@ async fn query_payment_info_accepts_a_response_with_blank_merchant_id() {
         ("RtnCode", "10200047"),
         ("RtnMsg", "Cant not find the trade data."),
     ]);
-    let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+    let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
     let srv = spawn_http_server(move |_path, _body| {
         (
             200,
@@ -337,7 +337,7 @@ async fn query_payment_info_request_is_signed_and_routed() {
         let body = String::from_utf8_lossy(body).into_owned();
         *captured2.lock().unwrap() = Some(format!("{path}|{body}"));
         let respond = map(&[("MerchantID", MERCHANT_ID), ("RtnCode", "10200047")]);
-        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
         (
             200,
             "application/x-www-form-urlencoded".to_owned(),
@@ -579,7 +579,7 @@ async fn call_payment_api_signature_covers_the_sent_fields() {
         Some(MERCHANT_ID),
         "the forced MerchantID must be SENT, not just signed; body: {body}"
     );
-    let want_mac = ecpay::check_mac_value(&sent, HASH_KEY, HASH_IV, 1).unwrap();
+    let want_mac = ecpay::check_mac_value(&sent, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
     assert_eq!(
         got_mac, want_mac,
         "the signature must cover exactly the sent fields; body: {body}"
@@ -656,7 +656,7 @@ async fn query_trade_info_verifies_the_response_mac() {
             ("TradeStatus", "1"),
             ("TradeAmt", "100"),
         ]);
-        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
         (
             200,
             "application/x-www-form-urlencoded".to_owned(),
@@ -751,8 +751,7 @@ async fn credit_do_action_parses_like_python_parse_qsl() {
 async fn order_search_accepts_a_lowercase_response_mac() {
     let srv = spawn_http_server(move |_path, _body| {
         let respond = map(&[("MerchantID", MERCHANT_ID), ("TradeStatus", "1")]);
-        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1)
-            .unwrap()
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256)
             .to_lowercase();
         (
             200,
@@ -787,7 +786,7 @@ async fn platform_id_is_sent_only_when_non_empty() {
             .unwrap()
             .push(String::from_utf8_lossy(body).into_owned());
         let respond = map(&[("MerchantID", MERCHANT_ID), ("TradeStatus", "1")]);
-        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, 1).unwrap();
+        let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
         (
             200,
             "application/x-www-form-urlencoded".to_owned(),
@@ -828,7 +827,7 @@ fn generate_check_value_forces_the_merchant_id() {
     let mut params = map(&[("MerchantTradeNo", "x"), ("MerchantID", "9999999")]);
     let got = client.generate_check_value(&params).unwrap();
     params.insert("MerchantID".into(), MERCHANT_ID.into());
-    let want = ecpay::check_mac_value(&params, HASH_KEY, HASH_IV, 1).unwrap();
+    let want = ecpay::check_mac_value(&params, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
     assert_eq!(got, want, "signed as the configured merchant");
     assert_ne!(
         got,
@@ -836,9 +835,8 @@ fn generate_check_value_forces_the_merchant_id() {
             &map(&[("MerchantTradeNo", "x"), ("MerchantID", "9999999")]),
             HASH_KEY,
             HASH_IV,
-            1
-        )
-        .unwrap(),
+            ecpay::EncryptType::Sha256
+        ),
         "not as the caller's MerchantID"
     );
 

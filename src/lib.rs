@@ -83,6 +83,7 @@ mod wire;
 
 pub use crypto::{
     check_mac_value, decrypt, decrypt_data, encrypt, encrypt_data, hash_mac, unmarshal, url_encode,
+    EncryptType,
 };
 pub use ecpg::{
     AtmInfo, BarcodeInfo, CardInfo, ConsumerInfo, CreateBindCardInput, CreatePaymentInput,
@@ -431,11 +432,8 @@ impl Ecpay {
             crypto::str_pairs(params),
             &self.hash_key,
             &self.hash_iv,
-            1,
+            crypto::EncryptType::Sha256,
         )
-        // The Err branch (UnsupportedEncryptType) is unreachable with
-        // EncryptType=1 hardcoded; a library must not panic on an invariant.
-        .unwrap_or(false)
     }
 }
 
@@ -484,13 +482,23 @@ mod tests {
         let mut posted = HashMap::new();
         posted.insert("MerchantID".to_owned(), "3002607".to_owned());
         posted.insert("EncryptType".to_owned(), "0".to_owned());
-        let sha = crypto::check_mac_value(&posted, &client.hash_key, &client.hash_iv, 1).unwrap();
+        let sha = crypto::check_mac_value(
+            &posted,
+            &client.hash_key,
+            &client.hash_iv,
+            crypto::EncryptType::Sha256,
+        );
         posted.insert("CheckMacValue".to_owned(), sha);
         assert!(client.verify_check_mac_value(&posted));
 
         // And an MD5 mac fails verification even when EncryptType=0 claims
         // MD5 — the field is never honored on inbound verification.
-        let md5 = crypto::check_mac_value(&posted, &client.hash_key, &client.hash_iv, 0).unwrap();
+        let md5 = crypto::check_mac_value(
+            &posted,
+            &client.hash_key,
+            &client.hash_iv,
+            crypto::EncryptType::Md5,
+        );
         posted.insert("CheckMacValue".to_owned(), md5);
         assert!(!client.verify_check_mac_value(&posted));
     }

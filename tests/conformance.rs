@@ -130,8 +130,12 @@ fn new_payment_mock(
         // The response carries its own CheckMacValue over the fields as
         // sent, like the real server (the client verifies it).
         let mut signed = respond.clone();
-        let mac = check_mac_value(&signed, TEST_PAYMENT_HASH_KEY, TEST_PAYMENT_HASH_IV, 1)
-            .expect("mock signs SHA-256");
+        let mac = check_mac_value(
+            &signed,
+            TEST_PAYMENT_HASH_KEY,
+            TEST_PAYMENT_HASH_IV,
+            ecpay::EncryptType::Sha256,
+        );
         signed.insert("CheckMacValue".to_owned(), mac);
         (
             200,

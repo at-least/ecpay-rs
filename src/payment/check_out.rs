@@ -103,7 +103,10 @@ pub struct AioCheckOutParams {
     /// CheckMacValue 加密類別：1 = SHA-256。**只接受 1**——ECPay 已淘汰
     /// MD5（0），`aio_check_out` 對任何非 1 的值回驗證錯誤（金流回呼驗證
     /// [`crate::Ecpay::verify_check_mac_value`] 同樣只認 SHA-256）。
-    /// MD5 簽名仍可用於國內物流（內部走 MD5）與
+    /// 刻意保持 `i64` 而非 [`crate::EncryptType`]：這是會被序列化成
+    /// `EncryptType=1` 字串上線的**表單欄位**（且驗證已限死 ==1），enum
+    /// 屬於簽章 API（[`crate::crypto::check_mac_value`]）的參數。MD5 簽名
+    /// 仍可用於國內物流（內部走 MD5）與
     /// [`crate::Ecpay::generate_check_value`] 的 EncryptType=0 路徑。
     pub encrypt_type: i64,
     /// 電子發票開立註記:`Y` 或 `N`(官方 sample 明確帶 `N`)。`None` 時不送出;

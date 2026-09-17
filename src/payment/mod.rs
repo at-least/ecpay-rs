@@ -413,7 +413,7 @@ impl Ecpay {
         // a verifier must not take its algorithm selector from the very
         // message it is verifying.
         let encrypt_type =
-            crate::crypto::parse_encrypt_type(m.get("EncryptType").map(String::as_str));
+            crate::crypto::parse_encrypt_type(m.get("EncryptType").map(String::as_str))?;
         let mac = self.generate_check_value(&m)?;
         m.insert("CheckMacValue".to_owned(), mac);
 
@@ -440,7 +440,7 @@ impl Ecpay {
             &self.hash_key,
             &self.hash_iv,
             encrypt_type,
-        )? {
+        ) {
             return Err(Error::CheckMacValueMismatch);
         }
         Ok(query)

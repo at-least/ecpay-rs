@@ -137,7 +137,7 @@ fn empty_key_client_rejects_empty_key_forged_mac() {
         ("RtnCode", "1"),
         ("TradeAmt", "100"),
     ]);
-    let forged = check_mac_value(&params, "", "", 1).unwrap();
+    let forged = check_mac_value(&params, "", "", ecpay::EncryptType::Sha256);
     params.insert("CheckMacValue".to_owned(), forged);
     assert!(
         !ec.verify_check_mac_value(&params),

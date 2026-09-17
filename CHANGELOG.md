@@ -4,6 +4,19 @@
 
 _breaking changes（程式碼審查後的安全/一致性修正）：_
 
+- **`EncryptType` enum 取代 `check_mac_value` 的 `encrypt_type: i64`**：
+  `ecpay::EncryptType::{Sha256, Md5}`（closed enum——wire 上只有 0/1，第三
+  種摘要會是新協定、必為破壞性更新）。移轉：`1` → `EncryptType::Sha256`、
+  `0` → `EncryptType::Md5`。`EncryptType::try_from(i64)`（以及 crate 內部
+  讀取 wire `EncryptType` 欄位的解析）對 0/1 以外的值回**同一個**
+  `Error::UnsupportedEncryptType(n)`——對
+  [`Ecpay::generate_check_value`] 的呼叫端，`EncryptType=2` 的錯誤形狀與
+  位置（出網前）皆不變。連帶清掉
+  不可能的 `Result`：`check_mac_value` 現在直接回 `String`（enum 使
+  「不支援的摘要」無法表示）、`verify_mac`（crate 內部）直接回 `bool`，
+  `verify_check_mac_value` / `verify_logistics_check_mac_value` 的
+  `unwrap_or(false)` 不可達分支同時消失。`AioCheckOutParams.encrypt_type`
+  維持 `i64`（表單 wire 欄位，已驗證 ==1）。
 - **CBC padding oracle 防護**：AES-JSON 回呼解密器
   （`decrypt_ecpg_callback` / `decrypt_logistics_callback` /
   `decrypt_temp_trade_established`）解密的是公開端點上攻擊者可篡改的 CBC
@@ -101,10 +114,6 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
 
 _非破壞性：_
 
-- （pre-1.0 考量，暫緩）`check_mac_value` 的 `encrypt_type: i64` 公開參數
-  形狀：0/1 之外的值早已回 `Error::UnsupportedEncryptType`，1.0 前考慮換
-  專用 enum。國內物流仍以 MD5 簽章，變體必須保留到那時——見
-  `check_mac_value` 的 TODO(pre-1.0) 註解。
 - README 新增「回呼處理清單」：MAC 只證明作者性與完整性，不證明新鮮度與
   金額正確——去重、金額綁定、主動查詢、統一錯誤回應等六步。
 - `decrypt`/`decrypt_data` 文件警告勿用於攻擊者可達的回呼端點（詳細錯誤

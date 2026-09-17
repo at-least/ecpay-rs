@@ -241,7 +241,8 @@ async fn logistics_domestic_create_with_md5_cmv_answers() {
         "https://www.ecpay.com.tw/example/server-reply".into(),
     );
     m.insert("ReceiverStoreID".to_owned(), "006598".into()); // store from the official example
-    let mac = ecpay::crypto::check_mac_value(&m, LOGISTICS_KEY, LOGISTICS_IV, 0).expect("MD5 CMV");
+    let mac =
+        ecpay::crypto::check_mac_value(&m, LOGISTICS_KEY, LOGISTICS_IV, ecpay::EncryptType::Md5);
     m.insert("CheckMacValue".to_owned(), mac);
 
     let endpoint = "https://logistics-stage.ecpay.com.tw/Express/Create";
@@ -258,8 +259,12 @@ async fn logistics_domestic_create_with_md5_cmv_answers() {
     let sent = fields
         .get("CheckMacValue")
         .expect("response carries a CheckMacValue");
-    let ours = ecpay::crypto::check_mac_value(&fields, LOGISTICS_KEY, LOGISTICS_IV, 0)
-        .expect("MD5 CMV over response fields");
+    let ours = ecpay::crypto::check_mac_value(
+        &fields,
+        LOGISTICS_KEY,
+        LOGISTICS_IV,
+        ecpay::EncryptType::Md5,
+    );
     assert_eq!(
         ours, *sent,
         "response CMV signs the query AFTER the `1|` prefix"

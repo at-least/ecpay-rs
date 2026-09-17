@@ -364,7 +364,12 @@ fn check_values_match_the_official_sdk() {
 /// the escaped digest comes from the documented encoding change.
 fn check_mac_value_reference(params: &BTreeMap<String, String>) -> String {
     let map: HashMap<String, String> = params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    ecpay::check_mac_value(&map, TEST_HASH_KEY, TEST_HASH_IV, 1).unwrap()
+    ecpay::check_mac_value(
+        &map,
+        TEST_HASH_KEY,
+        TEST_HASH_IV,
+        ecpay::EncryptType::Sha256,
+    )
 }
 
 #[test]

@@ -54,7 +54,7 @@ fn sample_create() -> LogisticsCreateInput {
 }
 
 fn md5(fields: &HashMap<String, String>) -> String {
-    check_mac_value(fields, LOGISTICS_KEY, LOGISTICS_IV, 0).expect("md5 cmv")
+    check_mac_value(fields, LOGISTICS_KEY, LOGISTICS_IV, ecpay::EncryptType::Md5)
 }
 
 #[tokio::test]
@@ -791,7 +791,12 @@ fn verify_logistics_check_mac_value_is_md5_keyed() {
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
     .collect();
-    let mac = check_mac_value(&params, LOGISTICS_KEY, LOGISTICS_IV, 0).unwrap();
+    let mac = check_mac_value(
+        &params,
+        LOGISTICS_KEY,
+        LOGISTICS_IV,
+        ecpay::EncryptType::Md5,
+    );
     params.insert("CheckMacValue".to_owned(), mac);
     assert!(sdk.verify_logistics_check_mac_value(&params));
     // A SHA-256 signature (the payment default) must NOT verify.
@@ -1755,7 +1760,7 @@ fn empty_key_client_rejects_empty_key_forged_logistics_mac() {
         .into_iter()
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
-        let forged = check_mac_value(&params, "", "", 0).unwrap();
+        let forged = check_mac_value(&params, "", "", ecpay::EncryptType::Md5);
         params.insert("CheckMacValue".to_owned(), forged);
         assert!(
             !sdk.verify_logistics_check_mac_value(&params),

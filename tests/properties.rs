@@ -10,7 +10,7 @@ use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
 use sha2::{Digest, Sha256};
 
-use ecpay::{check_mac_value, decrypt, encrypt, hash_mac, url_encode};
+use ecpay::{decrypt, encrypt, hash_mac, url_encode};
 
 /// Field names ECPay actually exchanges, plus hostile punctuation.
 fn key_strategy() -> impl Strategy<Value = String> {
@@ -233,12 +233,29 @@ proptest! {
         } // else: rejected as bad padding/base64 — also acceptable
     }
 
-    /// check_mac_value rejects unknown EncryptTypes instead of signing with
-    /// the wrong algorithm (the Python SDK silently emits an empty MAC).
+    /// TryFrom<i64> (and with it the wire-field parse behind
+    /// generate_check_value) rejects unknown EncryptTypes instead of
+    /// signing with the wrong algorithm (the Python SDK silently emits an
+    /// empty MAC). The enum makes an unsupported type unrepresentable at
+    /// the hashing call itself, so the rejection lives at the conversion
+    /// boundary — and generate_check_value still surfaces it end to end.
     #[test]
-    fn unsupported_encrypt_types_are_rejected(params in params_strategy(), t in -100i64..100) {
+    fn unsupported_encrypt_types_are_rejected(
+        params in params_strategy(),
+        t in -100i64..100
+    ) {
         prop_assume!(t != 0 && t != 1);
-        let got = check_mac_value(&params, KEY, IV, t);
+        let got = ecpay::EncryptType::try_from(t);
+        prop_assert!(matches!(got, Err(ecpay::Error::UnsupportedEncryptType(_))));
+        let mut params = params;
+        params.insert("EncryptType".to_owned(), t.to_string());
+        let client = ecpay::Ecpay {
+            merchant_id: "3002607".into(),
+            hash_key: KEY.to_owned(),
+            hash_iv: IV.to_owned(),
+            ..Default::default()
+        };
+        let got = client.generate_check_value(&params);
         prop_assert!(matches!(got, Err(ecpay::Error::UnsupportedEncryptType(_))));
     }
 }

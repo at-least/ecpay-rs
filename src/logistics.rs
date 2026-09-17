@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::client::{body_excerpt, render_auto_submit_form, truncate_for_display, unix_now};
-use crate::crypto::{check_mac_value, verify_mac};
+use crate::crypto::{check_mac_value, verify_mac, EncryptType};
 use crate::error::{Error, Result};
 use crate::payment::params::{cap_str, optional_str, required_nonempty, required_str};
 use crate::Ecpay;
@@ -121,7 +121,7 @@ impl Ecpay {
     /// the ONLY service family using MD5), appends CheckMacValue.
     fn sign_logistics(&self, params: &mut HashMap<String, String>) -> Result<()> {
         let (key, iv) = self.logistics_keys();
-        let mac = check_mac_value(params, key, iv, 0)?;
+        let mac = check_mac_value(params, key, iv, EncryptType::Md5);
         params.insert("CheckMacValue".to_owned(), mac);
         Ok(())
     }
@@ -176,7 +176,13 @@ impl Ecpay {
             .filter(|v| !v.is_empty())
             .ok_or(Error::CheckMacValueMismatch)?;
         let (key, iv) = self.logistics_keys();
-        if !verify_mac(&got, crate::crypto::str_pairs(&fields), key, iv, 0)? {
+        if !verify_mac(
+            &got,
+            crate::crypto::str_pairs(&fields),
+            key,
+            iv,
+            EncryptType::Md5,
+        ) {
             return Err(Error::CheckMacValueMismatch);
         }
         if let Some(status) = status {
@@ -872,7 +878,13 @@ impl Ecpay {
             Some(v) if !v.is_empty() => v,
             _ => return false,
         };
-        verify_mac(got, crate::crypto::str_pairs(params), key, iv, 0).unwrap_or(false)
+        verify_mac(
+            got,
+            crate::crypto::str_pairs(params),
+            key,
+            iv,
+            EncryptType::Md5,
+        )
     }
 
     /// 解密全方位物流 v2 / 跨境物流的 ServerReplyURL 回呼(整包 JSON POST,

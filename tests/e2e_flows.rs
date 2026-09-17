@@ -71,7 +71,7 @@ fn urlencode(s: &str) -> String {
 }
 
 fn md5(fields: &HashMap<String, String>) -> String {
-    check_mac_value(fields, LOG_KEY, LOG_IV, 0).expect("md5 cmv")
+    check_mac_value(fields, LOG_KEY, LOG_IV, ecpay::EncryptType::Md5)
 }
 
 async fn post_form(url: &str, pairs: &[(String, String)]) -> (u16, String) {
@@ -144,12 +144,17 @@ fn unquote(s: &str) -> String {
 
 /// Builds `k=v&...` sorted by key, URL-encoded — how ECPay signs and sends
 /// its query-string responses.
-fn signed_query(pairs: &[(&str, String)], key: &str, iv: &str, encrypt_type: i64) -> String {
+fn signed_query(
+    pairs: &[(&str, String)],
+    key: &str,
+    iv: &str,
+    encrypt_type: ecpay::EncryptType,
+) -> String {
     let map: HashMap<String, String> = pairs
         .iter()
         .map(|(k, v)| (k.to_string(), v.clone()))
         .collect();
-    let mac = check_mac_value(&map, key, iv, encrypt_type).expect("cmv");
+    let mac = check_mac_value(&map, key, iv, encrypt_type);
     let mut all = map;
     all.insert("CheckMacValue".to_string(), mac);
     let mut sorted: Vec<_> = all.iter().collect();
@@ -239,7 +244,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
                     ],
                     LOG_KEY,
                     LOG_IV,
-                    0,
+                    ecpay::EncryptType::Md5,
                 );
                 (200, "text/plain".into(), format!("1|{query}").into_bytes())
             } else if path.ends_with("/Helper/QueryLogisticsTradeInfo/V2") {
@@ -259,7 +264,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
                     ],
                     LOG_KEY,
                     LOG_IV,
-                    0,
+                    ecpay::EncryptType::Md5,
                 );
                 (200, "text/plain".into(), query.into_bytes())
             } else {
