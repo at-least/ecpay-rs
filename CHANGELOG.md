@@ -75,6 +75,29 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
   wire 值，現在客戶端即以 `Error::Validation("TotalAmount cannot be
   negative.")` 拒絕，不再簽章送出後由綠界錯誤頁回答。零仍允許（是否
   接受零額屬伺服器端規則）。
+- **`aio_check_out` 拒絕非 1 的 `EncryptType`**（全庫審查）：AIO 收銀台
+  簽章只認 SHA-256——ECPay 已淘汰 MD5（`EncryptType=0`）。先前 `0` 會被
+  簽成 MD5 送出（換來收銀台拒絕）、`2` 只在簽章階段才以
+  `Error::UnsupportedEncryptType` 失敗；現在兩者都在驗證階段即回
+  `Error::Validation("EncryptType must be 1 (SHA-256); ECPay has retired
+  MD5 (EncryptType=0) on AIO.")`，與回應驗證
+  （`verify_check_mac_value`，SHA-256 only）對稱。`generate_check_value`
+  與 `check_mac_value` 的 `EncryptType=0`（MD5）路徑保留不變——國內物流
+  仍以 MD5 簽章，官方 Python SDK 向量亦釘住該路徑。
+- **國內物流（CMV-MD5 家族）補本地欄位驗證**（全庫審查）：`Express/Create`、
+  `express/ReturnCVS`/`ReturnUniMartCVS`、`Express/ReturnHome`、
+  `Helper/QueryLogisticsTradeInfo/V2`、`Helper/UpdateShipmentInfo`、
+  `Express/UpdateStoreInfo`、`Express/CancelC2COrder` 的呼叫現在於簽章
+  前驗證欄位——必填欄位留空、`MerchantTradeNo` 超過 20 字、`GoodsAmount`
+  為負等，一律以 `Error::Validation` 在出網前拒絕（訊息與 payment 模組
+  同一套，含官方 "langth" 拼字）。驗證僅限於官方明載、且不更嚴於它：
+  長度上限只取官方欄位表明載者（`GoodsName`≤50、姓名≤10、手機≤20、
+  地址≤60、`ReceiverStoreID`≤6），以字元數計——對伺服器端以 byte 或
+  半形單位計數的實作而言是寬鬆子集，不會擋掉綠界會接受的值；
+  `MerchantTradeNo`（可空，系統自動產生）與 `GoodsName`/
+  `SenderCellPhone`（僅 C2C 子類別必填）三個欄位**只驗長度不驗必填**，
+  留空的 B2C 訂單照常送出。金額上限依 `LogisticsSubType` 而異，仍由
+  伺服器裁定。
 
 _非破壞性：_
 
@@ -83,9 +106,14 @@ _非破壞性：_
 - `decrypt`/`decrypt_data` 文件警告勿用於攻擊者可達的回呼端點（詳細錯誤
   僅適合自家 TLS 連線上的綠界回應），並指向回呼解密器。
 - 移除 `verify_check_mac_value` / `hash_mac` 內部不可達分支的 `.expect`
-  （改回 `false` / 空 MAC + `debug_assert`）；`logistics_keys` 回傳
+  （`verify_check_mac_value` 改回 `false`）；`hash_mac` 重構為直接走與
+  `check_mac_value`（EncryptType=1 分支）共用的 SHA-256 前像路徑，
+  不存在任何可吞掉的錯誤分支；`logistics_keys` 回傳
   `(&str, &str)`，刪除不可達的 UTF-8 錯誤路徑；CheckMacValue 前像改以
-  `write!` 組字串（少一次 per-pair 配置）。
+  `write!` 組字串（少一次 per-pair 配置）。`constant_time_eq` 改用
+  audited 的 `subtle` crate 原語（長度先短路——長度不是祕密；語意與
+  Go `crypto/subtle.ConstantTimeCompare` 不變，字元級行為由
+  characterization 測試釘住）。
 - **國內物流錯誤訊息文字加上界**（全庫審查）：`0|<訊息>` 業務拒絕與
   「2xx 非簽章 query（HTML 錯誤頁）」兩條 `Error::Message` 路徑，先前把
   回應 body 原文（上限 1 MiB）整段塞進錯誤字串；現在分別以

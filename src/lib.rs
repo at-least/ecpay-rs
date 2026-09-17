@@ -213,10 +213,13 @@ pub struct Ecpay {
     /// B2B envelope `RqHeader.RqID` — a GUID-format request ID you generate.
     /// ECPay does not dedupe on it (proven on stage: one fixed RqID issued
     /// two distinct invoices), but production integrations should still make
-    /// it unique per request for their own auditing. **Required**: every B2B
-    /// call is refused locally when this is empty (the official PHP examples
-    /// always send an RqID; whether the stage accepts an empty one is
-    /// unverified, and the crate will not gamble the request on it).
+    /// it unique per request for their own auditing. The field lives on the
+    /// client, so per-request uniqueness is a clone-and-set away:
+    /// `let mut c = client.clone(); c.b2b_rq_id = new_guid();`.
+    /// **Required**: every B2B call is refused locally when this is empty
+    /// (the official PHP examples always send an RqID; whether the stage
+    /// accepts an empty one is unverified, and the crate will not gamble
+    /// the request on it).
     pub b2b_rq_id: String,
     /// Optional injected HTTP client (your own pooling/timeout policy, or a
     /// mock in tests). `None` (the default) uses the crate's shared hardened
