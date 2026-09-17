@@ -392,15 +392,17 @@ cargo clippy --all-targets
 submodule 只有 `.claude/skills/ecpay`(官方 ECPay-API-Skill,供 Claude Code
 讀規格用),不初始化也能 build 與跑測試;發佈到 crates.io 的 crate 已排除該目錄。
 
-`cargo test` 預設**完全離線**:四個打真實 ECPay stage 的套件
+`cargo test` 預設**完全離線**:打真實 ECPay stage 的套件
 (`tests/sandbox.rs`、`tests/sandbox_b2b.rs`、`tests/sandbox_logistics.rs`、
-`tests/stage_smoke.rs`,以及探測用的 `tests/stage_probes.rs`)全部 `#[ignore]`,
-離線環境不會失敗。需要端對端驗證時以 `-- --ignored` 明確執行(公開測試特店
-2000132,需對外網路;每次執行會在 stage 建立並清理真實沙盒資料,CI 的
+`tests/sandbox_ecpg.rs`、`tests/stage_smoke.rs`,以及探測用的
+`tests/stage_probes.rs`)全部 `#[ignore]`,離線環境不會失敗。需要端對端
+驗證時以 `-- --ignored` 明確執行(公開測試特店 2000132/3002607,需對外
+網路;每次執行會在 stage 建立並清理真實沙盒資料,CI 的
 `cargo test --test sandbox … -- --ignored` 步驟即以此做端對端驗證):
 
 ```bash
 cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics -- --ignored
+cargo test --test sandbox_ecpg -- --ignored --test-threads=1   # 站內付 2.0
 cargo test --test stage_smoke -- --ignored --nocapture          # 煙霧
 cargo test --test stage_probes -- --ignored --test-threads=1    # 探測(手動)
 ```

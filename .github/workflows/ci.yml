@@ -25,6 +25,8 @@ jobs:
       # same three sandbox suites CI always ran — now via -- --ignored.
       # stage_smoke / stage_probes stay a manual run (see README).
       - run: cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics -- --ignored
+      # ECPG stage has been observed slow — single-threaded like stage_probes.
+      - run: cargo test --test sandbox_ecpg -- --ignored --test-threads=1
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings

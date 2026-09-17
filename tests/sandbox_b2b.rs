@@ -154,6 +154,31 @@ async fn b2b_invalid_reason_length_is_checked_before_the_lookup() {
     assert_eq!(short["RtnCode"], 6070004, "{short}");
 }
 
+/// GetIssue on a fabricated number: the lookup-key contract (InvoiceNumber
+/// + InvoiceDate) — the answer must be an in-band business rejection whose
+/// RtnCode is a STRING (the type quirk the roundtrip pins for success).
+/// Stateless — nothing is issued.
+#[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_b2b -- --ignored --nocapture"]
+async fn b2b_get_issue_not_found_is_an_in_band_string_rtncode() {
+    let got = sdk()
+        .get_issue_b2b(&GetIssueInput {
+            merchant_id: MERCHANT_ID.into(),
+            invoice_category: 0,
+            invoice_number: "ZZ00000000".into(),
+            invoice_date: taipei_today(),
+        })
+        .await
+        .expect("the envelope decodes (TransCode=1)");
+    println!("get_issue not-found = {got:?}");
+    assert!(
+        got["RtnCode"].is_string(),
+        "B2B GetIssue's RtnCode is the STRING type quirk, got {}",
+        got["RtnCode"]
+    );
+    assert_ne!(got["RtnCode"], "1", "a fabricated number must not be found");
+}
+
 #[tokio::test]
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_b2b -- --ignored --nocapture"]
 async fn b2b_get_invoice_word_setting_answers() {
