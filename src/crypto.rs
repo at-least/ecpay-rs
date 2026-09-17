@@ -162,13 +162,14 @@ fn sorted_pairs<'a>(
 
 /// Go `HashMac`: the "k=v" pairs (joined by &, wrapped in HashKey/HashIV)
 /// URL-encoded with the .NET-flavored encoder, lowercased, SHA-256-hashed,
-/// UPPERCASE hex. Equivalent to [`check_mac_value`] with EncryptType = 1.
+/// UPPERCASE hex. Equivalent to [`check_mac_value`] with EncryptType = 1 —
+/// and, like that arm, computed over the shared preimage path
+/// (`cmv_preimage`), so there is no error branch to swallow (SHA-256
+/// cannot fail).
 pub fn hash_mac(params: &HashMap<String, String>, hash_key: &str, hash_iv: &str) -> String {
-    let mac = check_mac_value(params, hash_key, hash_iv, 1);
-    debug_assert!(mac.is_ok(), "EncryptType=1 cannot fail");
-    // Unreachable (EncryptType=1 is hardcoded); degrade to an empty MAC
-    // rather than panic inside a library.
-    mac.unwrap_or_default()
+    to_upper_hex(&Sha256::digest(
+        cmv_preimage(str_pairs(params), hash_key, hash_iv).as_bytes(),
+    ))
 }
 
 /// Shared verification half of [`check_mac_value`]: recompute the mac over
@@ -229,6 +230,23 @@ pub(crate) fn check_mac_value_pairs<'a>(
     hash_iv: &str,
     encrypt_type: i64,
 ) -> Result<String> {
+    let preimage = cmv_preimage(pairs, hash_key, hash_iv);
+    match encrypt_type {
+        1 => Ok(to_upper_hex(&Sha256::digest(preimage.as_bytes()))),
+        0 => Ok(to_upper_hex(&<Md5 as Digest>::digest(preimage.as_bytes()))),
+        n => Err(Error::UnsupportedEncryptType(n)),
+    }
+}
+
+/// The digest preimage both EncryptType arms (and [`hash_mac`], which is
+/// SHA-256 by definition) share: drop any existing CheckMacValue, sort by
+/// lowercased key, join "k=v" pairs with &, wrap in HashKey/HashIV, .NET-
+/// URLEncode, lowercase.
+fn cmv_preimage<'a>(
+    pairs: impl IntoIterator<Item = (&'a str, &'a str)>,
+    hash_key: &str,
+    hash_iv: &str,
+) -> String {
     let pairs = sorted_pairs(pairs.into_iter().filter(|(k, _)| *k != "CheckMacValue"));
     use std::fmt::Write as _;
     let mut s = format!("HashKey={hash_key}&");
@@ -237,31 +255,28 @@ pub(crate) fn check_mac_value_pairs<'a>(
         let _ = write!(s, "{k}={v}&");
     }
     let _ = write!(s, "HashIV={hash_iv}");
-    let s = url_encode(&s).to_lowercase();
-    let digest: Vec<u8> = match encrypt_type {
-        1 => Sha256::digest(s.as_bytes()).to_vec(),
-        0 => <Md5 as Digest>::digest(s.as_bytes()).to_vec(),
-        n => return Err(Error::UnsupportedEncryptType(n)),
-    };
+    url_encode(&s).to_lowercase()
+}
+
+fn to_upper_hex(digest: &[u8]) -> String {
     let mut out = String::with_capacity(digest.len() * 2);
     for b in digest {
         out.push(UPPER_HEX[usize::from(b >> 4)] as char);
         out.push(UPPER_HEX[usize::from(b & 0x0f)] as char);
     }
-    Ok(out)
+    out
 }
 
-/// Constant-time byte comparison (Go `crypto/subtle.ConstantTimeCompare`; like
-/// Go, a length difference short-circuits — lengths are not secret).
+/// Constant-time byte comparison, on the audited `subtle` primitive (Go
+/// `crypto/subtle.ConstantTimeCompare` semantics). The explicit length
+/// guard documents that lengths are not secret (subtle's slice `ct_eq`
+/// also short-circuits to not-equal on unequal lengths).
 pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
+    use subtle::ConstantTimeEq as _;
+    a.ct_eq(b).into()
 }
 
 /// Go `Encrypt`: validate the key size and IV length (Go aes.NewCipher +
@@ -489,6 +504,13 @@ pub(crate) fn decrypt_payload_uniform<T: DeserializeOwned>(
 /// B2B module has sent serde_json-formatted floats to the stage server and
 /// been accepted (2026-09) — which is why the former Go-`encoding/json`
 /// byte emulation was dropped.
+///
+/// ⚠ Float-money hygiene for callers: shortest-round-trip means an f64
+/// arithmetic artifact goes on the wire verbatim — `3 * 19.99` serializes
+/// as `59.970000000000006`. Construct these fields by parsing the decimal
+/// literal your pricing produced (`"59.97".parse::<f64>()`) or compute in
+/// integer minor units and convert once at the end; TWD totals
+/// (`TotalAmount`, `SalesAmount`, …) are `i64` and never touch this path.
 pub mod finite_f64 {
     use serde::{Deserialize, Deserializer, Serializer};
 
@@ -588,5 +610,18 @@ mod tests {
         b[13] = 1; // claims 3 but not all 3s
         assert!(unpad_pkcs7(&b).is_err());
         assert_eq!(unpad_pkcs7(b"abc\x02\x02").unwrap(), b"abc");
+    }
+
+    // Characterization (pinning): the contract verify_mac depends on —
+    // equal inputs true, any one-bit difference false, unequal lengths
+    // false without panicking. Written before swapping the body onto the
+    // `subtle` crate; must stay green across that refactor.
+    #[test]
+    fn constant_time_eq_equal_differs_on_one_bit_and_on_length() {
+        assert!(constant_time_eq(b"MACVALUE", b"MACVALUE"));
+        assert!(!constant_time_eq(b"MACVALUE", b"MACVALUF")); // last bit flipped
+        assert!(!constant_time_eq(b"MACVALUE", b"MACVALU")); // shorter
+        assert!(!constant_time_eq(b"", b"x"));
+        assert!(constant_time_eq(b"", b""));
     }
 }
