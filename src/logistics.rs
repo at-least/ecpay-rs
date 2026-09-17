@@ -73,7 +73,9 @@ impl LogisticsForm {
         &self.pairs
     }
 
-    /// Auto-submitting HTML form, same contract as the checkout form.
+    /// Auto-submitting HTML form, same contract as the checkout form. Render
+    /// at most one per page — the auto-submit script targets the fixed id
+    /// `data_set`, so only the first form in the page gets submitted.
     pub fn html_form(&self) -> String {
         render_auto_submit_form(self.action(), &self.pairs)
     }

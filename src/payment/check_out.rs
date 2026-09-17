@@ -308,7 +308,9 @@ impl AioCheckOut {
     /// Port of `ExtendFunction.gen_html_post_form`: an auto-submitting HTML
     /// form that sends the browser to ECPay's payment page. Attribute values
     /// are HTML-escaped (the official SDK does not, which breaks on `"` and
-    /// is an injection vector).
+    /// is an injection vector). Render at most one form per page — the
+    /// auto-submit script targets the fixed id `data_set`, so only the first
+    /// form in the page gets submitted.
     pub fn html_form(&self) -> String {
         render_auto_submit_form(self.action(), &self.params)
     }

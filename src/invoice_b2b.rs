@@ -21,8 +21,10 @@
 //!
 //! Only [`Ecpay::issue_b2b`] decodes into a typed output
 //! ([`B2bIssueOutput`], stage-proven live: `{"InvoiceNumber":"LP30000931",
-//! "RandomNumber":"3990","RtnCode":1,"RtnMsg":"發票開立成功"}` — note
-//! `RtnCode` is an INTEGER, unlike the B2C invoice's string-typed one).
+//! "RandomNumber":"3990","RtnCode":1,"RtnMsg":"發票開立成功"}` — `RtnCode`
+//! is a JSON integer, same as the B2C invoice's typed outputs, which model
+//! it `i64` likewise; the real B2B naming difference is `InvoiceNumber`,
+//! where B2C uses `InvoiceNo`).
 //! Every other endpoint's full response field set is not stage-proven, so
 //! those methods honestly return the decrypted `serde_json::Value` and the
 //! caller inspects `RtnCode` itself.
@@ -36,7 +38,13 @@
 //! collide with the existing B2C invoice methods (`allowance`, `invalid`,
 //! `get_issue`, `get_invalid`, `get_allowance`, `get_allowance_invalid`,
 //! `get_invoice_word_setting`) take a `_b2b` suffix — the same treatment
-//! [`Ecpay::issue_b2b`] gets to avoid [`Ecpay::issue`].
+//! [`Ecpay::issue_b2b`] gets to avoid [`Ecpay::issue`]. The same rule
+//! governs the TYPE exports: the 19 input/output types without a B2C
+//! name collision are re-exported at the crate root, while the seven
+//! same-named ones (`AllowanceInput`, `InvalidInput`, `GetIssueInput`,
+//! `GetInvalidInput`, `GetAllowanceInput`, `GetAllowanceInvalidInput`,
+//! `GetInvoiceWordSettingInput`) are reachable only here, as
+//! `ecpay::invoice_b2b::<Type>`.
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

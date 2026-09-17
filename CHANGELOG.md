@@ -188,6 +188,20 @@ _非破壞性：_
   `stage_smoke`/`stage_probes`（探測會建立真實 stage 紀錄故不自動跑，
   但可一鍵手動執行，parity 不再無人把關）；`need_extra_paid_info`
   常數與 injected-client 超時路徑補上測試。
+- **B2B 發票型別 root 再導出**（全庫審查）：`invoice_b2b` 模組中 19 個
+  不與 B2C 撞名的型別（`IssueB2bInput`、`B2bItem`、`B2bIssueOutput`、
+  `B2bAllowanceDetail`、各 `*ConfirmInput`、`NotifyInput`/`RejectInput`
+  等）可直接從 crate root `use`，與其他模組一致；七個與 B2C 同名的型別
+  （`AllowanceInput`、`InvalidInput`、`GetIssueInput`、`GetInvalidInput`、
+  `GetAllowanceInput`、`GetAllowanceInvalidInput`、
+  `GetInvoiceWordSettingInput`）維持在 `ecpay::invoice_b2b` 底下（與
+  `_b2b` 方法後綴同一規則），root 匯出測試逐名釘住。同批文件修正（全庫
+  審查）：`invoice_b2b` 模組文件誤稱 B2C `RtnCode` 為「字串型」的過時
+  註解（兩服務的 typed 輸出皆為 `i64`，真正的差異是回應欄位名
+  `InvoiceNumber` vs B2C 的 `InvoiceNo`）；`encrypt_checked` 補上
+  「檢查後仍加密原 wire 字串」的理由（`to_value` 再序列化會經
+  BTreeMap 重排鍵序、改變 conformance 釘死的 wire bytes）；表單 builder
+  文件標明「一頁一表單」（自動提交腳本以固定 id `data_set` 定位）。
 
 ## 0.4.0 — 2026-09-16
 

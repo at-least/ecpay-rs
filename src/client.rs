@@ -95,6 +95,12 @@ impl Ecpay {
         key: &[u8],
         iv: &[u8],
     ) -> Result<String> {
+        // Serialized ONCE to the wire JSON, parsed back only to inspect the
+        // top-level MerchantID; the WIRE string is what gets encrypted.
+        // Serializing the inspected Value instead (to_value +
+        // to_string(&value)) would alphabetically reorder every object —
+        // serde_json's Map is a BTreeMap without the preserve_order feature
+        // — and change the wire bytes the conformance tests pin.
         let json = serde_json::to_string(input)?;
         let value: serde_json::Value = serde_json::from_str(&json)?;
         if let Some(mid) = value.get("MerchantID").and_then(serde_json::Value::as_str) {
@@ -155,7 +161,10 @@ pub(crate) fn html_escape(s: &str) -> String {
 /// Port of `ExtendFunction.gen_html_post_form`: an auto-submitting HTML form
 /// (id `data_set`) that sends the browser to ECPay's page — shared by the AIO
 /// checkout form and the logistics forms. Attribute values are HTML-escaped
-/// (see [`html_escape`]).
+/// (see [`html_escape`]). Render AT MOST ONE form per page: the auto-submit
+/// script targets the fixed id `data_set` via `getElementById`, so a second
+/// form on the same page would be skipped (or hijack the submit) — official-
+/// SDK behavior, kept for byte parity.
 pub(crate) fn render_auto_submit_form(action: &str, pairs: &[(String, String)]) -> String {
     let mut html = format!(
         "<form id=\"data_set\" action=\"{}\" method=\"post\">",
