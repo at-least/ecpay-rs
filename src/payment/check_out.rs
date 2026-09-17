@@ -326,6 +326,13 @@ impl Ecpay {
         required_str("TradeDesc", &p.trade_desc, 200)?;
         required_str("ItemName", &p.item_name, 400)?;
         required_str("ReturnURL", &p.return_url, 200)?;
+        // A negative TWD total is never a valid wire value; reject it before
+        // signing rather than letting ECPay's error page answer. (Zero stays
+        // allowed — whether zero is accepted is a server-side rule, and some
+        // flows price differently.)
+        if p.total_amount < 0 {
+            return Err(Error::Validation("TotalAmount cannot be negative.".into()));
+        }
         optional_str("StoreID", &p.store_id, 10)?;
         optional_str("ClientBackURL", &p.client_back_url, 200)?;
         optional_str("ItemURL", &p.item_url, 200)?;

@@ -816,3 +816,37 @@ fn optional_extend_fields_reject_overlong_values() {
         assert_eq!(err, format!("{name} max langth is {want_max}."), "{name}");
     }
 }
+
+/// A negative TWD total is never a valid wire value; the client must reject
+/// it before signing instead of letting ECPay's error page answer.
+#[test]
+fn aio_check_out_rejects_a_negative_total_amount() {
+    let mut p = base(ChoosePayment::Credit);
+    p.total_amount = -1;
+    let err = sdk().aio_check_out(&p).unwrap_err();
+    assert_eq!(
+        validation(err),
+        "TotalAmount cannot be negative.",
+        "a negative total must be a client-side Validation error"
+    );
+}
+
+/// The `need_extra_paid_info` constants are the modeled way to set the
+/// Y/N flag; pin that they reach the wire verbatim (previously only raw
+/// strings were exercised, leaving the constants example-only surface).
+#[test]
+fn need_extra_paid_info_constants_reach_the_wire() {
+    for (value, wire) in [
+        (ecpay::payment::need_extra_paid_info::YES, "Y"),
+        (ecpay::payment::need_extra_paid_info::NO, "N"),
+    ] {
+        let mut p = base(ChoosePayment::Credit);
+        p.need_extra_paid_info = Some(value.to_owned());
+        let out = sdk().aio_check_out(&p).unwrap();
+        assert_eq!(
+            param(&out, "NeedExtraPaidInfo"),
+            Some(wire),
+            "constant {value:?} must land on the wire as {wire:?}"
+        );
+    }
+}

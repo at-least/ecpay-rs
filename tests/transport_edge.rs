@@ -542,3 +542,39 @@ fn callback_decoders_route_through_their_own_key_pairs() {
         .unwrap();
     assert_eq!(v["RtnCode"], "1");
 }
+
+/// An injected client's timeout policy is honored end to end: a server
+/// slower than the configured overall timeout surfaces as `Error::Http`
+/// with `is_timeout()` (the default shared client carries 10s/30s timeouts;
+/// this pins the path with a tight injected one so the test stays fast).
+#[tokio::test]
+async fn injected_client_timeout_surfaces_as_http_timeout_error() {
+    let srv = spawn_http_server(move |_path, _body| {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        (200, "text/html".to_owned(), b"too late".to_vec())
+    });
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(100))
+        .build()
+        .expect("test client");
+    let client = Ecpay {
+        payment_api_url: srv,
+        http: Some(http),
+        ..sdk()
+    };
+    let err = client
+        .order_search(&OrderSearchParams {
+            merchant_trade_no: "x".into(),
+            time_stamp: 0,
+            platform_id: None,
+        })
+        .await
+        .expect_err("the server outlives the client's timeout");
+    match err {
+        ecpay::Error::Http(e) => assert!(
+            e.is_timeout(),
+            "the failure must be the client timeout, got: {e:?}"
+        ),
+        other => panic!("expected Error::Http(timeout), got: {other:?}"),
+    }
+}

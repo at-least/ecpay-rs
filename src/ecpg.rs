@@ -155,9 +155,12 @@ pub struct ConsumerInfo {
     #[serde(rename = "MerchantMemberID", skip_serializing_if = "Option::is_none")]
     pub merchant_member_id: Option<String>,
     /// 消費者電子信箱（官方文件：`Email` 或 `Phone` 擇一必填；見型別層級說明）。
+    /// 留空時仍以空字串上 wire（非省略）——這對 ECPay 是無效請求，由伺服器
+    /// 點名回錯（5100010 系）；本 crate 不在本機擋，讓錯誤訊息保持伺服器真相。
     #[serde(rename = "Email")]
     pub email: String,
     /// 消費者手機號碼（官方文件：`Email` 或 `Phone` 擇一必填；見型別層級說明）。
+    /// 留空時仍以空字串上 wire（非省略），同 [`Self::email`] 的理由。
     #[serde(rename = "Phone")]
     pub phone: String,
     /// 消費者姓名。
