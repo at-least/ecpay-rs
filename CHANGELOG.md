@@ -29,6 +29,12 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
 - **B2B 發票要求 `b2b_rq_id`**：留空時每個 B2B 呼叫在出網前回
   `Error::Message`——wire 契約每個請求都帶 `RqHeader.RqID`（官方 PHP 範例
   一律送出），空值是否被伺服器接受未經實測，不再賭這一把。
+- **ECPG 查詢家族要求 Data 層 MerchantID**:`ecpg_query_trade` /
+  `ecpg_query_payment_info` / `ecpg_query_credit_trade` 對省略 Data
+  `MerchantID` 的呼叫改為出網前回 `Error::Message`——2026-09 對 stage
+  三端點逐一實測,省略一律回 `10200051 MerchantID Error.`
+  (`EcpgTradeRefInput` 文件「省略時以信封 MerchantID 為準」的舊假設已
+  證偽),與 DoAction/CreditCardPeriodAction 同一防呆。
 - **物流 v2/跨境要求 Data 層 MerchantID**：輸入結構帶 `MerchantID` 欄位
   者（依官方範例慣例），留空或與信封不一致時出網前回 `Error::Message`——
   與 ECPG/B2B 模組同一防呆；先前空值會原樣送出、換來伺服器不帶訊息的
@@ -52,6 +58,18 @@ _非破壞性：_
   `InvoiceStatus` 的 Display 同一 512 字元契約）與 `body_excerpt`
   （有界 + 跳脫，與 AES-JSON "not an envelope" 錯誤同款）截斷——錯誤
   訊息不再可能被單一回應灌爆 log 行。
+- **新增 `tests/sandbox_ecpg.rs`(進 CI 的 live stage suite)**:站內付 2.0
+  家族此前只有手動 probe——現在以真實 `Ecpay` 方法覆蓋 GetTokenbyTrade
+  取號(含「缺 ConsumerInfo → RtnCode≠1 且無訊息」的Opaque 拒絕契約、
+  「ChoosePaymentList="0" 仍要求 CVSInfo/BarcodeInfo」的 5100010 實測)、
+  雙網域查詢家族與 DoAction 的查無訂單形狀(`RtnCode 10000185`,釘死
+  JSON **整數**型別)。ECPG stage 觀察偏慢,CI 以 `--test-threads=1` 執行。
+- **物流瀏覽表單欄位順序的 stage 實證**:`LogisticsForm` 渲染出的排序
+  欄位以瀏覽器的原始順序 server-to-server POST 到 `Express/Create`,
+  stage 回簽章 `1|` 回應(RtnCode=300)——排序欄位序被真實伺服器接受,
+  不再只靠 MAC-over-map 不變式推論。B2B 補 `GetIssue` 查無發票 probe
+  (釘 `RtnCode` 為字串的型別怪癖)。sandbox 測試的 `unique_no` 加原子
+  序號,消除並行測試同毫秒撞單號的 flake(實測 `0|廠商訂單編號重覆`)。
 - **`LogisticsForm` 欄位順序確定性**（全庫審查）：六個瀏覽器表單建構點
   改走統一的排序建構（鍵 bytewise 排序，同 `AioCheckOut`）。簽章本就算
   在 map 上、欄位順序對 wire 無差異，但先前 `HashMap` 迭代順序讓每次
