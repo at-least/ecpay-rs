@@ -366,16 +366,20 @@ pub struct DeleteMemberBindCardInput {
 // --- ecpayment 網域（查詢/動作）家族的輸入 ---
 
 /// 查詢類端點（`Cashier/QueryTrade`、`Cashier/QueryPaymentInfo`、
-/// `CreditDetail/QueryTrade`）共用的交易參照。`PlatformID` / `MerchantID`
-/// 未設定（`None`）時**自 Data 省略**，ECPay 以信封的 MerchantID（即
-/// [`crate::Ecpay::merchant_id`]）為準。
+/// `CreditDetail/QueryTrade`）共用的交易參照。`PlatformID` 未設定
+/// （`None`）時自 Data 省略（stage 實測可省）。`MerchantID` 則為**必要**：
+/// 三個查詢端點對省略一律回 `10200051 MerchantID Error.`（2026-09 對
+/// stage 逐一實測），「以信封 MerchantID 為準」的舊假設已證偽——方法會
+/// 在出網前擋下 `None`，與 DoAction/CreditCardPeriodAction 同一防呆。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EcpgTradeRefInput {
     /// 平台商代號（平台商模式才需要）。
     #[serde(rename = "PlatformID", skip_serializing_if = "Option::is_none")]
     pub platform_id: Option<String>,
-    /// 特店編號；省略時以信封 MerchantID 為準。
+    /// 特店編號（Data 層必填；省略會被方法在本機拒絕——stage 對三個查詢
+    /// 端點與 DoAction/CreditCardPeriodAction 一律回 `10200051 MerchantID
+    /// Error.`，見輸入結構的說明）。
     #[serde(rename = "MerchantID", skip_serializing_if = "Option::is_none")]
     pub merchant_id: Option<String>,
     /// 特店交易編號。
@@ -405,15 +409,17 @@ pub struct QueryTradeMediaInput {
 }
 
 /// `Cashier/CreditCardPeriodAction`（信用卡定期定額動作）的 Data 內容。
-/// `PlatformID` / `MerchantID` 未設定時自 Data 省略（同
-/// [`EcpgTradeRefInput`] 的規則）。
+/// `PlatformID` 未設定時自 Data 省略；`MerchantID` 為必要（見
+/// [`EcpgTradeRefInput`] 的說明）。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EcpgPeriodActionInput {
     /// 平台商代號（平台商模式才需要）。
     #[serde(rename = "PlatformID", skip_serializing_if = "Option::is_none")]
     pub platform_id: Option<String>,
-    /// 特店編號；省略時以信封 MerchantID 為準。
+    /// 特店編號（Data 層必填；省略會被方法在本機拒絕——stage 對三個查詢
+    /// 端點與 DoAction/CreditCardPeriodAction 一律回 `10200051 MerchantID
+    /// Error.`，見輸入結構的說明）。
     #[serde(rename = "MerchantID", skip_serializing_if = "Option::is_none")]
     pub merchant_id: Option<String>,
     /// 特店交易編號。
@@ -426,14 +432,17 @@ pub struct EcpgPeriodActionInput {
 
 /// `Credit/DoAction`（信用卡請款/退款/取消/放棄：C/R/E/N）的 Data 內容。
 /// 僅適用於**信用卡**交易 — ATM/超商代碼/條碼不支援線上退款 API。
-/// `PlatformID` / `MerchantID` 未設定時自 Data 省略。
+/// `PlatformID` 未設定時自 Data 省略；`MerchantID` 為必要（stage 對省略
+/// 回 `10200051 MerchantID Error.`，方法在本機擋下）。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EcpgDoActionInput {
     /// 平台商代號（平台商模式才需要）。
     #[serde(rename = "PlatformID", skip_serializing_if = "Option::is_none")]
     pub platform_id: Option<String>,
-    /// 特店編號；省略時以信封 MerchantID 為準。
+    /// 特店編號（Data 層必填；省略會被方法在本機拒絕——stage 對三個查詢
+    /// 端點與 DoAction/CreditCardPeriodAction 一律回 `10200051 MerchantID
+    /// Error.`，見輸入結構的說明）。
     #[serde(rename = "MerchantID", skip_serializing_if = "Option::is_none")]
     pub merchant_id: Option<String>,
     /// 特店交易編號。
@@ -480,9 +489,10 @@ impl Ecpay {
     /// PlatformID — 在此現狀下「Data MerchantID ≠ 信封」的請求只會被
     /// stage 以空訊息拒絕，本機先擋不會擋掉任何原本可行的流程。查詢家族
     /// （`EcpgTradeRefInput`/`EcpgPeriodActionInput`/`EcpgDoActionInput`）
-    /// 的 `MerchantID` 是 `Option`：省略時以信封為準；帶了值則同樣會被
-    /// 共用 serializer 的 Data-MerchantID 防呆（`encrypt_checked`）在出網
-    /// 前比對。
+    /// 的 `MerchantID` 是 `Option` 只是為了容納「平台商模式信封」的未來
+    /// 變化：省略一律被各方法在本機拒絕（stage 回 `10200051`）；帶了值
+    /// 則由共用 serializer 的 Data-MerchantID 防呆（`encrypt_checked`）在
+    /// 出網前比對。
     fn require_data_merchant_id(&self, data_merchant_id: &str) -> Result<()> {
         self.require_data_merchant_id_with(
             data_merchant_id,
@@ -614,6 +624,14 @@ impl Ecpay {
     /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
     /// (RtnCode 為整數)。
     pub async fn ecpg_query_trade(&self, input: &EcpgTradeRefInput) -> Result<serde_json::Value> {
+        let Some(mid) = input.merchant_id.as_deref() else {
+            return Err(Error::Message(
+                "ecpay: QueryTrade requires Data MerchantID — stage answers \
+                 10200051 MerchantID Error without it (live-captured 2026-09)"
+                    .into(),
+            ));
+        };
+        self.require_data_merchant_id(mid)?;
         self.ecpg_post(
             format!("{}Cashier/QueryTrade", self.ecpayment_base_url()),
             input,
@@ -632,6 +650,14 @@ impl Ecpay {
         &self,
         input: &EcpgTradeRefInput,
     ) -> Result<serde_json::Value> {
+        let Some(mid) = input.merchant_id.as_deref() else {
+            return Err(Error::Message(
+                "ecpay: QueryPaymentInfo requires Data MerchantID — stage answers \
+                 10200051 MerchantID Error without it (live-captured 2026-09)"
+                    .into(),
+            ));
+        };
+        self.require_data_merchant_id(mid)?;
         self.ecpg_post(
             format!("{}Cashier/QueryPaymentInfo", self.ecpayment_base_url()),
             input,
@@ -722,6 +748,14 @@ impl Ecpay {
         &self,
         input: &EcpgTradeRefInput,
     ) -> Result<serde_json::Value> {
+        let Some(mid) = input.merchant_id.as_deref() else {
+            return Err(Error::Message(
+                "ecpay: CreditDetail/QueryTrade requires Data MerchantID — stage answers \
+                 10200051 MerchantID Error without it (live-captured 2026-09)"
+                    .into(),
+            ));
+        };
+        self.require_data_merchant_id(mid)?;
         self.ecpg_post(
             format!("{}CreditDetail/QueryTrade", self.ecpayment_base_url()),
             input,

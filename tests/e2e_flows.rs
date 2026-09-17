@@ -815,6 +815,8 @@ async fn ecpg_full_flow_from_token_to_paid_query() {
     //    the ReturnURL handling is proven by the 1|OK/0|ERR asserts above).
     let trade = client
         .ecpg_query_trade(&ecpay::ecpg::EcpgTradeRefInput {
+            // Data MerchantID is required (stage: 10200051 without it).
+            merchant_id: Some(client.merchant_id.clone()),
             merchant_trade_no: "E2E0000001".into(),
             ..Default::default()
         })

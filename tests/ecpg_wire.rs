@@ -302,6 +302,56 @@ async fn unset_optional_pieces_are_omitted_from_the_wire() {
     assert_eq!(full["ATMInfo"]["ExpireDate"], 3);
 }
 
+/// Boxed future alias so three different query methods can share one loop.
+type BoxFut<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = ecpay::Result<serde_json::Value>> + 'a>>;
+
+/// The query family needs its Data MerchantID too: live-captured 2026-09,
+/// QueryTrade / QueryPaymentInfo / CreditDetail-QueryTrade ALL answer the
+/// in-band `10200051 MerchantID Error.` when it is omitted (the old "the
+/// envelope MerchantID stands in" assumption is falsified — probed on all
+/// three endpoints). Like DoAction/CreditCardPeriodAction, the methods
+/// refuse locally before any bytes go out.
+#[tokio::test]
+async fn query_family_refuses_an_omitted_data_merchant_id() {
+    let sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hit = sent.clone();
+    let srv = spawn_http_server(move |_p, _body| {
+        hit.store(true, std::sync::atomic::Ordering::SeqCst);
+        envelope_reply(json!({"RtnCode": 1, "RtnMsg": ""}))
+    });
+    let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
+    let input = EcpgTradeRefInput {
+        merchant_trade_no: "no".to_owned(),
+        ..Default::default()
+    };
+    let calls: [(&str, BoxFut<'_>); 3] = [
+        ("QueryTrade", Box::pin(ec.ecpg_query_trade(&input))),
+        (
+            "QueryPaymentInfo",
+            Box::pin(ec.ecpg_query_payment_info(&input)),
+        ),
+        (
+            "CreditDetail/QueryTrade",
+            Box::pin(ec.ecpg_query_credit_trade(&input)),
+        ),
+    ];
+    for (label, call) in calls {
+        let err = call
+            .await
+            .expect_err(&format!("{label}: omit must be refused"));
+        let msg = err.to_string();
+        assert!(
+            msg.contains("requires Data MerchantID") && msg.contains("10200051"),
+            "{label}: {msg}"
+        );
+    }
+    assert!(
+        !sent.load(std::sync::atomic::Ordering::SeqCst),
+        "no bytes may reach the wire without a Data MerchantID"
+    );
+}
+
 /// TransCode != 1 (the envelope gate) surfaces as `Error::TransCode`
 /// before any Data decoding is attempted.
 #[tokio::test]
@@ -427,12 +477,14 @@ async fn every_method_hits_its_exact_dual_domain_path() {
 
     for out in [
         ec.ecpg_query_trade(&EcpgTradeRefInput {
+            merchant_id: Some(MERCHANT.to_owned()),
             merchant_trade_no: "order1234567890".to_owned(),
             ..Default::default()
         })
         .await
         .unwrap(),
         ec.ecpg_query_payment_info(&EcpgTradeRefInput {
+            merchant_id: Some(MERCHANT.to_owned()),
             merchant_trade_no: "order1234567890".to_owned(),
             ..Default::default()
         })
@@ -466,6 +518,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
         .await
         .unwrap(),
         ec.ecpg_query_credit_trade(&EcpgTradeRefInput {
+            merchant_id: Some(MERCHANT.to_owned()),
             merchant_trade_no: "order1234567890".to_owned(),
             ..Default::default()
         })
@@ -529,9 +582,10 @@ async fn every_method_hits_its_exact_dual_domain_path() {
         BTreeSet::from(["MerchantID", "MerchantMemberID", "MerchantTradeNo"]),
         // DeleteMemberBindCard.
         BTreeSet::from(["MerchantID", "BindCardID"]),
-        // QueryTrade / QueryPaymentInfo (ids unset → omitted).
-        BTreeSet::from(["MerchantTradeNo"]),
-        BTreeSet::from(["MerchantTradeNo"]),
+        // QueryTrade / QueryPaymentInfo (PlatformID unset → omitted;
+        // MerchantID required — stage 10200051 otherwise).
+        BTreeSet::from(["MerchantID", "MerchantTradeNo"]),
+        BTreeSet::from(["MerchantID", "MerchantTradeNo"]),
         // QueryTradeMedia.
         BTreeSet::from([
             "MerchantID",
@@ -552,7 +606,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
             "TotalAmount",
         ]),
         // QueryCreditTrade.
-        BTreeSet::from(["MerchantTradeNo"]),
+        BTreeSet::from(["MerchantID", "MerchantTradeNo"]),
     ];
     assert_eq!(calls.len(), expected_keys.len(), "every method sent once");
     for (i, (_, data)) in calls.iter().enumerate() {
@@ -566,11 +620,12 @@ async fn every_method_hits_its_exact_dual_domain_path() {
     }
 }
 
-/// Query-family inputs: `PlatformID`/`MerchantID` are omitted from Data when
-/// `None` (the envelope MerchantID stands in), and ride along when `Some`
-/// (the client's own ID); DoAction carries its required fields verbatim. A
-/// set-but-mismatched Data MerchantID is rejected locally by the shared
-/// envelope guard instead of surfacing as ECPay's opaque `RtnCode != 1`.
+/// Query-family inputs: an UNSET Data MerchantID is refused locally (stage
+/// answers 10200051 — see query_family_refuses_an_omitted_data_merchant_id);
+/// a set one rides the Data, and `PlatformID` is omitted when `None`.
+/// DoAction carries its required fields verbatim. A set-but-mismatched Data
+/// MerchantID is rejected locally by the shared envelope guard instead of
+/// surfacing as ECPay's opaque `RtnCode != 1`.
 #[tokio::test]
 async fn query_inputs_omit_unset_platform_and_merchant_ids() {
     let datas: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
@@ -581,9 +636,21 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
     });
     let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
 
-    // 1) Both ids unset → Data is exactly {MerchantTradeNo}.
+    // 1) MerchantID unset → refused locally (stage: 10200051 MerchantID
+    //    Error; nothing may reach the wire).
+    let err = ec
+        .ecpg_query_trade(&EcpgTradeRefInput {
+            merchant_trade_no: "no-1".to_owned(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("omit must be refused");
+    assert!(err.to_string().contains("10200051"), "{err}");
+
+    // 1b) MerchantID set, PlatformID unset → Data omits PlatformID only.
     ec.ecpg_query_trade(&EcpgTradeRefInput {
-        merchant_trade_no: "no-1".to_owned(),
+        merchant_id: Some(MERCHANT.to_owned()),
+        merchant_trade_no: "no-1b".to_owned(),
         ..Default::default()
     })
     .await
@@ -612,6 +679,9 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
 
     {
         let d = datas.lock().unwrap();
+        // Only the request that PASSED the local guard reaches the wire:
+        // 1b (MerchantID set, PlatformID unset), 2 (both set), 3 (DoAction).
+        assert_eq!(d.len(), 3, "the refused call sent nothing: {d:?}");
         let keys: Vec<&str> = d[0]
             .as_object()
             .unwrap()
@@ -620,10 +690,11 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
             .collect();
         assert_eq!(
             keys,
-            ["MerchantTradeNo"],
-            "unset PlatformID/MerchantID must be omitted, got {keys:?}"
+            ["MerchantID", "MerchantTradeNo"],
+            "unset PlatformID must be omitted, got {keys:?}"
         );
-        assert_eq!(d[0]["MerchantTradeNo"], "no-1");
+        assert_eq!(d[0]["MerchantTradeNo"], "no-1b");
+        assert_eq!(d[0]["MerchantID"], MERCHANT);
         assert_eq!(d[1]["PlatformID"], "platform-id");
         assert_eq!(d[1]["MerchantID"], MERCHANT);
         assert_eq!(d[2]["TradeNo"], "ecpay-trade-no");
