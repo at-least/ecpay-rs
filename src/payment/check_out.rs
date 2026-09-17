@@ -100,7 +100,11 @@ pub struct AioCheckOutParams {
     pub custom_field3: Option<String>,
     /// 自訂名稱欄位 4(最大 50 字元)。
     pub custom_field4: Option<String>,
-    /// CheckMacValue 加密類別:1 = SHA-256(預設)、0 = MD5(ECPay 已淘汰)。
+    /// CheckMacValue 加密類別：1 = SHA-256。**只接受 1**——ECPay 已淘汰
+    /// MD5（0），`aio_check_out` 對任何非 1 的值回驗證錯誤（金流回呼驗證
+    /// [`crate::Ecpay::verify_check_mac_value`] 同樣只認 SHA-256）。
+    /// MD5 簽名仍可用於國內物流（內部走 MD5）與
+    /// [`crate::Ecpay::generate_check_value`] 的 EncryptType=0 路徑。
     pub encrypt_type: i64,
     /// 電子發票開立註記:`Y` 或 `N`(官方 sample 明確帶 `N`)。`None` 時不送出;
     /// [`Self::invoice`] 有值而此欄位為 `None` 時自動帶 `Y`。
@@ -332,6 +336,16 @@ impl Ecpay {
         // flows price differently.)
         if p.total_amount < 0 {
             return Err(Error::Validation("TotalAmount cannot be negative.".into()));
+        }
+        // The AIO cashier signs SHA-256 only: ECPay has retired MD5
+        // (EncryptType=0) there, so refusing locally (instead of signing a
+        // form the cashier rejects) mirrors the TotalAmount guard above. Any
+        // non-1 value is refused — 0 is retired, and others never existed.
+        if p.encrypt_type != 1 {
+            return Err(Error::Validation(
+                "EncryptType must be 1 (SHA-256); ECPay has retired MD5 (EncryptType=0) on AIO."
+                    .into(),
+            ));
         }
         optional_str("StoreID", &p.store_id, 10)?;
         optional_str("ClientBackURL", &p.client_back_url, 200)?;

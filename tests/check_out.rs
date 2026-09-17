@@ -310,18 +310,29 @@ fn defaults_are_always_sent() {
         64,
         "SHA-256 (EncryptType=1) digest"
     );
-    let md5 = sdk()
-        .aio_check_out(&AioCheckOutParams {
-            encrypt_type: 0,
-            ..base(ChoosePayment::Credit)
-        })
-        .unwrap();
-    assert_eq!(param(&md5, "EncryptType"), Some("0"));
-    assert_eq!(
-        md5.check_mac_value().len(),
-        32,
-        "MD5 (EncryptType=0) digest"
+    let md5_err = validation(
+        sdk()
+            .aio_check_out(&AioCheckOutParams {
+                encrypt_type: 0,
+                ..base(ChoosePayment::Credit)
+            })
+            .expect_err("EncryptType=0 is refused"),
     );
+    // ECPay has retired MD5 on AIO; the builder rejects it locally instead
+    // of signing a form the cashier will refuse.
+    assert!(md5_err.contains("EncryptType"), "{md5_err}");
+    // Any other value gets the same local rejection (previously
+    // EncryptType=2 only failed later, at signing, with
+    // UnsupportedEncryptType).
+    let two_err = validation(
+        sdk()
+            .aio_check_out(&AioCheckOutParams {
+                encrypt_type: 2,
+                ..base(ChoosePayment::Credit)
+            })
+            .expect_err("EncryptType=2 is refused"),
+    );
+    assert!(two_err.contains("EncryptType"), "{two_err}");
 }
 
 // --- ChoosePayment groups ---
