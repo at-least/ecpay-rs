@@ -21,12 +21,12 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       # Fully offline: every live-stage suite is #[ignore]d.
       - run: cargo test --all-targets
-      # Live E2E against ECPay's stage server (public test account), the
-      # same three sandbox suites CI always ran — now via -- --ignored.
+      # Live E2E against ECPay's stage server (public test accounts): the
+      # four sandbox suites, via -- --ignored, at the default parallelism the
+      # first three always ran at (sandbox_ecpg's unique_no carries a
+      # per-process counter; its 5 tests were verified in a parallel run).
       # stage_smoke / stage_probes stay a manual run (see README).
-      - run: cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics -- --ignored
-      # ECPG stage has been observed slow — single-threaded like stage_probes.
-      - run: cargo test --test sandbox_ecpg -- --ignored --test-threads=1
+      - run: cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics --test sandbox_ecpg -- --ignored
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings

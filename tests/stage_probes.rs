@@ -1,18 +1,21 @@
 //! Staging probes for the three services the official PHP SDK (`ECPay/SDK_PHP`)
-//! covers that this crate does NOT implement yet:
+//! covers — first captured here before this crate implemented them (all three
+//! are typed modules now):
 //!
 //! 1. ECPG 站內付 2.0 (AES-JSON, `ecpg-stage` + `ecpayment-stage` domains)
 //! 2. 國內物流 Domestic logistics (form POST + CheckMacValue **MD5**,
 //!    `logistics-stage/Express/Create`)
 //! 3. B2B 電子發票 (AES-JSON, `RqHeader` 帶 `RqID` + `Revision`)
 //!
-//! Each probe builds its request with this crate's own public crypto helpers
-//! (`encrypt_data` / `check_mac_value`) against the official public stage test
-//! accounts, prints the RAW server answer, and asserts only transport/protocol
-//! facts (HTTP 200, TransCode gating). Business outcomes (order-not-found,
-//! 服務未開通, …) are printed, not asserted — the point is to pin down what the
-//! stage server actually accepts from our wire format, independent of any
-//! language-SDK quirk, and to seed the eventual typed implementations.
+//! The early probes build their requests with this crate's own public crypto
+//! helpers (`encrypt_data` / `check_mac_value`) against the official public
+//! stage test accounts and print the RAW server answer; what each one asserts
+//! is stated in its own doc — from transport/protocol facts only (HTTP 200,
+//! TransCode gating) up to business codes. The later ECPG probes go through
+//! the typed `Ecpay` methods or raw envelopes and pin the answers the crate's
+//! guards and docs quote, including shapes the typed methods can no longer
+//! send. The point throughout is what the stage server actually accepts from
+//! our wire format, independent of any language-SDK quirk.
 //!
 //! Run (serial — the logistics/B2B probes create REAL stage-side records:
 //! logistics orders and B2B invoices that consume 字軌 numbers, never
@@ -97,8 +100,8 @@ fn unwrap_aes_response(body: &str, key: &str, iv: &str) -> Option<Value> {
 async fn ecpg_get_token_by_trade_accepts_our_aes_envelope() {
     let trade_no = unique_no("PROBE");
     // Field set mirrors example/Payment/Ecpg/CreateAllOrder/GetToken.php.
-    // ConsumerInfo is load-bearing: without Email/Phone the stage answers
-    // RtnCode≠1 with no message (guides/02 §GetTokenbyTrade 必填欄位速查).
+    // ConsumerInfo is required with RememberCard=1 — stage names it (5100010
+    // "The parameter [ConsumerInfo] cannot be empty"; tests/sandbox_ecpg.rs).
     let payload = json!({
         "MerchantID": ECPG_MERCHANT,
         "RememberCard": 1,
@@ -414,7 +417,7 @@ async fn ecpg_query_family_error_shapes() {
     };
     let unknown = format!("NOSUCH{}", unix_now());
     let trade_ref = ecpay::ecpg::EcpgTradeRefInput {
-        merchant_id: Some("3002607".into()),
+        merchant_id: "3002607".into(),
         merchant_trade_no: unknown.clone(),
         ..Default::default()
     };
@@ -450,7 +453,7 @@ async fn ecpg_query_family_error_shapes() {
         .ecpg_credit_card_period_action(&ecpay::ecpg::EcpgPeriodActionInput {
             // 釐清必要性:只帶 MerchantID、不帶 PlatformID。
             platform_id: None,
-            merchant_id: Some("3002607".into()),
+            merchant_id: "3002607".into(),
             merchant_trade_no: unknown.clone(),
             action: "ReAuth".into(),
         })
@@ -466,7 +469,7 @@ async fn ecpg_query_family_error_shapes() {
     let do_action = client
         .ecpg_do_action(&ecpay::ecpg::EcpgDoActionInput {
             platform_id: None,
-            merchant_id: Some("3002607".into()),
+            merchant_id: "3002607".into(),
             merchant_trade_no: unknown,
             trade_no: "NOSUCHTREADNO0001".into(),
             action: "R".into(),
@@ -476,6 +479,165 @@ async fn ecpg_query_family_error_shapes() {
         .expect("DoAction: Data MerchantID alone must be accepted");
     println!("DoAction (merchant_id only) = {do_action}");
     assert_eq!(do_action["RtnCode"], 10000185, "{do_action}");
+}
+
+/// The Data-level `MerchantID` contract on BOTH ECPG domains, captured with
+/// raw envelopes: the typed methods refuse an omitted or mismatched value
+/// locally, so this probe is the only place those bytes ever reach stage.
+/// Pinned so the codes quoted in the crate's guards and docs stay
+/// reproducible (2026-09: all five ecpayment endpoints answer 5000220 /
+/// 5000261, the ecpg-domain `Merchant/GetTokenbyTrade` answers 5100080 /
+/// 5100074 — all with a message naming the parameter; nothing here is an
+/// opaque `RtnCode != 1`).
+#[tokio::test]
+#[ignore = "hits the real stage server"]
+async fn ecpg_data_merchant_id_omitted_or_mismatched_is_named_by_stage() {
+    let rq = || json!({ "Timestamp": unix_now() });
+    let trade_no = unique_no("NOSUCH");
+    let ecpayment = "https://ecpayment-stage.ecpay.com.tw/1.0.0/";
+
+    // ecpayment domain, all five endpoints, two shapes each: Data WITHOUT
+    // MerchantID, then Data with a MerchantID that is NOT the envelope's.
+    let ecpayment_data: [(&str, Value); 5] = [
+        ("Cashier/QueryTrade", json!({ "MerchantTradeNo": trade_no })),
+        (
+            "Cashier/QueryPaymentInfo",
+            json!({ "MerchantTradeNo": trade_no }),
+        ),
+        (
+            "CreditDetail/QueryTrade",
+            json!({ "MerchantTradeNo": trade_no }),
+        ),
+        (
+            "Cashier/CreditCardPeriodAction",
+            json!({ "MerchantTradeNo": trade_no, "Action": "ReAuth" }),
+        ),
+        (
+            "Credit/DoAction",
+            json!({
+                "MerchantTradeNo": trade_no,
+                "TradeNo": "NOSUCHTREADNO0001",
+                "Action": "R",
+                "TotalAmount": 100,
+            }),
+        ),
+    ];
+    for (path, base) in &ecpayment_data {
+        let endpoint = format!("{ecpayment}{path}");
+        let (status, body) = aes_post(
+            &endpoint,
+            ECPG_MERCHANT,
+            rq(),
+            base.clone(),
+            ECPG_KEY,
+            ECPG_IV,
+        )
+        .await;
+        assert_eq!(status, 200, "{path}: {body}");
+        let v = unwrap_aes_response(&body, ECPG_KEY, ECPG_IV)
+            .unwrap_or_else(|| panic!("{path}: envelope must decode: {body}"));
+        println!("{path} (Data MerchantID omitted) = {v}");
+        assert_eq!(v["RtnCode"], 5000220, "{path}: {v}");
+        assert!(
+            v["RtnMsg"]
+                .as_str()
+                .is_some_and(|m| m.contains("[MerchantID] is required")),
+            "{path}: {v}"
+        );
+
+        let mut mismatched = base.clone();
+        mismatched["MerchantID"] = json!(LOGISTICS_MERCHANT);
+        let (status, body) = aes_post(
+            &endpoint,
+            ECPG_MERCHANT,
+            rq(),
+            mismatched,
+            ECPG_KEY,
+            ECPG_IV,
+        )
+        .await;
+        assert_eq!(status, 200, "{path}: {body}");
+        let v = unwrap_aes_response(&body, ECPG_KEY, ECPG_IV)
+            .unwrap_or_else(|| panic!("{path}: envelope must decode: {body}"));
+        println!("{path} (Data MerchantID mismatched) = {v}");
+        assert_eq!(v["RtnCode"], 5000261, "{path}: {v}");
+        assert!(
+            v["RtnMsg"]
+                .as_str()
+                .is_some_and(|m| m.contains("[MerchantID] does not match")),
+            "{path}: {v}"
+        );
+    }
+
+    // ecpg domain (Merchant/GetTokenbyTrade): the same two shapes. Neither
+    // issues a token, so this adds no stage-side trade.
+    let token_payload = |merchant_id: Option<&str>| {
+        let mut p = json!({
+            "RememberCard": 1,
+            "PaymentUIType": 2,
+            "ChoosePaymentList": "0",
+            "OrderInfo": {
+                "MerchantTradeDate": taipei_now(),
+                "MerchantTradeNo": unique_no("PROBE"),
+                "TotalAmount": "100",
+                "ReturnURL": "https://www.ecpay.com.tw/example/receive",
+                "TradeDesc": "ecpay-rs probe",
+                "ItemName": "Probe",
+            },
+            "CardInfo": {
+                "Redeem": 0,
+                "OrderResultURL": "https://www.ecpay.com.tw/example/receive",
+                "CreditInstallment": "3,6,12",
+                "FlexibleInstallment": 30,
+            },
+            "ATMInfo": { "ExpireDate": 3 },
+            "CVSInfo": { "StoreExpireDate": 10080 },
+            "BarcodeInfo": { "StoreExpireDate": 7 },
+            "ConsumerInfo": {
+                "MerchantMemberID": "probe000001",
+                "Email": "customer@email.com",
+                "Phone": "0912345678",
+                "Name": "Probe",
+                "CountryCode": "158",
+            },
+        });
+        if let Some(mid) = merchant_id {
+            p["MerchantID"] = json!(mid);
+        }
+        p
+    };
+    for (label, mid, code, needle) in [
+        ("omitted", None, 5100080, "[MerchantID]"),
+        (
+            "mismatched",
+            Some(LOGISTICS_MERCHANT),
+            5100074,
+            "MerchantID",
+        ),
+    ] {
+        let (status, body) = aes_post(
+            "https://ecpg-stage.ecpay.com.tw/Merchant/GetTokenbyTrade",
+            ECPG_MERCHANT,
+            rq(),
+            token_payload(mid),
+            ECPG_KEY,
+            ECPG_IV,
+        )
+        .await;
+        assert_eq!(status, 200, "GetTokenbyTrade {label}: {body}");
+        let v = unwrap_aes_response(&body, ECPG_KEY, ECPG_IV)
+            .unwrap_or_else(|| panic!("GetTokenbyTrade {label}: envelope must decode: {body}"));
+        println!("Merchant/GetTokenbyTrade (Data MerchantID {label}) = {v}");
+        assert_eq!(v["RtnCode"], code, "GetTokenbyTrade {label}: {v}");
+        assert!(
+            v["RtnMsg"].as_str().is_some_and(|m| m.contains(needle)),
+            "GetTokenbyTrade {label}: {v}"
+        );
+        assert!(
+            v["Token"].as_str().is_none_or(str::is_empty),
+            "GetTokenbyTrade {label}: no token may be issued: {v}"
+        );
+    }
 }
 
 // --- helpers (kept local so the probe file survives on its own) ---

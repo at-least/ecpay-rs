@@ -41,7 +41,8 @@ fn client(ecpg_api_url: String, ecpayment_api_url: String) -> Ecpay {
 }
 
 /// The GetTokenbyTrade body the round-trip tests send: OrderInfo + a
-/// load-bearing ConsumerInfo, everything else left unset.
+/// ConsumerInfo (required by stage with RememberCard=1), everything else
+/// left unset.
 fn token_input() -> GetTokenbyTradeInput {
     GetTokenbyTradeInput {
         merchant_id: MERCHANT.to_owned(),
@@ -306,12 +307,13 @@ async fn unset_optional_pieces_are_omitted_from_the_wire() {
 type BoxFut<'a> =
     std::pin::Pin<Box<dyn std::future::Future<Output = ecpay::Result<serde_json::Value>> + 'a>>;
 
-/// The query family needs its Data MerchantID too: live-captured 2026-09,
+/// The query family needs its Data MerchantID too: live-captured 2026-09
+/// (tests/stage_probes.rs, ecpg_data_merchant_id_omitted_or_mismatched_is_named_by_stage),
 /// QueryTrade / QueryPaymentInfo / CreditDetail-QueryTrade ALL answer the
-/// in-band `10200051 MerchantID Error.` when it is omitted (the old "the
-/// envelope MerchantID stands in" assumption is falsified — probed on all
-/// three endpoints). Like DoAction/CreditCardPeriodAction, the methods
-/// refuse locally before any bytes go out.
+/// in-band `5000220 "The parameter [MerchantID] is required."` when it is
+/// omitted (the old "the envelope MerchantID stands in" assumption is
+/// falsified). Like DoAction/CreditCardPeriodAction, the methods refuse an
+/// empty value locally before any bytes go out.
 #[tokio::test]
 async fn query_family_refuses_an_omitted_data_merchant_id() {
     let sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -342,7 +344,7 @@ async fn query_family_refuses_an_omitted_data_merchant_id() {
             .expect_err(&format!("{label}: omit must be refused"));
         let msg = err.to_string();
         assert!(
-            msg.contains("requires Data MerchantID") && msg.contains("10200051"),
+            msg.contains("Data MerchantID must be set") && msg.contains("5000220"),
             "{label}: {msg}"
         );
     }
@@ -379,7 +381,7 @@ async fn transcode_rejection_surfaces_as_a_transcode_error() {
 }
 
 /// The MerchantID duplicated inside Data must equal the client's: ECPay
-/// rejects a mismatch opaquely (RtnCode != 1, empty message), so the client
+/// rejects a mismatch server-side (5000261 / 5100074, live 2026-09), so the client
 /// refuses locally before any request leaves.
 #[tokio::test]
 async fn data_merchant_id_must_match_the_client_merchant() {
@@ -477,14 +479,14 @@ async fn every_method_hits_its_exact_dual_domain_path() {
 
     for out in [
         ec.ecpg_query_trade(&EcpgTradeRefInput {
-            merchant_id: Some(MERCHANT.to_owned()),
+            merchant_id: MERCHANT.to_owned(),
             merchant_trade_no: "order1234567890".to_owned(),
             ..Default::default()
         })
         .await
         .unwrap(),
         ec.ecpg_query_payment_info(&EcpgTradeRefInput {
-            merchant_id: Some(MERCHANT.to_owned()),
+            merchant_id: MERCHANT.to_owned(),
             merchant_trade_no: "order1234567890".to_owned(),
             ..Default::default()
         })
@@ -500,7 +502,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
         .await
         .unwrap(),
         ec.ecpg_credit_card_period_action(&EcpgPeriodActionInput {
-            merchant_id: Some(MERCHANT.to_owned()), // Data MerchantID required (stage 10200051 otherwise)
+            merchant_id: MERCHANT.to_owned(), // Data MerchantID required (stage 5000220 otherwise)
             merchant_trade_no: "order1234567890".to_owned(),
             action: "ReAuth".to_owned(),
             ..Default::default()
@@ -508,7 +510,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
         .await
         .unwrap(),
         ec.ecpg_do_action(&EcpgDoActionInput {
-            merchant_id: Some(MERCHANT.to_owned()), // Data MerchantID required (stage 10200051 otherwise)
+            merchant_id: MERCHANT.to_owned(), // Data MerchantID required (stage 5000220 otherwise)
             merchant_trade_no: "order1234567890".to_owned(),
             trade_no: "ecpay-trade-no".to_owned(),
             action: "R".to_owned(),
@@ -518,7 +520,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
         .await
         .unwrap(),
         ec.ecpg_query_credit_trade(&EcpgTradeRefInput {
-            merchant_id: Some(MERCHANT.to_owned()),
+            merchant_id: MERCHANT.to_owned(),
             merchant_trade_no: "order1234567890".to_owned(),
             ..Default::default()
         })
@@ -583,7 +585,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
         // DeleteMemberBindCard.
         BTreeSet::from(["MerchantID", "BindCardID"]),
         // QueryTrade / QueryPaymentInfo (PlatformID unset → omitted;
-        // MerchantID required — stage 10200051 otherwise).
+        // MerchantID required — stage 5000220 otherwise).
         BTreeSet::from(["MerchantID", "MerchantTradeNo"]),
         BTreeSet::from(["MerchantID", "MerchantTradeNo"]),
         // QueryTradeMedia.
@@ -595,7 +597,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
             "PaymentType",
         ]),
         // CreditCardPeriodAction (Data MerchantID is REQUIRED on stage —
-        // 10200051 MerchantID Error otherwise, live-captured 2026-09).
+        // 5000220 "[MerchantID] is required" otherwise, live-captured 2026-09).
         BTreeSet::from(["MerchantID", "MerchantTradeNo", "Action"]),
         // DoAction (Data MerchantID required, same reason).
         BTreeSet::from([
@@ -620,14 +622,14 @@ async fn every_method_hits_its_exact_dual_domain_path() {
     }
 }
 
-/// Query-family inputs: an UNSET Data MerchantID is refused locally (stage
-/// answers 10200051 — see query_family_refuses_an_omitted_data_merchant_id);
+/// Query-family inputs: an EMPTY Data MerchantID is refused locally (stage
+/// answers 5000220 — see query_family_refuses_an_omitted_data_merchant_id);
 /// a set one rides the Data, and `PlatformID` is omitted when `None`.
 /// DoAction carries its required fields verbatim. A set-but-mismatched Data
-/// MerchantID is rejected locally by the shared envelope guard instead of
-/// surfacing as ECPay's opaque `RtnCode != 1`.
+/// MerchantID is rejected locally instead of round-tripping to ECPay's
+/// `5000261 "The parameter [MerchantID] does not match."`.
 #[tokio::test]
-async fn query_inputs_omit_unset_platform_and_merchant_ids() {
+async fn query_inputs_omit_unset_platform_id_and_require_merchant_id() {
     let datas: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
     let seen = datas.clone();
     let srv = spawn_http_server(move |_p, body| {
@@ -636,8 +638,8 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
     });
     let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
 
-    // 1) MerchantID unset → refused locally (stage: 10200051 MerchantID
-    //    Error; nothing may reach the wire).
+    // 1) MerchantID empty → refused locally (stage: 5000220 "The parameter
+    //    [MerchantID] is required."; nothing may reach the wire).
     let err = ec
         .ecpg_query_trade(&EcpgTradeRefInput {
             merchant_trade_no: "no-1".to_owned(),
@@ -645,11 +647,11 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
         })
         .await
         .expect_err("omit must be refused");
-    assert!(err.to_string().contains("10200051"), "{err}");
+    assert!(err.to_string().contains("5000220"), "{err}");
 
     // 1b) MerchantID set, PlatformID unset → Data omits PlatformID only.
     ec.ecpg_query_trade(&EcpgTradeRefInput {
-        merchant_id: Some(MERCHANT.to_owned()),
+        merchant_id: MERCHANT.to_owned(),
         merchant_trade_no: "no-1b".to_owned(),
         ..Default::default()
     })
@@ -659,7 +661,7 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
     // 2) Both ids set → they ride the Data (MerchantID = the client's own).
     ec.ecpg_query_trade(&EcpgTradeRefInput {
         platform_id: Some("platform-id".to_owned()),
-        merchant_id: Some(MERCHANT.to_owned()),
+        merchant_id: MERCHANT.to_owned(),
         merchant_trade_no: "no-2".to_owned(),
     })
     .await
@@ -667,7 +669,7 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
 
     // 3) DoAction required fields ride verbatim.
     ec.ecpg_do_action(&EcpgDoActionInput {
-        merchant_id: Some(MERCHANT.to_owned()),
+        merchant_id: MERCHANT.to_owned(),
         merchant_trade_no: "no-3".to_owned(),
         trade_no: "ecpay-trade-no".to_owned(),
         action: "R".to_owned(),
@@ -712,7 +714,7 @@ async fn query_inputs_omit_unset_platform_and_merchant_ids() {
     let err = offline
         .ecpg_query_trade(&EcpgTradeRefInput {
             platform_id: None,
-            merchant_id: Some("sub-merchant".to_owned()),
+            merchant_id: "sub-merchant".to_owned(),
             merchant_trade_no: "no-4".to_owned(),
         })
         .await

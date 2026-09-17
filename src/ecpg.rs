@@ -47,7 +47,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::Ecpay;
 
 // --- 共用子物件（巢狀 JSON 物件） ---
@@ -140,19 +140,24 @@ pub struct BarcodeInfo {
     pub store_expire_date: Option<i64>,
 }
 
-/// `ConsumerInfo`：消費者資訊。**`Email` 與 `Phone` 是載重欄位** — 缺漏時
-/// stage 回 `RtnCode != 1` 且**不帶任何錯誤訊息**（2026-09 實測），除錯時
-/// 先檢查這裡。
+/// `ConsumerInfo`：消費者資訊。stage 實測（2026-09，`tests/sandbox_ecpg.rs`
+/// 釘住）：`RememberCard = 1` 時整個 `ConsumerInfo` 為必要——缺漏回
+/// `RtnCode 5100010 "The parameter [ConsumerInfo] cannot be empty"`（官方文件
+/// 並標 `MerchantMemberID` 此時必填）；`RememberCard = 0` 時可整個省略，仍
+/// 取得 Token（官方文件仍把 `ConsumerInfo` 列為必填；以上以 stage 實測為
+/// 準）。官方文件另標 `Email` 或 `Phone` 擇一必填，本 crate 不在本機驗證。
+/// 參數驗證失敗時 `RtnMsg` 會點名該參數（實測 5100010 / 5100080 /
+/// 5100074），並非空白。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ConsumerInfo {
     /// 會員綁卡代號（綁卡流程用；一般取號可省略）。
     #[serde(rename = "MerchantMemberID", skip_serializing_if = "Option::is_none")]
     pub merchant_member_id: Option<String>,
-    /// 消費者電子信箱。必要（見型別層級說明）。
+    /// 消費者電子信箱（官方文件：`Email` 或 `Phone` 擇一必填；見型別層級說明）。
     #[serde(rename = "Email")]
     pub email: String,
-    /// 消費者手機號碼。必要（見型別層級說明）。
+    /// 消費者手機號碼（官方文件：`Email` 或 `Phone` 擇一必填；見型別層級說明）。
     #[serde(rename = "Phone")]
     pub phone: String,
     /// 消費者姓名。
@@ -175,8 +180,8 @@ pub struct ConsumerInfo {
 /// stage 實測（2026-09，公開測試帳號 3002607）：缺漏的參數會被**逐一**點名
 /// 回 RtnCode 5100010 "The parameter \[&lt;Param&gt;\] cannot be empty"
 /// （實測中 `CardInfo.OrderResultURL` 與 `ATMInfo` 都曾被點名）；官方 PHP
-/// 範例送全套 OrderInfo + CardInfo + ATMInfo + CVSInfo + BarcodeInfo +
-/// ConsumerInfo。
+/// CreateAllOrder 範例送 OrderInfo + CardInfo + UnionPayInfo + ATMInfo +
+/// CVSInfo + BarcodeInfo + ConsumerInfo。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GetTokenbyTradeInput {
@@ -192,8 +197,11 @@ pub struct GetTokenbyTradeInput {
     /// 付款畫面呈現類型（ECPay 規格代碼；官方 stage 範例用 2）。
     #[serde(rename = "PaymentUIType", skip_serializing_if = "Option::is_none")]
     pub payment_ui_type: Option<i64>,
-    /// 付款方式清單：逗號分隔的付款方式代碼（官方範例值 `"0"`, `"1"`,
-    /// `"2,8"`, `"3"`, `"4"`, `"5"`, `"6"`, `"7"`；`"0"` = 信用卡）。
+    /// 付款方式清單：逗號分隔的付款方式代碼。`"0"` = **全部**（信用卡 +
+    /// 銀聯 + ATM + 超商代碼 + 條碼——官方 CreateAllOrder 範例因此帶齊
+    /// CardInfo/UnionPayInfo/ATMInfo/CVSInfo/BarcodeInfo）、`"1"` = 信用卡、
+    /// `"2,8"` = 分期、`"3"` = ATM、`"4"` = 超商代碼、`"5"` = 條碼、`"6"` =
+    /// 銀聯、`"7"` = Apple Pay（guides/02 §8 種付款方式的 GetToken 差異）。
     #[serde(rename = "ChoosePaymentList")]
     pub choose_payment_list: String,
     /// 訂單資訊。
@@ -214,7 +222,7 @@ pub struct GetTokenbyTradeInput {
     /// 超商條碼參數。
     #[serde(rename = "BarcodeInfo", skip_serializing_if = "Option::is_none")]
     pub barcode_info: Option<BarcodeInfo>,
-    /// 消費者資訊（Email/Phone 必填，缺漏時失敗且無錯誤訊息）。
+    /// 消費者資訊（`RememberCard = 1` 時必要，見 [`ConsumerInfo`]）。
     #[serde(rename = "ConsumerInfo", skip_serializing_if = "Option::is_none")]
     pub consumer_info: Option<ConsumerInfo>,
     /// 客戶編號。
@@ -238,7 +246,8 @@ pub struct GetTokenbyTradeOutput {
     /// 業務層回應代碼：1 = 成功（信封層 TransCode 已由 crate 閘門檢查）。
     #[serde(rename = "RtnCode")]
     pub rtn_code: i64,
-    /// 業務層回應訊息（失敗時可能是空字串 — 先檢查 ConsumerInfo）。
+    /// 業務層回應訊息（參數驗證失敗時點名該參數，例如 `5100010 "The
+    /// parameter [ConsumerInfo] cannot be empty"`）。
     #[serde(rename = "RtnMsg")]
     pub rtn_msg: String,
     /// 交易用 Token（交給前端 JS SDK；不可存檔長期使用）。
@@ -367,21 +376,24 @@ pub struct DeleteMemberBindCardInput {
 
 /// 查詢類端點（`Cashier/QueryTrade`、`Cashier/QueryPaymentInfo`、
 /// `CreditDetail/QueryTrade`）共用的交易參照。`PlatformID` 未設定
-/// （`None`）時自 Data 省略（stage 實測可省）。`MerchantID` 則為**必要**：
-/// 三個查詢端點對省略一律回 `10200051 MerchantID Error.`（2026-09 對
-/// stage 逐一實測），「以信封 MerchantID 為準」的舊假設已證偽——方法會
-/// 在出網前擋下 `None`，與 DoAction/CreditCardPeriodAction 同一防呆。
+/// （`None`）時自 Data 省略（stage 實測可省）。`MerchantID` 為**必要**且須
+/// 等於 client 的 [`Ecpay::merchant_id`]：stage 對省略回
+/// `5000220 "The parameter [MerchantID] is required."`、對不一致回
+/// `5000261 "The parameter [MerchantID] does not match."`（2026-09 以原始
+/// 信封對三個查詢端點與 DoAction/CreditCardPeriodAction 逐一實測，
+/// `tests/stage_probes.rs` 釘住）——「以信封 MerchantID 為準」的舊假設已
+/// 證偽，方法會在出網前擋下空值與不一致，與 DoAction/CreditCardPeriodAction
+/// 同一防呆。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EcpgTradeRefInput {
     /// 平台商代號（平台商模式才需要）。
     #[serde(rename = "PlatformID", skip_serializing_if = "Option::is_none")]
     pub platform_id: Option<String>,
-    /// 特店編號（Data 層必填；省略會被方法在本機拒絕——stage 對三個查詢
-    /// 端點與 DoAction/CreditCardPeriodAction 一律回 `10200051 MerchantID
-    /// Error.`，見輸入結構的說明）。
-    #[serde(rename = "MerchantID", skip_serializing_if = "Option::is_none")]
-    pub merchant_id: Option<String>,
+    /// 特店編號（Data 層必填，須等於 client 的 `merchant_id`；空值或不一致
+    /// 由方法在出網前拒絕——stage 的對應回應見 [`EcpgTradeRefInput`]）。
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
     /// 特店交易編號。
     #[serde(rename = "MerchantTradeNo")]
     pub merchant_trade_no: String,
@@ -417,11 +429,10 @@ pub struct EcpgPeriodActionInput {
     /// 平台商代號（平台商模式才需要）。
     #[serde(rename = "PlatformID", skip_serializing_if = "Option::is_none")]
     pub platform_id: Option<String>,
-    /// 特店編號（Data 層必填；省略會被方法在本機拒絕——stage 對三個查詢
-    /// 端點與 DoAction/CreditCardPeriodAction 一律回 `10200051 MerchantID
-    /// Error.`，見輸入結構的說明）。
-    #[serde(rename = "MerchantID", skip_serializing_if = "Option::is_none")]
-    pub merchant_id: Option<String>,
+    /// 特店編號（Data 層必填，須等於 client 的 `merchant_id`；空值或不一致
+    /// 由方法在出網前拒絕——stage 的對應回應見 [`EcpgTradeRefInput`]）。
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
     /// 特店交易編號。
     #[serde(rename = "MerchantTradeNo")]
     pub merchant_trade_no: String,
@@ -432,19 +443,18 @@ pub struct EcpgPeriodActionInput {
 
 /// `Credit/DoAction`（信用卡請款/退款/取消/放棄：C/R/E/N）的 Data 內容。
 /// 僅適用於**信用卡**交易 — ATM/超商代碼/條碼不支援線上退款 API。
-/// `PlatformID` 未設定時自 Data 省略；`MerchantID` 為必要（stage 對省略
-/// 回 `10200051 MerchantID Error.`，方法在本機擋下）。
+/// `PlatformID` 未設定時自 Data 省略；`MerchantID` 為必要（見
+/// [`EcpgTradeRefInput`] 的說明，方法在本機擋下）。
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EcpgDoActionInput {
     /// 平台商代號（平台商模式才需要）。
     #[serde(rename = "PlatformID", skip_serializing_if = "Option::is_none")]
     pub platform_id: Option<String>,
-    /// 特店編號（Data 層必填；省略會被方法在本機拒絕——stage 對三個查詢
-    /// 端點與 DoAction/CreditCardPeriodAction 一律回 `10200051 MerchantID
-    /// Error.`，見輸入結構的說明）。
-    #[serde(rename = "MerchantID", skip_serializing_if = "Option::is_none")]
-    pub merchant_id: Option<String>,
+    /// 特店編號（Data 層必填，須等於 client 的 `merchant_id`；空值或不一致
+    /// 由方法在出網前拒絕——stage 的對應回應見 [`EcpgTradeRefInput`]）。
+    #[serde(rename = "MerchantID")]
+    pub merchant_id: String,
     /// 特店交易編號。
     #[serde(rename = "MerchantTradeNo")]
     pub merchant_trade_no: String,
@@ -480,23 +490,25 @@ impl Ecpay {
         .await
     }
 
-    /// `Merchant/*` 家族會在 Data 內重複帶一次 MerchantID；與信封不一致時
-    /// ECPay 只回 `RtnCode != 1` 且無訊息（與缺 ConsumerInfo 同類的啞巴
-    /// 失敗），所以在本機先拒絕。
+    /// ECPG 兩個網域的 Data 內都要重複帶一次 MerchantID，且須等於信封的：
+    /// stage 對省略與不一致都回**點名參數**的業務錯誤（2026-09 實測，
+    /// `tests/stage_probes.rs`：`Merchant/GetTokenbyTrade` 回 5100080 /
+    /// 5100074，五支 ecpayment 端點回 5000220 / 5000261），本 crate 在出網前
+    /// 先擋下。
     ///
-    /// 刻意不提供「Data 帶子特店編號」的逃生口：平台商模式的 ECPG 信封
-    /// 需帶 `PlatformID`，而共用的信封建構（`post_aes_json`）目前不送
-    /// PlatformID — 在此現狀下「Data MerchantID ≠ 信封」的請求只會被
-    /// stage 以空訊息拒絕，本機先擋不會擋掉任何原本可行的流程。查詢家族
-    /// （`EcpgTradeRefInput`/`EcpgPeriodActionInput`/`EcpgDoActionInput`）
-    /// 的 `MerchantID` 是 `Option` 只是為了容納「平台商模式信封」的未來
-    /// 變化：省略一律被各方法在本機拒絕（stage 回 `10200051`）；帶了值
-    /// 則由共用 serializer 的 Data-MerchantID 防呆（`encrypt_checked`）在
-    /// 出網前比對。
+    /// 刻意不提供「Data 帶子特店編號」的逃生口：官方平台商範例的 Data 仍是
+    /// `PlatformID` + 特店自己的 `MerchantID` 並列（guides/02 的 DoAction
+    /// 範例、guides/03 的 CreditCardPeriodAction 範例），而共用的信封建構
+    /// （`post_aes_json`）目前不送 PlatformID——在此現狀下「Data MerchantID
+    /// ≠ 信封」的請求只會被 stage 拒絕，本機先擋不會擋掉任何原本可行的
+    /// 流程。所有 ECPG 輸入結構的 `MerchantID` 因此一律是 `String`，每個
+    /// 方法都先經過這裡；共用 serializer 的 `encrypt_checked` 是第二道防線。
     fn require_data_merchant_id(&self, data_merchant_id: &str) -> Result<()> {
         self.require_data_merchant_id_with(
             data_merchant_id,
-            "; ECPay rejects a mismatch opaquely with RtnCode != 1 and no message",
+            "; ECPay requires it inside Data too and rejects an omitted or \
+             mismatched value by name (live 2026-09: 5100080/5100074 on \
+             Merchant/GetTokenbyTrade, 5000220/5000261 on the ecpayment domain)",
         )
     }
 
@@ -507,7 +519,8 @@ impl Ecpay {
     /// 打錯網域會 404。
     ///
     /// 回傳的 [`GetTokenbyTradeOutput::rtn_code`] 由呼叫端檢查（1 = 成功）；
-    /// 失敗時先檢查 `ConsumerInfo` 的 Email/Phone（缺漏時 RtnMsg 為空）。
+    /// 參數驗證失敗時 `RtnMsg` 會點名該參數（5100010，例如 `RememberCard = 1`
+    /// 而缺 `ConsumerInfo`）。
     pub async fn get_token_by_trade(
         &self,
         input: &GetTokenbyTradeInput,
@@ -623,15 +636,12 @@ impl Ecpay {
     /// stage 實測(2026-09,查無訂單):`Data` 解密後為
     /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
     /// (RtnCode 為整數)。
+    ///
+    /// ⚠️ Data 內的 `MerchantID` 為**必要**且須等於 client 的 `merchant_id`
+    /// （方法在出網前檢查；stage 對省略回 `5000220`、不一致回 `5000261`，
+    /// 見 [`EcpgTradeRefInput`]）。
     pub async fn ecpg_query_trade(&self, input: &EcpgTradeRefInput) -> Result<serde_json::Value> {
-        let Some(mid) = input.merchant_id.as_deref() else {
-            return Err(Error::Message(
-                "ecpay: QueryTrade requires Data MerchantID — stage answers \
-                 10200051 MerchantID Error without it (live-captured 2026-09)"
-                    .into(),
-            ));
-        };
-        self.require_data_merchant_id(mid)?;
+        self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
             format!("{}Cashier/QueryTrade", self.ecpayment_base_url()),
             input,
@@ -646,18 +656,15 @@ impl Ecpay {
     /// stage 實測(2026-09,查無訂單):`Data` 解密後為
     /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
     /// (RtnCode 為整數)。
+    ///
+    /// ⚠️ Data 內的 `MerchantID` 為**必要**且須等於 client 的 `merchant_id`
+    /// （方法在出網前檢查；stage 對省略回 `5000220`、不一致回 `5000261`，
+    /// 見 [`EcpgTradeRefInput`]）。
     pub async fn ecpg_query_payment_info(
         &self,
         input: &EcpgTradeRefInput,
     ) -> Result<serde_json::Value> {
-        let Some(mid) = input.merchant_id.as_deref() else {
-            return Err(Error::Message(
-                "ecpay: QueryPaymentInfo requires Data MerchantID — stage answers \
-                 10200051 MerchantID Error without it (live-captured 2026-09)"
-                    .into(),
-            ));
-        };
-        self.require_data_merchant_id(mid)?;
+        self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
             format!("{}Cashier/QueryPaymentInfo", self.ecpayment_base_url()),
             input,
@@ -687,21 +694,15 @@ impl Ecpay {
     /// `{ecpayment_base_url}Cashier/CreditCardPeriodAction`。
     ///
     /// ⚠️ Data 內的 `MerchantID` 為**必要**（stage 實測 2026-09：省略時回
-    /// `10200051 MerchantID Error.`；帶了則正確回業務錯誤，例如查無訂單
-    /// `90100150 不存在的訂單` 並原樣回響 MerchantID/MerchantTradeNo）。
+    /// `5000220 "The parameter [MerchantID] is required."`；帶了則正確回
+    /// 業務錯誤，例如查無訂單 `90100150 不存在的訂單` 並原樣回響
+    /// MerchantID/MerchantTradeNo）。
     /// 官方 PHP 範例另帶 `PlatformID`，實測可省略。
     pub async fn ecpg_credit_card_period_action(
         &self,
         input: &EcpgPeriodActionInput,
     ) -> Result<serde_json::Value> {
-        let Some(mid) = input.merchant_id.as_deref() else {
-            return Err(Error::Message(
-                "ecpay: CreditCardPeriodAction requires Data MerchantID — stage answers \
-                 10200051 MerchantID Error without it (live-captured 2026-09)"
-                    .into(),
-            ));
-        };
-        self.require_data_merchant_id(mid)?;
+        self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
             format!(
                 "{}Cashier/CreditCardPeriodAction",
@@ -719,17 +720,10 @@ impl Ecpay {
     /// `{ecpayment_base_url}Credit/DoAction`。
     ///
     /// ⚠️ Data 內的 `MerchantID` 為**必要**（stage 實測 2026-09：省略時回
-    /// `10200051 MerchantID Error.`；帶了則查無訂單回
+    /// `5000220 "The parameter [MerchantID] is required."`；帶了則查無訂單回
     /// `RtnCode 10000185 "Cant not find the trade data"`）。
     pub async fn ecpg_do_action(&self, input: &EcpgDoActionInput) -> Result<serde_json::Value> {
-        let Some(mid) = input.merchant_id.as_deref() else {
-            return Err(Error::Message(
-                "ecpay: DoAction requires Data MerchantID — stage answers \
-                 10200051 MerchantID Error without it (live-captured 2026-09)"
-                    .into(),
-            ));
-        };
-        self.require_data_merchant_id(mid)?;
+        self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
             format!("{}Credit/DoAction", self.ecpayment_base_url()),
             input,
@@ -744,18 +738,15 @@ impl Ecpay {
     /// stage 實測(2026-09,查無訂單):`Data` 解密後為
     /// `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`
     /// (RtnCode 為整數)。
+    ///
+    /// ⚠️ Data 內的 `MerchantID` 為**必要**且須等於 client 的 `merchant_id`
+    /// （方法在出網前檢查；stage 對省略回 `5000220`、不一致回 `5000261`，
+    /// 見 [`EcpgTradeRefInput`]）。
     pub async fn ecpg_query_credit_trade(
         &self,
         input: &EcpgTradeRefInput,
     ) -> Result<serde_json::Value> {
-        let Some(mid) = input.merchant_id.as_deref() else {
-            return Err(Error::Message(
-                "ecpay: CreditDetail/QueryTrade requires Data MerchantID — stage answers \
-                 10200051 MerchantID Error without it (live-captured 2026-09)"
-                    .into(),
-            ));
-        };
-        self.require_data_merchant_id(mid)?;
+        self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
             format!("{}CreditDetail/QueryTrade", self.ecpayment_base_url()),
             input,

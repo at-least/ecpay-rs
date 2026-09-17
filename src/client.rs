@@ -79,8 +79,9 @@ impl Ecpay {
     /// top-level string `MerchantID` (B2C invoice, logistics v2/cross-border,
     /// and the ECPG/B2B Data structs all do), a SET value must equal the
     /// ENVELOPE's `envelope_merchant_id` — ECPay wants the ID in BOTH the
-    /// envelope and `Data`, and rejects a mismatch opaquely (`RtnCode != 1`,
-    /// no message). The check runs before any bytes go out. An empty value
+    /// envelope and `Data`, and rejects a mismatch server-side (ECPG names
+    /// the parameter: `5000261` / `5100074`, live 2026-09). The check runs
+    /// before any bytes go out. An empty value
     /// passes through unchanged here (legacy wire behavior), but the
     /// ECPG/B2B and logistics v2/CrossBorder modules additionally refuse an
     /// empty value at their field-level guards — only the B2C invoice path
@@ -101,7 +102,7 @@ impl Ecpay {
                 return Err(Error::Message(format!(
                     "ecpay: Data MerchantID must equal the envelope MerchantID \
                      (got {mid:?}, envelope has {envelope_merchant_id:?}); ECPay rejects a \
-                     mismatch opaquely with RtnCode != 1 and no message"
+                     mismatch server-side"
                 )));
             }
         }
@@ -110,8 +111,10 @@ impl Ecpay {
 
     /// Shared by the ECPG (站內付 2.0) and B2B invoice modules: ECPay wants
     /// the MerchantID in BOTH the AES envelope and inside the encrypted
-    /// `Data`, and rejects a mismatch opaquely (RtnCode != 1, no message) —
-    /// so both modules check before any bytes go out. `tail` appends
+    /// `Data`, and rejects an omitted or mismatched value server-side
+    /// (live-probed for ECPG in tests/stage_probes.rs; B2B applies the same
+    /// guard untested) — so both modules check before any bytes go out.
+    /// `tail` appends
     /// module-specific wording to the error message.
     pub(crate) fn require_data_merchant_id_with(
         &self,

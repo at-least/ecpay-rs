@@ -341,11 +341,14 @@ staging 實測(2026-09)確立的 server 真相,全部寫進了各模組文件:
   信封**,AES 核心會解出業務錯誤而非丟 HTTP 錯誤。
 - **補充實測(2026-09 同日)**:v2 `PrintTradeDocument` 與
   `RedirectToLogisticsSelection` 回的是 **text/html 自動提交表單**(不是
-  AES 信封)— 本 crate 以 `String` 回傳原文供輸出給瀏覽器;ECPG
-  `DoAction`/`CreditCardPeriodAction` 的 Data 內 **`MerchantID` 必填**
-  (省略回 `10200051 MerchantID Error.`,本 crate 已本地防呆);ECPG 三支
-  查詢查無訂單回 `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade
-  data"}`;國內物流的業務拒絕可能是**未簽章短字串**(如
+  AES 信封)— 本 crate 以 `String` 回傳原文供輸出給瀏覽器;ECPG 五支
+  ecpayment 端點(`QueryTrade`/`QueryPaymentInfo`/`CreditDetail/QueryTrade`/
+  `DoAction`/`CreditCardPeriodAction`)的 Data 內 **`MerchantID` 必填且須
+  等於信封**(省略回 `5000220 "The parameter [MerchantID] is required."`、
+  不一致回 `5000261`,`tests/stage_probes.rs` 以原始信封釘住;本 crate 已
+  本地防呆);ECPG 三支查詢查無訂單回
+  `{"RtnCode":10000185,"RtnMsg":"Cant not find the trade data"}`;國內物流
+  的業務拒絕可能是**未簽章短字串**(如
   `0|資料處理中,無法異動`),本 crate 以可讀訊息回報而非誤導的 MAC 錯誤;
   `UpdateShipmentInfo` 對 CVS 訂單需帶 `ReceiverStoreID`。
 
@@ -397,12 +400,13 @@ submodule 只有 `.claude/skills/ecpay`(官方 ECPay-API-Skill,供 Claude Code
 `tests/sandbox_ecpg.rs`、`tests/stage_smoke.rs`,以及探測用的
 `tests/stage_probes.rs`)全部 `#[ignore]`,離線環境不會失敗。需要端對端
 驗證時以 `-- --ignored` 明確執行(公開測試特店 2000132/3002607,需對外
-網路;每次執行會在 stage 建立並清理真實沙盒資料,CI 的
+網路;每次執行會在 stage 建立真實沙盒資料——例如物流訂單,套件不會取消
+它們;`sandbox_ecpg` 只取號、驗證參數與查詢不存在的訂單/綁卡,不建立
+訂單——CI 的
 `cargo test --test sandbox … -- --ignored` 步驟即以此做端對端驗證):
 
 ```bash
-cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics -- --ignored
-cargo test --test sandbox_ecpg -- --ignored --test-threads=1   # 站內付 2.0
+cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics --test sandbox_ecpg -- --ignored
 cargo test --test stage_smoke -- --ignored --nocapture          # 煙霧
 cargo test --test stage_probes -- --ignored --test-threads=1    # 探測(手動)
 ```

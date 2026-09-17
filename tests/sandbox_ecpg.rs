@@ -1,14 +1,14 @@
 //! Live ECPG (站內付 2.0) tests against the two real stage domains — the
 //! dual-domain family (ecpg `Merchant/*` vs ecpayment `1.0.0/*`) that was
 //! previously live-covered only by the MANUAL probes in `tests/
-//! stage_probes.rs` (raw crypto primitives) and one typed probe in
-//! `tests/ecpg_wire.rs`. These use the real `Ecpay` methods end to end
-//! (envelope build, encrypt_checked guard, TransCode gate, typed decode).
+//! stage_probes.rs` (raw envelopes plus one typed query probe) and one typed
+//! probe in `tests/ecpg_wire.rs`. These use the real `Ecpay` methods end to
+//! end (envelope build, encrypt_checked guard, TransCode gate, typed decode).
 //!
 //! Like the other sandbox suites every test is `#[ignore]`d (offline by
-//! default; run with `-- --ignored --test-threads=1` — the ECPG stage has
-//! been observed slow). Scope is deliberately mutation-free: token creation
-//! and not-found queries; no payment is ever driven.
+//! default; run with `-- --ignored`; `unique_no` carries a per-process
+//! counter so the default parallelism is safe). Scope: token issuance,
+//! parameter-validation and not-found answers — no payment is ever driven.
 
 use ecpay::ecpg::{
     AtmInfo, BarcodeInfo, CardInfo, ConsumerInfo, CreatePaymentWithCardIdInput, CvsInfo,
@@ -35,8 +35,11 @@ fn sdk() -> Ecpay {
 
 fn unique_no(tag: &str) -> String {
     // Milliseconds alone collide when parallel tests start in the same ms
-    // (live-observed: `0|廠商訂單編號重覆`) — a per-process counter makes
-    // every number unique. tag + 13 millis + 3 seq = 19 ≤ 20 chars.
+    // (the logistics suite hit `0|廠商訂單編號重覆` that way; ECPG answers
+    // AES-JSON, not the `0|` form protocol) — a per-process counter makes
+    // every number unique. MerchantTradeNo is capped at 20 chars: "SBX" +
+    // 13 millis + 3 seq = 19. Longer tags are only used for
+    // MerchantMemberID / BindCardID.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -73,14 +76,17 @@ fn taipei_now() -> String {
 }
 
 /// The full field set mirrors example/Payment/Ecpg/CreateAllOrder/
-/// GetToken.php (the same shape the manual probe proved). ConsumerInfo is
-/// load-bearing: without Email/Phone the stage answers RtnCode ≠ 1 with no
-/// message.
+/// GetToken.php (the same shape the manual probe proved). `RememberCard=1`
+/// makes `ConsumerInfo` (with `MerchantMemberID`) required — see
+/// `missing_consumer_info_is_named_by_stage_only_with_remember_card`.
 fn token_input() -> GetTokenbyTradeInput {
     GetTokenbyTradeInput {
         merchant_id: MERCHANT_ID.into(),
         remember_card: Some(1),
         payment_ui_type: Some(2),
+        // "0" = ALL payment methods per the spec (guides/02 §8 種付款方式);
+        // the sub-objects below follow the official CreateAllOrder example
+        // minus UnionPayInfo (stage issues the token without it).
         choose_payment_list: "0".into(),
         order_info: Some(OrderInfo {
             merchant_trade_date: taipei_now(),
@@ -100,9 +106,6 @@ fn token_input() -> GetTokenbyTradeInput {
         atm_info: Some(AtmInfo {
             expire_date: Some(3),
         }),
-        // Stage names these one by one with 5100010 when ChoosePaymentList
-        // leaves them out — even a credit-only list ("0") needs them all
-        // (live: "The parameter [CVSInfo] cannot be empty").
         cvs_info: Some(CvsInfo {
             store_expire_date: Some(10080),
         }),
@@ -122,7 +125,7 @@ fn token_input() -> GetTokenbyTradeInput {
 }
 
 #[tokio::test]
-#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --test-threads=1 --nocapture"]
+#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --nocapture"]
 async fn get_token_by_trade_issues_a_real_token() {
     let out = sdk()
         .get_token_by_trade(&token_input())
@@ -137,21 +140,44 @@ async fn get_token_by_trade_issues_a_real_token() {
     );
 }
 
-/// The opaque-rejection contract documented on ConsumerInfo: a missing
-/// Email/Phone is answered RtnCode ≠ 1 with (possibly) an EMPTY RtnMsg —
-/// only the code is assertable.
+/// The ConsumerInfo contract documented on `ConsumerInfo`: with
+/// `RememberCard=1` a missing ConsumerInfo is a NAMED parameter-validation
+/// error (5100010, the message names the parameter — it is not an opaque
+/// `RtnCode != 1`); with `RememberCard=0` the whole object may be omitted
+/// and a token is still issued. Message copy drifts, so the code is pinned
+/// and the message is only searched for the parameter name.
 #[tokio::test]
-#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --test-threads=1 --nocapture"]
-async fn get_token_by_trade_without_consumer_info_fails_opaquely() {
+#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --nocapture"]
+async fn missing_consumer_info_is_named_by_stage_only_with_remember_card() {
+    let client = sdk();
+
     let mut input = token_input();
     input.consumer_info = None;
-    let out = sdk()
+    let out = client
         .get_token_by_trade(&input)
         .await
         .expect("the envelope still decodes (TransCode=1)");
-    println!("no-consumer out = {out:?}");
-    assert_ne!(out.rtn_code, 1, "missing ConsumerInfo must be rejected");
+    println!("RememberCard=1, no ConsumerInfo = {out:?}");
+    assert_eq!(out.rtn_code, 5100010, "named parameter error: {out:?}");
+    assert!(
+        out.rtn_msg.contains("ConsumerInfo"),
+        "the message names the parameter: {out:?}"
+    );
     assert!(out.token.is_empty(), "no token on a rejected request");
+
+    let mut input = token_input();
+    input.remember_card = Some(0);
+    input.consumer_info = None;
+    let out = client
+        .get_token_by_trade(&input)
+        .await
+        .expect("the envelope decodes (TransCode=1)");
+    println!("RememberCard=0, no ConsumerInfo = {out:?}");
+    assert_eq!(out.rtn_code, 1, "RtnMsg={:?}", out.rtn_msg);
+    assert!(
+        !out.token.is_empty(),
+        "ConsumerInfo is not required without RememberCard"
+    );
 }
 
 /// The query family lives on the SECOND domain (`ecpayment`), and its
@@ -159,15 +185,16 @@ async fn get_token_by_trade_without_consumer_info_fails_opaquely() {
 /// JSON INTEGER (a string would silently break callers comparing to i64).
 /// Server message copy drifts — RtnMsg is asserted non-empty, not verbatim.
 #[tokio::test]
-#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --test-threads=1 --nocapture"]
+#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --nocapture"]
 async fn query_family_not_found_is_an_in_band_integer_rtncode() {
     let client = sdk();
     // Data MerchantID is REQUIRED on all three query endpoints (stage
-    // answers 10200051 MerchantID Error without it — the methods refuse
-    // locally now, so Some() is the only reachable shape here).
+    // answers 5000220 "The parameter [MerchantID] is required." without it
+    // — pinned by the raw-envelope probe in tests/stage_probes.rs; the
+    // typed methods refuse an empty value locally).
     let query = || EcpgTradeRefInput {
         platform_id: None,
-        merchant_id: Some(MERCHANT_ID.into()),
+        merchant_id: MERCHANT_ID.into(),
         merchant_trade_no: unique_no("SBX"), // never created
     };
     for out in [
@@ -195,12 +222,12 @@ async fn query_family_not_found_is_an_in_band_integer_rtncode() {
 /// answers the same in-band not-found shape — pinning the domain routing
 /// and the integer RtnCode at zero mutation risk.
 #[tokio::test]
-#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --test-threads=1 --nocapture"]
+#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --nocapture"]
 async fn do_action_not_found_is_in_band_on_the_ecpayment_domain() {
     let out = sdk()
         .ecpg_do_action(&EcpgDoActionInput {
             platform_id: None,
-            merchant_id: Some(MERCHANT_ID.into()), // required (10200051 without)
+            merchant_id: MERCHANT_ID.into(), // required (5000220 without)
             merchant_trade_no: unique_no("SBX"),
             trade_no: unique_no("T"),
             action: "R".into(),
@@ -219,35 +246,65 @@ async fn do_action_not_found_is_in_band_on_the_ecpayment_domain() {
 
 /// One more ecpg-domain method beyond GetTokenbyTrade, so the `Merchant/*`
 /// family is not single-endpoint-covered: CreatePaymentWithCardID with a
-/// never-issued BindCardID answers an in-band business error (TransCode
-/// gate passes; the error is the expected answer, any code).
+/// never-issued BindCardID answers the in-band not-found code 5100088
+/// ("The BindCard does not exist."). That answer is only reachable with
+/// `MerchantMemberID` supplied — without it stage stops at parameter
+/// validation (5100010 "The parameter [MerchantMemberID] cannot be empty")
+/// before any card lookup. Both shapes are pinned so the not-found arm
+/// cannot silently turn vacuous again.
 #[tokio::test]
-#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --test-threads=1 --nocapture"]
+#[ignore = "hits the live ECPG stage server (public test account); run with: cargo test --test sandbox_ecpg -- --ignored --nocapture"]
 async fn create_payment_with_unknown_bind_card_id_is_rejected_in_band() {
-    let out = sdk()
-        .create_payment_with_card_id(&CreatePaymentWithCardIdInput {
-            merchant_id: MERCHANT_ID.into(),
-            bind_card_id: unique_no("BIND"),
-            order_info: Some(OrderInfo {
-                merchant_trade_date: taipei_now(),
-                merchant_trade_no: unique_no("SBX"),
-                total_amount: 100,
-                return_url: "https://www.ecpay.com.tw/example/receive".into(),
-                trade_desc: "ecpay-rs sandbox".into(),
-                item_name: "商品 x1".into(),
-            }),
-            consumer_info: Some(ConsumerInfo {
-                email: "customer@email.com".into(),
-                phone: "0912345678".into(),
-                ..Default::default()
-            }),
+    let client = sdk();
+    let request = |merchant_member_id: Option<String>| CreatePaymentWithCardIdInput {
+        merchant_id: MERCHANT_ID.into(),
+        bind_card_id: unique_no("BIND"),
+        order_info: Some(OrderInfo {
+            merchant_trade_date: taipei_now(),
+            merchant_trade_no: unique_no("SBX"),
+            total_amount: 100,
+            return_url: "https://www.ecpay.com.tw/example/receive".into(),
+            trade_desc: "ecpay-rs sandbox".into(),
+            item_name: "商品 x1".into(),
+        }),
+        consumer_info: Some(ConsumerInfo {
+            merchant_member_id,
+            email: "customer@email.com".into(),
+            phone: "0912345678".into(),
             ..Default::default()
-        })
+        }),
+        ..Default::default()
+    };
+
+    let out = client
+        .create_payment_with_card_id(&request(None))
+        .await
+        .expect("the envelope decodes (TransCode=1)");
+    println!("unknown bind card, no MerchantMemberID = {out}");
+    assert_eq!(
+        out["RtnCode"], 5100010,
+        "parameter validation stops the request before the card lookup: {out}"
+    );
+    assert!(
+        out["RtnMsg"]
+            .as_str()
+            .is_some_and(|m| m.contains("MerchantMemberID")),
+        "the message names the parameter: {out}"
+    );
+
+    let out = client
+        .create_payment_with_card_id(&request(Some(unique_no("member"))))
         .await
         .expect("the envelope decodes (TransCode=1)");
     println!("unknown bind card = {out}");
+    assert_eq!(
+        out["RtnCode"], 5100088,
+        "an unknown BindCardID must reach the card lookup: {out}"
+    );
     assert!(
-        out["RtnCode"].as_i64().is_some_and(|c| c != 1),
-        "an unknown BindCardID must be a business-level rejection: {out}"
+        out["RtnMsg"]
+            .as_str()
+            .is_some_and(|m| m.contains("BindCard")),
+        "the message names the card: {out}"
     );
 }
