@@ -519,6 +519,12 @@ impl Ecpay {
 
     /// `CreditDoAction.credit_do_action`(信用卡關帳/退刷/取消/放棄):
     /// POSTs to `CreditDetail/DoAction` and returns the response fields.
+    ///
+    /// The response is **not** CheckMacValue-verified because the endpoint
+    /// does not sign it: live stage probe (2026-09, `tests/stage_probes.rs`)
+    /// — even the normal not-found answer (`RtnCode=0&RtnMsg=訂單不存在`)
+    /// carries no CheckMacValue, so a verification gate would reject it.
+    /// Transport integrity is TLS's job here, exactly like the official SDK.
     pub async fn credit_do_action(
         &self,
         p: &CreditDoActionParams,
@@ -614,7 +620,21 @@ impl Ecpay {
 
     /// `CreditCardPeriodAction.credit_card_period_action`(信用卡定期定額訂單
     /// 狀態作業): POSTs to `Cashier/CreditCardPeriodAction` and returns the
-    /// response fields.
+    /// response fields, **verifying the response's own CheckMacValue** (raising
+    /// [`Error::CheckMacValueMismatch`] on mismatch or absence) like
+    /// [`Self::order_search`]. Unlike [`Self::credit_do_action`]'s endpoint,
+    /// this one signs its answers — including the not-found reply, which
+    /// echoes EMPTY `MerchantID`/`MerchantTradeNo` under a MAC that only
+    /// verifies over the fields as received (live stage probe 2026-09,
+    /// `tests/stage_probes.rs`).
+    ///
+    /// ⚠ The signed-not-found reply is the only live-captured shape (a
+    /// SUCCESS reply needs a real periodic order, which no server-side test
+    /// can create). Treat a [`Error::CheckMacValueMismatch`] here as
+    /// "untrusted answer", NOT "the action did not run": the server may have
+    /// applied the action before the response failed verification — confirm
+    /// with a query ([`Self::order_search_period`]) before retrying or
+    /// alerting.
     pub async fn credit_card_period_action(
         &self,
         p: &CreditCardPeriodActionParams,
@@ -630,8 +650,7 @@ impl Ecpay {
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
         insert_optional_str(&mut m, "PlatformID", &p.platform_id);
         let endpoint = format!("{}CreditCardPeriodAction", self.payment_base_url());
-        let body = self.post_signed_form(endpoint, &mut m).await?;
-        Ok(parse_qsl(&String::from_utf8_lossy(&body)))
+        self.post_cmv_verified(&endpoint, m).await
     }
 }
 

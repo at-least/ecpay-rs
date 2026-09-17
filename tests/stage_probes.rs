@@ -30,6 +30,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ecpay::Ecpay;
 use serde_json::{json, Value};
+mod common;
+use common::sandbox::{taipei_now, unique_no_millis as unique_no, urlencode};
 
 // Official public stage test accounts (developers.ecpay.com.tw / SDK_PHP examples).
 const ECPG_MERCHANT: &str = "3002607";
@@ -696,20 +698,6 @@ fn unquote_plus(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for &c in s.as_bytes() {
-        match c {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => {
-                out.push(c as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{c:02X}")),
-        }
-    }
-    out
-}
-
 fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -717,33 +705,106 @@ fn unix_now() -> i64 {
         .as_secs() as i64
 }
 
-fn unique_no(tag: &str) -> String {
-    let n = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    format!("{tag}{n}")
+/// Server-truth probes (2026-09): do the AIO payment COMMAND endpoints
+/// answer with a CheckMacValue the client could verify, like the query
+/// endpoints do? Live answers DIVERGE per endpoint, which is why these are
+/// two pins, not one assumption:
+///
+/// * `CreditDetail/DoAction` (credit_do_action): **UNSIGNED** — the
+///   not-found reply (`RtnCode=0&RtnMsg=訂單不存在`, plus a duplicated
+///   `Merchant=` quirk) carries no CheckMacValue at all, so response
+///   verification cannot be adopted there (a `post_cmv_verified`-style gate
+///   would reject the normal not-found path).
+/// * `Cashier/CreditCardPeriodAction` (credit_card_period_action):
+///   **SIGNED** — the equivalent not-found reply carries a CheckMacValue
+///   that verifies with the payment keys over the fields AS RECEIVED (the
+///   reply echoes EMPTY MerchantID/MerchantTradeNo, the same
+///   hash-as-received requirement QueryPaymentInfo's not-found answer
+///   pinned). This is the evidence `credit_card_period_action`'s response
+///   verification rests on.
+#[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test stage_probes -- --ignored --test-threads=1 --nocapture"]
+async fn aio_do_action_responses_are_unsigned_query_strings() {
+    let client = command_probe_client();
+    let mut params: HashMap<String, String> = [
+        ("MerchantTradeNo", unique_no("PROBE")),
+        ("TradeNo", unique_no("NO")),
+        ("Action", "C".to_owned()),
+        ("TotalAmount", "100".to_owned()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v))
+    .collect();
+    params.insert("MerchantID".to_owned(), ECPG_MERCHANT.into());
+    let mac = client.generate_check_value(&params).expect("sign");
+    params.insert("CheckMacValue".to_owned(), mac);
+    let body = form_post(
+        "https://payment-stage.ecpay.com.tw/CreditDetail/DoAction",
+        &params,
+    )
+    .await;
+    println!("CreditDetail/DoAction raw => {body}");
+    let fields = parse_query(&body);
+    assert!(
+        !fields.is_empty() && fields.contains_key("RtnCode"),
+        "expected the in-band RtnCode business answer, got: {body}"
+    );
+    assert!(
+        !fields.contains_key("CheckMacValue"),
+        "the response is now CheckMacValue-SIGNED — server behavior changed; \
+         adopt post_cmv_verified-style verification in credit_do_action and \
+         update this pin"
+    );
+    println!("CreditDetail/DoAction: confirmed unsigned (no CheckMacValue)");
 }
 
-fn taipei_now() -> String {
-    let secs = unix_now() + 8 * 3600; // UTC+8
-    let days = secs.div_euclid(86_400);
-    let tod = secs.rem_euclid(86_400);
-    // Howard Hinnant's civil_from_days.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!(
-        "{y:04}/{m:02}/{d:02} {:02}:{:02}:{:02}",
-        tod / 3600,
-        tod % 3600 / 60,
-        tod % 60
+#[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test stage_probes -- --ignored --test-threads=1 --nocapture"]
+async fn aio_credit_card_period_action_responses_are_signed_and_verify() {
+    let client = command_probe_client();
+    let mut params: HashMap<String, String> = [
+        ("MerchantTradeNo", unique_no("PROBE")),
+        ("Action", "Stop".to_owned()),
+        ("TimeStamp", unix_now().to_string()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v))
+    .collect();
+    params.insert("MerchantID".to_owned(), ECPG_MERCHANT.into());
+    let mac = client.generate_check_value(&params).expect("sign");
+    params.insert("CheckMacValue".to_owned(), mac);
+    let body = form_post(
+        "https://payment-stage.ecpay.com.tw/Cashier/CreditCardPeriodAction",
+        &params,
     )
+    .await;
+    println!("Cashier/CreditCardPeriodAction raw => {body}");
+    let fields = parse_query(&body);
+    assert!(
+        fields.contains_key("RtnCode"),
+        "expected the in-band RtnCode business answer, got: {body}"
+    );
+    assert!(
+        fields.contains_key("CheckMacValue"),
+        "the response no longer carries CheckMacValue — server behavior \
+         changed; drop credit_card_period_action's response verification and \
+         update this pin"
+    );
+    assert!(
+        client.verify_check_mac_value(&fields),
+        "the not-found answer's CheckMacValue must verify over the fields as \
+         received (empty echoed MerchantID/MerchantTradeNo included)"
+    );
+    println!("Cashier/CreditCardPeriodAction: CheckMacValue present and verifies");
+}
+
+fn command_probe_client() -> Ecpay {
+    Ecpay {
+        merchant_id: ECPG_MERCHANT.into(),
+        hash_key: ECPG_KEY.into(),
+        hash_iv: ECPG_IV.into(),
+        payment_api_url: "https://payment-stage.ecpay.com.tw/Cashier/".into(),
+        credit_api_url: "https://payment-stage.ecpay.com.tw/CreditDetail/".into(),
+        ..Default::default()
+    }
 }

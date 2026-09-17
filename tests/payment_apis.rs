@@ -475,11 +475,28 @@ async fn action_apis_route_and_parse() {
     let captured2 = captured.clone();
     let srv = spawn_http_server(move |path, _body| {
         *captured2.lock().unwrap() = Some(path.to_owned());
-        (
-            200,
-            "application/x-www-form-urlencoded".to_owned(),
-            "RtnCode=1&RtnMsg=OK".to_owned().into_bytes(),
-        )
+        if path == "/CreditCardPeriodAction" {
+            // This endpoint SIGNS its answers (stage probe 2026-09) — the
+            // client verifies and strips the MAC.
+            let map: std::collections::HashMap<String, String> =
+                [("MerchantID", ""), ("RtnCode", "1"), ("RtnMsg", "OK")]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                    .collect();
+            let mac = ecpay::hash_mac(&map, HASH_KEY, HASH_IV);
+            (
+                200,
+                "application/x-www-form-urlencoded".to_owned(),
+                format!("MerchantID=&RtnCode=1&RtnMsg=OK&CheckMacValue={mac}").into_bytes(),
+            )
+        } else {
+            // DoAction's answers are UNSIGNED (stage probe 2026-09).
+            (
+                200,
+                "application/x-www-form-urlencoded".to_owned(),
+                "RtnCode=1&RtnMsg=OK".to_owned().into_bytes(),
+            )
+        }
     });
     let client = Ecpay {
         credit_api_url: srv.clone(),
@@ -955,7 +972,7 @@ async fn server_side_apis_validate_before_sending() {
     assert_eq!(validation(e), "EndDate max langth is 10.");
 
     let e = client
-        .credit_card_period_action(&CreditCardPeriodActionParams {
+        .credit_card_period_action(&ecpay::payment::CreditCardPeriodActionParams {
             merchant_trade_no: "no1".into(),
             action: ecpay::payment::CreditAction::Other(String::new()),
             time_stamp: 1,
@@ -1021,4 +1038,106 @@ fn invoice_free_text_fields_preserve_letter_case() {
         "letter case must survive: {name} (the official SDK would send {name:?} lowercased)"
     );
     assert_eq!(name, "AB%E5%B8%82", "uppercase hex escapes, ~ .NET style");
+}
+
+/// `credit_card_period_action` verifies the response's own CheckMacValue
+/// (stage-verified 2026-09: `Cashier/CreditCardPeriodAction` answers carry a
+/// MAC that verifies over the fields as received, including the not-found
+/// reply's EMPTY echoed MerchantID/MerchantTradeNo — see the stage_probes
+/// pin). A tampered or unsigned response must be rejected; a genuine one
+/// comes back with the MAC stripped.
+#[tokio::test]
+async fn credit_card_period_action_verifies_the_response_check_mac_value() {
+    let signed_body = |fields: &str| {
+        // Sign over the decoded pairs (values here contain no escapes), then
+        // append the MAC — the wire shape ECPay answers with.
+        let map: std::collections::HashMap<String, String> = fields
+            .split('&')
+            .map(|kv| kv.split_once('=').unwrap())
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect();
+        let mac = ecpay::hash_mac(&map, HASH_KEY, HASH_IV);
+        format!("{fields}&CheckMacValue={mac}")
+    };
+
+    let srv = spawn_http_server(move |_path, _body| {
+        let body = signed_body("MerchantID=&MerchantTradeNo=&RtnCode=10100140&RtnMsg=");
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            body.into_bytes(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    let got = client
+        .credit_card_period_action(&ecpay::payment::CreditCardPeriodActionParams {
+            merchant_trade_no: "no1".into(),
+            action: "Stop".into(),
+            time_stamp: 1,
+            platform_id: None,
+        })
+        .await
+        .expect("a signed response must verify end-to-end");
+    assert_eq!(got.get("RtnCode").map(String::as_str), Some("10100140"));
+    assert!(
+        !got.contains_key("CheckMacValue"),
+        "the verified MAC is stripped from the returned fields"
+    );
+
+    // Tampered RtnCode with the ORIGINAL MAC: recomputation must diverge.
+    let srv = spawn_http_server(move |_path, _body| {
+        let body = signed_body("MerchantID=&MerchantTradeNo=&RtnCode=10100140&RtnMsg=");
+        let tampered = body.replace("RtnCode=10100140", "RtnCode=1");
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            tampered.into_bytes(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    let err = client
+        .credit_card_period_action(&ecpay::payment::CreditCardPeriodActionParams {
+            merchant_trade_no: "no1".into(),
+            action: "Stop".into(),
+            time_stamp: 1,
+            platform_id: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ecpay::Error::CheckMacValueMismatch),
+        "{err:?}"
+    );
+
+    // No CheckMacValue at all: rejected, never returned as plain fields.
+    let srv = spawn_http_server(move |_path, _body| {
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            b"RtnCode=1&RtnMsg=OK".to_vec(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+    let err = client
+        .credit_card_period_action(&ecpay::payment::CreditCardPeriodActionParams {
+            merchant_trade_no: "no1".into(),
+            action: "Stop".into(),
+            time_stamp: 1,
+            platform_id: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, ecpay::Error::CheckMacValueMismatch),
+        "{err:?}"
+    );
 }
