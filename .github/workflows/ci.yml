@@ -31,6 +31,19 @@ jobs:
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+  # Supply-chain check: RustSec advisories against the dependency graph.
+  # Cargo.lock is not tracked (library crate), so resolve it first — the
+  # audit then covers exactly the versions CI is about to build with.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - run: cargo generate-lockfile
+      - run: cargo audit
   # The remaining live suites (stage_smoke / stage_probes) stay OUT of the
   # automatic runs: they print raw server answers and the probes create
   # REAL stage-side records (logistics orders, B2B invoices consuming 字軌
