@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,3 +31,19 @@ jobs:
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+  # The remaining live suites (stage_smoke / stage_probes) stay OUT of the
+  # automatic runs: they print raw server answers and the probes create
+  # REAL stage-side records (logistics orders, B2B invoices consuming 字軌
+  # numbers, never cancelled). They run ONLY on a manual workflow_dispatch
+  # (Actions tab -> CI -> Run workflow; the `if:` below skips this job on
+  # push/PR events), so their stage parity cannot silently rot either.
+  stage-manual:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Probes must run serially (see tests/stage_probes.rs header).
+      - run: cargo test --test stage_smoke -- --ignored --nocapture
+      - run: cargo test --test stage_probes -- --ignored --test-threads=1 --nocapture

@@ -4,6 +4,9 @@ use std::io::{Read, Write};
 
 /// Binds 127.0.0.1:0 and serves every request with the handler's response,
 /// one connection per request (Connection: close). Returns the base URL.
+// Each test crate includes `mod common`; the live stage suites use only the
+// sandbox helpers below, so these must not warn there under `-D warnings`.
+#[allow(dead_code)]
 pub fn spawn_http_server<F>(handler: F) -> String
 where
     F: Fn(&str, &[u8]) -> (u16, String, Vec<u8>) + Send + 'static,
@@ -14,6 +17,7 @@ where
 /// Like [`spawn_http_server`], but the handler also receives the raw
 /// request head (request line + headers) — for asserting which HTTP client
 /// sent the request.
+#[allow(dead_code)]
 pub fn spawn_http_server_with_head<F>(handler: F) -> String
 where
     F: Fn(&str, &str, &[u8]) -> (u16, String, Vec<u8>) + Send + 'static,
@@ -199,4 +203,102 @@ where
         }
     });
     format!("http://{addr}/")
+}
+
+/// Helpers shared by the LIVE stage suites (stage_smoke / stage_probes /
+/// sandbox_*). Previously each suite carried its own copy — a date-format
+/// bug would have needed five fixes.
+// Each test crate includes `mod common`; only the live stage suites use
+// these helpers, so the rest must not warn under `-D warnings`.
+#[allow(dead_code)]
+pub mod sandbox {
+    /// Current Taipei time as ECPay's `yyyy/MM/dd HH:mm:ss`, std-only
+    /// (Howard Hinnant's civil_from_days).
+    pub fn taipei_now() -> String {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 8 * 3600; // UTC+8
+        let days = secs.div_euclid(86_400);
+        let tod = secs.rem_euclid(86_400);
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z.rem_euclid(146_097);
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        format!(
+            "{y:04}/{m:02}/{d:02} {:02}:{:02}:{:02}",
+            tod / 3600,
+            tod % 3600 / 60,
+            tod % 60
+        )
+    }
+
+    /// Today's Taipei date as `yyyy-MM-dd` (the invoice/B2B wire date format).
+    pub fn taipei_today() -> String {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 8 * 3600; // UTC+8
+        let days = secs.div_euclid(86_400);
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z.rem_euclid(146_097);
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        format!("{y:04}-{m:02}-{d:02}")
+    }
+
+    /// A unique merchant-side number for parallel live tests: milliseconds
+    /// alone collide when parallel tests start in the same ms (live-observed
+    /// `0|廠商訂單編號重覆`), so a per-process counter is appended. Keep the
+    /// tag ≤ 3 chars: tag + 13 millis + 3 seq must fit MerchantTradeNo's 20.
+    pub fn unique_no(tag: &str) -> String {
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("{tag}{n}{seq:03}")
+    }
+
+    /// The millis-only variant for SERIAL contexts (stage_probes runs with
+    /// `--test-threads=1`): no counter suffix, so longer tags fit the
+    /// 20-char MerchantTradeNo cap (e.g. `PROBE` + 13 millis = 18).
+    pub fn unique_no_millis(tag: &str) -> String {
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        format!("{tag}{n}")
+    }
+
+    /// requests-style form encoding (quote_plus): alnum + `_.-~` literal,
+    /// space -> `+`, everything else uppercase %XX.
+    pub fn urlencode(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for &c in s.as_bytes() {
+            match c {
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => {
+                    out.push(c as char)
+                }
+                b' ' => out.push('+'),
+                _ => out.push_str(&format!("%{c:02X}")),
+            }
+        }
+        out
+    }
 }

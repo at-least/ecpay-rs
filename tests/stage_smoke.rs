@@ -21,6 +21,8 @@ use ecpay::payment::{
     OrderSearchPeriodParams, SearchSingleTransactionParams,
 };
 use ecpay::Ecpay;
+mod common;
+use common::sandbox::{taipei_now, unique_no_millis as unique_trade_no, urlencode};
 
 const STAGE_MERCHANT_ID: &str = "3002607";
 const STAGE_HASH_KEY: &str = "pwFHCqoQZGmho4w6";
@@ -39,42 +41,6 @@ fn stage() -> Ecpay {
         vendor_api_url: STAGE_VENDOR_URL.into(),
         ..Default::default()
     }
-}
-
-/// Current Taipei time as ECPay's `yyyy/MM/dd HH:mm:ss`, std-only.
-fn taipei_now() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
-        + 8 * 3600; // UTC+8
-    let days = secs.div_euclid(86_400);
-    let tod = secs.rem_euclid(86_400);
-    // Howard Hinnant's civil_from_days.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!(
-        "{y:04}/{m:02}/{d:02} {:02}:{:02}:{:02}",
-        tod / 3600,
-        tod % 3600 / 60,
-        tod % 60
-    )
-}
-
-fn unique_trade_no(tag: &str) -> String {
-    let n = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    format!("{tag}{n}")
 }
 
 #[tokio::test]
@@ -220,6 +186,8 @@ async fn stage_rejects_a_tampered_checkout_mac() {
 async fn stage_period_query_and_credit_action_answer() {
     let client = stage();
 
+    // A nonexistent periodic trade answers the in-band not-found RtnCode
+    // (integer 10200047, live-captured 2026-09) — not an error.
     let period = client
         .order_search_period(&OrderSearchPeriodParams {
             merchant_trade_no: unique_trade_no("SMOKE"),
@@ -231,7 +199,15 @@ async fn stage_period_query_and_credit_action_answer() {
         .await
         .expect("order_search_period transport");
     println!("order_search_period => {period}");
+    assert_eq!(
+        period["RtnCode"],
+        serde_json::json!(10200047),
+        "a nonexistent periodic trade must answer RtnCode=10200047"
+    );
 
+    // DoAction on a nonexistent trade answers the UNSIGNED in-band business
+    // rejection (stage probe 2026-09): RtnCode="0" / 訂單不存在, plus the
+    // endpoint's duplicated `Merchant` field quirk.
     let do_action = client
         .credit_do_action(&CreditDoActionParams {
             merchant_trade_no: unique_trade_no("SMOKE"),
@@ -243,7 +219,23 @@ async fn stage_period_query_and_credit_action_answer() {
         .await
         .expect("credit_do_action transport");
     println!("credit_do_action => {do_action:?}");
-    assert!(!do_action.is_empty(), "DoAction must answer form fields");
+    assert_eq!(
+        do_action.get("RtnCode").map(String::as_str),
+        Some("0"),
+        "a nonexistent trade must answer the in-band RtnCode=0 rejection"
+    );
+    assert_eq!(
+        do_action.get("RtnMsg").map(String::as_str),
+        Some("訂單不存在")
+    );
+    assert_eq!(
+        do_action.get("MerchantID").map(String::as_str),
+        Some(STAGE_MERCHANT_ID)
+    );
+    assert!(
+        do_action.contains_key("Merchant"),
+        "the endpoint's duplicated `Merchant` field quirk (live-captured 2026-09)"
+    );
 }
 
 #[tokio::test]
@@ -251,6 +243,9 @@ async fn stage_period_query_and_credit_action_answer() {
 async fn stage_single_transaction_and_balance_endpoints_answer() {
     let client = stage();
 
+    // CreditRefundId=0 is rejected IN BAND (live-captured 2026-09): a JSON
+    // object carrying a string RtnMsg ("授權單號錯誤") and a null RtnValue —
+    // no RtnCode key on this endpoint.
     let single = client
         .search_single_transaction(&SearchSingleTransactionParams {
             credit_refund_id: 0,
@@ -260,7 +255,21 @@ async fn stage_single_transaction_and_balance_endpoints_answer() {
         .await
         .expect("search_single_transaction transport");
     println!("search_single_transaction => {single}");
+    assert!(single.is_object(), "the answer is a JSON object: {single}");
+    assert!(
+        single["RtnMsg"].is_string() && !single["RtnMsg"].as_str().unwrap_or("").is_empty(),
+        "the in-band rejection carries a non-empty RtnMsg: {single}"
+    );
+    assert!(
+        single["RtnValue"].is_null(),
+        "RtnValue is null on the rejected lookup: {single}"
+    );
 
+    // The balance report for a no-data window is Ok("") — an empty report is
+    // a legitimate answer, not an error (live-captured 2026-09; the shared
+    // stage account has no disbursement rows in this window — if stage data
+    // ever lands here, shift the window to another empty one; the pin is the
+    // Ok-not-error contract, not the emptiness itself).
     let balance = client
         .download_merchant_balance(&ecpay::payment::DownloadMerchantBalanceParams {
             date_type: "1".into(),
@@ -275,8 +284,10 @@ async fn stage_single_transaction_and_balance_endpoints_answer() {
         "download_merchant_balance (first 200) => {}",
         balance.chars().take(200).collect::<String>()
     );
-
-    let _ = client; // vendor endpoint answered; content depends on stage data
+    assert!(
+        balance.is_empty(),
+        "a no-data window answers an empty report, not an error: {balance:?}"
+    );
 }
 
 async fn form_post(endpoint: &str, pairs: &[(String, String)]) -> String {
@@ -296,20 +307,4 @@ async fn form_post(endpoint: &str, pairs: &[(String, String)]) -> String {
     let text = resp.text().await.expect("stage body");
     assert!(status.is_success(), "stage returned {status}");
     text
-}
-
-fn urlencode(s: &str) -> String {
-    // requests-style form encoding (quote_plus): alnum + '_.-~' literal,
-    // space -> '+', everything else uppercase %XX.
-    let mut out = String::with_capacity(s.len());
-    for &c in s.as_bytes() {
-        match c {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => {
-                out.push(c as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{c:02X}")),
-        }
-    }
-    out
 }

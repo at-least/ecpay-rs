@@ -50,6 +50,28 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
   拒絕。無 `MerchantID` 欄位的三個結構（`CreateByTempTradeInput`、
   `UpdateTempTradeInput`、`AllInOneRedirectInput`）不受影響。
 
+- **`credit_card_period_action` 驗證回應 CheckMacValue**（全庫審查）：
+  改走 `post_cmv_verified`——回應 MAC 不符或缺失時回
+  `Error::CheckMacValueMismatch`，通過時回傳欄位不含 `CheckMacValue`。
+  依據 stage 實測（2026-09，`tests/stage_probes.rs` 兩支新 probe 釘住）：
+  `Cashier/CreditCardPeriodAction` 的回應**帶簽**（連查無訂單的
+  `RtnCode=10100140` 回應都攜帶可驗證的 MAC，且 echo 的空
+  MerchantID/MerchantTradeNo 必須「如收到般」納入雜湊——與
+  QueryPaymentInfo 先例同款）；`CreditDetail/DoAction` 則**不帶簽**
+  （`RtnCode=0&RtnMsg=訂單不存在`，另有重複 `Merchant=` 欄位的怪癖），
+  故 `credit_do_action` 維持不驗證並在文件記載原因——查詢類有簽、指令類
+  一簽一不簽的不對稱從此有實證註解。`order_search_period`（JSON 回應）
+  無 MAC 可驗，不變。
+- **空金鑰 client 拒絕「空金鑰偽造 MAC」**（全庫審查）：
+  `verify_check_mac_value` 與 `verify_logistics_check_mac_value` 在
+  HashKey/HashIV 為空時一律回 `false`——知道參數集的攻擊者可自行以空金鑰
+  算出相同 MAC，未設定的 client 先前會「驗證通過」，構成偽造回呼的
+  oracle。真正的綠界回呼（以真實金鑰簽署）行為不變（本就驗證失敗）。
+- **`aio_check_out` 拒絕負數 `TotalAmount`**：負的台幣總額永遠不是合法
+  wire 值，現在客戶端即以 `Error::Validation("TotalAmount cannot be
+  negative.")` 拒絕，不再簽章送出後由綠界錯誤頁回答。零仍允許（是否
+  接受零額屬伺服器端規則）。
+
 _非破壞性：_
 
 - README 新增「回呼處理清單」：MAC 只證明作者性與完整性，不證明新鮮度與
@@ -101,6 +123,26 @@ _非破壞性：_
   （`serde_json::Value` 的 BTreeMap 會重排金鑰——先前嘗試把
   `encrypt_checked` 改走 `to_value` 即因此改變加密位元組，已撤銷；
   舊測試解密成 Value 比對看不見順序，此測試釘住明文全文）。
+
+- **`Ecpay::stage(merchant_id, hash_key, hash_iv)` 建構子**（全庫審查）：
+  一次設定全部八個服務 base URL 到 stage 端點（含新常數
+  `CREDIT_API_URL_STAGE` = `payment-stage…/CreditDetail/`、
+  `VENDOR_API_URL_STAGE` = `vendor-stage…/PaymentMedia/`）。動機：每個
+  `*_api_url` 欄位獨立空值回退**正式環境**，逐欄手設的 stage client 少設
+  一個欄位就默默送出簽名過的正式流量——支付 API 動真錢。建構子的測試
+  逐一釘住八個欄位，未來新增服務欄位未跟著設 stage 會使測試失敗而非
+  靜默回退。
+- 測試基礎設施（全庫審查）：五個 live 套件重複的
+  `unique_no`/`taipei_now`/`taipei_today`/`urlencode` helper 合併進
+  `tests/common/mod.rs` 的 `sandbox` 模組（counter 版與 millis 版並存，
+  語意各歸各位）；`stage_smoke`/`sandbox_b2b`/`stage_probes` 三支空洞或
+  恆真的 live 測試補上真斷言（單筆交易查詢的 in-band 拒絕形狀、無資料
+  區間餘額報告為 `Ok("")`、B2B 字軌查詢的 `RtnCode=1` 與非空
+  `InvoiceInfo`、定期定額查詢的 `10200047`、DoAction 的 `0|訂單不存在`）；
+  CI 新增 `workflow_dispatch` 手動 job `stage-manual` 執行
+  `stage_smoke`/`stage_probes`（探測會建立真實 stage 紀錄故不自動跑，
+  但可一鍵手動執行，parity 不再無人把關）；`need_extra_paid_info`
+  常數與 injected-client 超時路徑補上測試。
 
 ## 0.4.0 — 2026-09-16
 

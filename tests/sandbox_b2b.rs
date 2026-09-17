@@ -7,6 +7,8 @@
 
 use ecpay::invoice_b2b::{GetIssueInput, InvalidInput, IssueB2bInput};
 use ecpay::Ecpay;
+mod common;
+use common::sandbox::taipei_today;
 
 const MERCHANT_ID: &str = "2000132";
 const B2B_KEY: &str = "ejCk326UnaZWKisg";
@@ -18,27 +20,6 @@ fn unique_relate_number() -> String {
         .unwrap()
         .as_millis();
     format!("B2BSBX{n}")
-}
-
-fn taipei_today() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
-        + 8 * 3600; // UTC+8
-    let days = secs.div_euclid(86_400);
-    // Howard Hinnant's civil_from_days, yyyy-MM-dd (B2B wire date format).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m:02}-{d:02}")
 }
 
 fn sdk() -> Ecpay {
@@ -184,6 +165,9 @@ async fn b2b_get_issue_not_found_is_an_in_band_string_rtncode() {
 async fn b2b_get_invoice_word_setting_answers() {
     // 民國年 for 2026 is 115; term/use/category follow the official example's
     // shape (InvoiceCategory=2 is the B2B value in the PHP example).
+    // Live-captured 2026-09: the shared stage account answers RtnCode=1
+    // "查詢成功" with a NON-empty InvoiceInfo array (dozens of real 字軌
+    // records for year 115) — assert that shape, not just "it answered".
     let out = sdk()
         .get_invoice_word_setting_b2b(&ecpay::invoice_b2b::GetInvoiceWordSettingInput {
             merchant_id: MERCHANT_ID.into(),
@@ -192,9 +176,30 @@ async fn b2b_get_invoice_word_setting_answers() {
             use_status: 0,
             invoice_category: 2,
         })
-        .await;
-    match out {
-        Ok(v) => println!("word setting = {v:?}"),
-        Err(e) => println!("word setting error (business-level acceptable) = {e:?}"),
+        .await
+        .expect("the envelope decodes (TransCode=1)");
+    println!(
+        "word setting => {} records",
+        out["InvoiceInfo"].as_array().map_or(0, Vec::len)
+    );
+    assert_eq!(
+        out["RtnCode"],
+        serde_json::json!(1),
+        "query must succeed: {out}"
+    );
+    let records = out["InvoiceInfo"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !records.is_empty(),
+        "the shared stage account has real 字軌 records for year 115: {out}"
+    );
+    for record in &records {
+        assert!(
+            record["InvType"].is_string(),
+            "each record carries InvType: {record}"
+        );
+        assert!(
+            record["InvoiceHeader"].is_string() && record["InvoiceStart"].is_string(),
+            "each record carries its 字軌 header and start number: {record}"
+        );
     }
 }

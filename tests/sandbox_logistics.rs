@@ -13,23 +13,12 @@ use ecpay::logistics::{
     DomesticQueryInput, GetStoreListInput, LogisticsCreateInput,
 };
 use ecpay::Ecpay;
+mod common;
+use common::sandbox::{taipei_now, taipei_today, unique_no};
 
 const MERCHANT_ID: &str = "2000132";
 const LOGISTICS_KEY: &str = "5294y06JbISpM5x9";
 const LOGISTICS_IV: &str = "v77hoKGq4kWxNNIS";
-
-fn unique_no(tag: &str) -> String {
-    // Milliseconds alone collide when parallel tests start in the same ms
-    // (live-observed: `0|廠商訂單編號重覆`) — a per-process counter makes
-    // every number unique. tag + 13 millis + 3 seq = 19 ≤ 20 chars.
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("{tag}{n}{seq:03}")
-}
 
 fn sdk() -> Ecpay {
     Ecpay {
@@ -303,40 +292,4 @@ async fn crossborder_create_test_data_answers_with_the_aes_envelope() {
         }
         Err(e) => panic!("unexpected error: {e:?}"),
     }
-}
-
-fn taipei_today() -> String {
-    // yyyy-MM-dd for UpdateShipmentInfo.
-    taipei_now()
-        .replace('/', "-")
-        .split(' ')
-        .next()
-        .unwrap()
-        .into()
-}
-
-fn taipei_now() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
-        + 8 * 3600; // UTC+8
-    let days = secs.div_euclid(86_400);
-    let tod = secs.rem_euclid(86_400);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!(
-        "{y:04}/{m:02}/{d:02} {:02}:{:02}:{:02}",
-        tod / 3600,
-        tod % 3600 / 60,
-        tod % 60
-    )
 }
