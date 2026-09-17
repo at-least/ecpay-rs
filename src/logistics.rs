@@ -172,7 +172,9 @@ impl Ecpay {
         }
         if let Some(status) = status {
             // Keep the status segment reachable without lying about the wire:
-            // Express/Create answers `1|...` where `1` means processed.
+            // Express/Create answers `1|...` where `1` means processed. The
+            // leading underscore makes a collision with a real ECPay field
+            // impossible — wire names are PascalCase alphanumerics.
             fields.insert("_status_prefix".to_owned(), status);
         }
         Ok(fields)
@@ -797,11 +799,16 @@ impl Ecpay {
     /// 驗證國內物流回呼(ServerReplyURL 等)的 CheckMacValue:與金流回呼
     /// 不同,物流回呼一律 **MD5** 且用物流 HashKey/HashIV。
     pub fn verify_logistics_check_mac_value(&self, params: &HashMap<String, String>) -> bool {
+        // Same empty-key guard as `verify_check_mac_value`: an unconfigured
+        // client must never "verify" an attacker-crafted empty-key MAC.
+        let (key, iv) = self.logistics_keys();
+        if key.is_empty() || iv.is_empty() {
+            return false;
+        }
         let got = match params.get("CheckMacValue") {
             Some(v) if !v.is_empty() => v,
             _ => return false,
         };
-        let (key, iv) = self.logistics_keys();
         verify_mac(got, crate::crypto::str_pairs(params), key, iv, 0).unwrap_or(false)
     }
 

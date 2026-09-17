@@ -156,9 +156,15 @@ pub const ECPAYMENT_API_URL_STAGE: &str = "https://ecpayment-stage.ecpay.com.tw/
 /// verbatim from the official SDK's hardcoded URLs.
 pub const CREDIT_API_URL_PRODUCTION: &str = "https://payment.ecpay.com.tw/CreditDetail/";
 
+/// The CreditDetail endpoints' stage base (same host as the payment stage).
+pub const CREDIT_API_URL_STAGE: &str = "https://payment-stage.ecpay.com.tw/CreditDetail/";
+
 /// The vendor (特店後台) endpoints (download_merchant_balance). Production
 /// base, verbatim from the official SDK's hardcoded URL.
 pub const VENDOR_API_URL_PRODUCTION: &str = "https://vendor.ecpay.com.tw/PaymentMedia/";
+
+/// The vendor (特店後台) endpoints' stage base (特店後台 stage host).
+pub const VENDOR_API_URL_STAGE: &str = "https://vendor-stage.ecpay.com.tw/PaymentMedia/";
 
 /// The configured client (Go `type Ecpay struct`; the official Python SDK's
 /// `ECPayPaymentSdk(MerchantID, HashKey, HashIV)` constructor). The zero
@@ -250,6 +256,57 @@ impl std::fmt::Debug for Ecpay {
 }
 
 impl Ecpay {
+    /// A stage (sandbox) client: the credentials plus EVERY service base URL
+    /// set to its stage endpoint in one call.
+    ///
+    /// Why this exists: each `*_api_url` field independently falls back to
+    /// its PRODUCTION endpoint when left empty, so a client configured for
+    /// stage field by field silently sends signed production traffic the
+    /// moment one field is missed — and payment APIs move real money.
+    /// `Ecpay::stage` removes the per-field trap: the struct is built
+    /// field-by-field WITHOUT `..Default::default()`, so adding a future
+    /// URL field to `Ecpay` breaks this constructor's compilation until it
+    /// gains a stage entry (the test pins all eight current fields).
+    ///
+    /// The credentials are still yours to supply (ECPay's public stage test
+    /// accounts are published in the official docs); the invoice/logistics
+    /// key pairs (`invoice_hash_key`/`invoice_hash_iv`,
+    /// `logistics_hash_key`/`logistics_hash_iv`) and the B2B `b2b_rq_id`
+    /// remain per-service settings on top of this base, exactly like on a
+    /// hand-built client.
+    pub fn stage(
+        merchant_id: impl Into<String>,
+        hash_key: impl Into<String>,
+        hash_iv: impl Into<String>,
+    ) -> Self {
+        // Every field explicit — no `..Default::default()`, on purpose (see
+        // the doc above): a newly added field must be decided here, not
+        // silently defaulted to "" (= the production endpoint).
+        Self {
+            platform_id: String::new(),
+            merchant_id: merchant_id.into(),
+            hash_key: hash_key.into(),
+            hash_iv: hash_iv.into(),
+            payment_api_url: PAYMENT_API_URL_STAGE.to_owned(),
+            invoice_api_url: INVOICE_API_URL_STAGE.to_owned(),
+            invoice_hash_key: String::new(),
+            invoice_hash_iv: String::new(),
+            relate_number: String::new(),
+            return_url: String::new(),
+            payment_info_url: String::new(),
+            credit_api_url: CREDIT_API_URL_STAGE.to_owned(),
+            vendor_api_url: VENDOR_API_URL_STAGE.to_owned(),
+            logistics_api_url: LOGISTICS_API_URL_STAGE.to_owned(),
+            logistics_hash_key: String::new(),
+            logistics_hash_iv: String::new(),
+            ecpg_api_url: ECPG_API_URL_STAGE.to_owned(),
+            ecpayment_api_url: ECPAYMENT_API_URL_STAGE.to_owned(),
+            b2b_invoice_api_url: B2B_INVOICE_API_URL_STAGE.to_owned(),
+            b2b_rq_id: String::new(),
+            http: None,
+        }
+    }
+
     /// The Cashier base (`{payment_api_url}{Action}/V5`), defaulting to
     /// production when unset.
     pub(crate) fn payment_base_url(&self) -> &str {
@@ -354,6 +411,12 @@ impl Ecpay {
     /// posted form, including the "CheckMacValue" field; a missing/empty value
     /// verifies as false. (SHA-256 only: EncryptType=0 is retired.)
     pub fn verify_check_mac_value(&self, params: &HashMap<String, String>) -> bool {
+        // An unconfigured client must never "verify": whoever knows the param
+        // set can compute the empty-key MAC themselves, so accepting it would
+        // turn this into a forged-callback oracle, not a check.
+        if self.hash_key.is_empty() || self.hash_iv.is_empty() {
+            return false;
+        }
         let got = match params.get("CheckMacValue") {
             Some(v) if !v.is_empty() => v,
             _ => return false,

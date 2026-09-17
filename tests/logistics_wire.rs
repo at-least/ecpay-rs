@@ -1557,3 +1557,33 @@ fn logistics_forms_render_deterministically() {
         );
     }
 }
+
+#[test]
+fn empty_key_client_rejects_empty_key_forged_logistics_mac() {
+    // Directly-empty logistics keys, and the fallback-to-empty-payment-pair
+    // shape alike: whoever knows the param set can compute the empty-key MD5
+    // preimage, so an unconfigured client must not "verify" it.
+    for mut sdk in [
+        logistics_sdk("https://logistics-stage.ecpay.com.tw/".into()),
+        logistics_sdk("https://logistics-stage.ecpay.com.tw/".into()),
+    ] {
+        sdk.logistics_hash_key = String::new();
+        sdk.logistics_hash_iv = String::new();
+        sdk.hash_key = String::new();
+        sdk.hash_iv = String::new();
+        let mut params: HashMap<String, String> = [
+            ("MerchantID", MERCHANT_ID),
+            ("AllPayLogisticsID", "1718552"),
+            ("RtnCode", "300"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        let forged = check_mac_value(&params, "", "", 0).unwrap();
+        params.insert("CheckMacValue".to_owned(), forged);
+        assert!(
+            !sdk.verify_logistics_check_mac_value(&params),
+            "an empty-key client must reject a MAC computed with the same empty keys"
+        );
+    }
+}

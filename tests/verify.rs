@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use ecpay::{hash_mac, Ecpay};
+use ecpay::{check_mac_value, hash_mac, Ecpay};
 
 fn test_payment_ecpay(base_url: &str) -> Ecpay {
     Ecpay {
@@ -116,5 +116,31 @@ fn test_verify_check_mac_value_official_callback() {
     assert!(
         !ec.verify_check_mac_value(&params),
         "tampering a signed field must invalidate the official MAC"
+    );
+}
+
+/// A client whose HashKey/HashIV were never configured must not "verify" a
+/// MAC computed over the empty-key preimage: whoever knows the param set can
+/// produce that exact MAC, so accepting it turns an unconfigured client into
+/// a forged-callback oracle (a real ECPay callback would fail either way —
+/// this guards the attacker-crafted direction).
+#[test]
+fn empty_key_client_rejects_empty_key_forged_mac() {
+    let ec = Ecpay {
+        merchant_id: "2000132".to_owned(),
+        ..Default::default()
+    };
+    assert!(ec.hash_key.is_empty() && ec.hash_iv.is_empty());
+    let mut params = map(&[
+        ("MerchantID", "2000132"),
+        ("MerchantTradeNo", "Test1234567890"),
+        ("RtnCode", "1"),
+        ("TradeAmt", "100"),
+    ]);
+    let forged = check_mac_value(&params, "", "", 1).unwrap();
+    params.insert("CheckMacValue".to_owned(), forged);
+    assert!(
+        !ec.verify_check_mac_value(&params),
+        "an empty-key client must reject a MAC computed with the same empty keys"
     );
 }
