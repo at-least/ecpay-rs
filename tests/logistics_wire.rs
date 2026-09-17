@@ -535,6 +535,182 @@ async fn return_cvs_sends_the_service_type_field() {
     assert_eq!(out["AllPayLogisticsID"], "1718600");
 }
 
+// --- Local field validation: invalid input must be refused BEFORE any
+// bytes leave the crate (Error::Validation), never signed and POSTed. Any
+// request that escapes validation lands on the forged server, whose answer
+// parses as a status error — never as Error::Validation — so these tests
+// fail loudly against an unvalidated path.
+
+async fn must_reject(
+    field: &str,
+    fut: impl std::future::Future<Output = ecpay::Result<std::collections::BTreeMap<String, String>>>,
+) {
+    match fut.await {
+        Err(ecpay::Error::Validation(m)) => {
+            assert!(m.contains(field), "expected {field} to be named in: {m}")
+        }
+        other => panic!("{field}: expected Error::Validation, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn domestic_create_rejects_invalid_fields_before_any_request() {
+    // The handler answers the official unsigned short-error shape; if a
+    // bad input ever reaches it, the result is a status Message error and
+    // the must_reject assertions below fail.
+    let server = spawn_http_server(|_path, _body| {
+        (
+            200,
+            "text/plain".into(),
+            b"0|validation was bypassed".to_vec(),
+        )
+    });
+    let sdk = logistics_sdk(server);
+
+    let case = |field: &'static str, mutate: fn(&mut LogisticsCreateInput)| {
+        let mut p = sample_create();
+        mutate(&mut p);
+        (field, p)
+    };
+    for (field, bad) in [
+        case("MerchantTradeNo", |p| p.merchant_trade_no = "N".repeat(21)),
+        case("MerchantTradeDate", |p| {
+            p.merchant_trade_date = String::new()
+        }),
+        case("LogisticsType", |p| p.logistics_type = String::new()),
+        case("LogisticsSubType", |p| p.logistics_sub_type = String::new()),
+        case("GoodsAmount", |p| p.goods_amount = -1),
+        case("GoodsName", |p| p.goods_name = "G".repeat(51)),
+        case("SenderName", |p| p.sender_name = String::new()),
+        case("SenderCellPhone", |p| p.sender_cell_phone = "0".repeat(21)),
+        case("ReceiverName", |p| p.receiver_name = String::new()),
+        case("ServerReplyURL", |p| p.server_reply_url = String::new()),
+    ] {
+        must_reject(field, sdk.logistics_create(&bad)).await;
+    }
+}
+
+/// The official spec keeps three Express/Create fields officially OPTIONAL
+/// with an empty value (guides/06 field table): `MerchantTradeNo` 可空
+/// （系統自動產生）、`GoodsName`/`SenderCellPhone` 僅 C2C 子類別必填。
+/// A B2C (FAMI) order with all three empty is valid wire input — local
+/// validation must pass it through, not reject it.
+#[tokio::test]
+async fn domestic_create_accepts_officially_optional_empty_fields() {
+    let server = spawn_http_server(|path, body| {
+        assert!(path.ends_with("/Express/Create"), "{path}");
+        // The three officially-optional fields go on the wire as explicit
+        // empties (`MerchantTradeNo=`), exactly like the official SDK sends
+        // them — pin that, so a future "helpful" drop-empty refactor here
+        // cannot silently change the wire shape.
+        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        for field in ["MerchantTradeNo", "GoodsName", "SenderCellPhone"] {
+            assert_eq!(
+                sent.get(field).map(String::as_str),
+                Some(""),
+                "{field} must be sent as an explicit empty"
+            );
+        }
+        let mut reply = HashMap::new();
+        reply.insert("RtnCode".to_string(), "300".to_string());
+        let mac = md5(&reply);
+        (
+            200,
+            "text/plain".into(),
+            format!("1|RtnCode=300&CheckMacValue={mac}").into_bytes(),
+        )
+    });
+    let out = logistics_sdk(server)
+        .logistics_create(&LogisticsCreateInput {
+            merchant_trade_no: String::new(),
+            goods_name: String::new(),
+            sender_cell_phone: String::new(),
+            ..sample_create()
+        })
+        .await
+        .expect("B2C order with officially-optional empties is signed and sent");
+    assert_eq!(out["RtnCode"], "300");
+}
+
+#[tokio::test]
+async fn domestic_update_cancel_and_return_reject_invalid_fields_before_any_request() {
+    let server = spawn_http_server(|_path, _body| {
+        (
+            200,
+            "text/plain".into(),
+            b"0|validation was bypassed".to_vec(),
+        )
+    });
+    let sdk = logistics_sdk(server);
+
+    // Query: the logistics ID is the only caller-supplied lookup key.
+    must_reject(
+        "AllPayLogisticsID",
+        sdk.logistics_query_logistics_trade_info(&DomesticQueryInput {
+            all_pay_logistics_id: String::new(),
+            time_stamp: None,
+        }),
+    )
+    .await;
+    // Update shipment: AllPayLogisticsID + ShipmentDate.
+    must_reject(
+        "ShipmentDate",
+        sdk.logistics_update_shipment_info(&UpdateShipmentInfoInput {
+            all_pay_logistics_id: "1718552".into(),
+            shipment_date: String::new(),
+            receiver_store_id: None,
+        }),
+    )
+    .await;
+    // Update store: the full C2C field set is required.
+    must_reject(
+        "StoreType",
+        sdk.logistics_update_store_info(&UpdateStoreInfoInput {
+            all_pay_logistics_id: "1718552".into(),
+            cvs_payment_no: "C9681067".into(),
+            cvs_validation_no: "2448".into(),
+            store_type: String::new(),
+            receiver_store_id: "006598".into(),
+        }),
+    )
+    .await;
+    // Cancel C2C: payment/validation numbers are required.
+    must_reject(
+        "CVSPaymentNo",
+        sdk.logistics_cancel_c2c_order(&CancelC2cInput {
+            all_pay_logistics_id: "1718552".into(),
+            cvs_payment_no: String::new(),
+            cvs_validation_no: "2448".into(),
+        }),
+    )
+    .await;
+    // Return CVS: sender and reply URL are required.
+    must_reject(
+        "SenderName",
+        sdk.logistics_return_cvs(&ReturnCvsInput {
+            goods_amount: 1000,
+            service_type: "4".into(),
+            sender_name: String::new(),
+            sender_cell_phone: None,
+            server_reply_url: "https://example.com/reply".into(),
+        }),
+    )
+    .await;
+    // Return home: a negative refund amount is never a valid wire value.
+    must_reject(
+        "GoodsAmount",
+        sdk.logistics_return_home(&ReturnHomeInput {
+            all_pay_logistics_id: "1718552".into(),
+            goods_amount: -1,
+            temperature: "0001".into(),
+            distance: "00".into(),
+            specification: None,
+            server_reply_url: "https://example.com/reply".into(),
+        }),
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn logistics_callback_helpers_roundtrip() {
     let sdk = logistics_sdk("https://logistics-stage.ecpay.com.tw/".into());

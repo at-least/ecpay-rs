@@ -36,6 +36,7 @@ use serde_json::Value;
 use crate::client::{body_excerpt, render_auto_submit_form, truncate_for_display, unix_now};
 use crate::crypto::{check_mac_value, verify_mac};
 use crate::error::{Error, Result};
+use crate::payment::params::{cap_str, optional_str, required_nonempty, required_str};
 use crate::Ecpay;
 
 // --- LogisticsForm — the browser auto-submit flow builder ---
@@ -90,6 +91,14 @@ impl LogisticsForm {
 /// `Helper/QueryLogisticsTradeInfo/V2`) and the query fields. The `1|`
 /// segment is NOT part of the signed data (live-verified byte-exact against
 /// stage: signing the prefixed key never matches).
+///
+/// Heuristic, and its known edge: a status prefix is recognized only when
+/// the head segment is ≤3 ASCII-alphanumeric chars with no `=`. A response
+/// whose FIRST KEY were ≤3 alphanumerics and whose value contained `|`
+/// before any `=` (e.g. a hypothetical `ID|v=1`) would be misread as
+/// status-prefixed. No ECPay logistics field name fits that shape (they
+/// are PascalCase ≥4 chars), and every live-captured responder matches —
+/// the alternative (parsing per-endpoint) buys nothing the wire has shown.
 fn split_status_prefix(body: &str) -> (Option<String>, &str) {
     match body.split_once('|') {
         // A status prefix only exists when the head segment is a short
@@ -255,7 +264,8 @@ impl Ecpay {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LogisticsCreateInput {
-    /// 特店交易編號 (merchant_trade_no), maxlength 20
+    /// 特店交易編號 (merchant_trade_no), maxlength 20。官方標記可空——
+    /// 留空時系統自動產生（guides/06 欄位表）；本 crate 只驗長度不驗必填。
     #[serde(rename = "MerchantTradeNo")]
     pub merchant_trade_no: String,
     /// 特店交易時間 yyyy/MM/dd HH:mm:ss (UTC+8)
@@ -271,13 +281,16 @@ pub struct LogisticsCreateInput {
     /// 商品金額 0 ~ 20,000 元(C2C 部分子類別上限不同,以官方文件為準)
     #[serde(rename = "GoodsAmount")]
     pub goods_amount: i64,
-    /// 商品名稱 maxlength 50
+    /// 商品名稱 maxlength 50。官方標記**僅 C2C 子類別必填**（B2C 可空）；
+    /// 本 crate 只驗長度，C2C 必填由伺服器裁定。
     #[serde(rename = "GoodsName")]
     pub goods_name: String,
     /// 寄件人姓名 maxlength 10(中文 5 個字)
     #[serde(rename = "SenderName")]
     pub sender_name: String,
-    /// 寄件人手機 maxlength 20,格式數字(部分子類別需含國碼)
+    /// 寄件人手機 maxlength 20,格式數字(部分子類別需含國碼)。官方標記
+    /// **僅 C2C 子類別必填**（B2C/宅配可空或由 SenderPhone 擇一——本結構
+    /// 無 SenderPhone 欄位）;本 crate 只驗長度。
     #[serde(rename = "SenderCellPhone")]
     pub sender_cell_phone: String,
     /// 寄件人郵遞區號(HOME 必填)
@@ -493,6 +506,7 @@ impl Ecpay {
         &self,
         input: &DomesticQueryInput,
     ) -> Result<BTreeMap<String, String>> {
+        required_nonempty("AllPayLogisticsID", &input.all_pay_logistics_id)?;
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert(
@@ -527,6 +541,8 @@ impl Ecpay {
         &self,
         input: &UpdateShipmentInfoInput,
     ) -> Result<BTreeMap<String, String>> {
+        required_nonempty("AllPayLogisticsID", &input.all_pay_logistics_id)?;
+        required_nonempty("ShipmentDate", &input.shipment_date)?;
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert(
@@ -547,6 +563,11 @@ impl Ecpay {
         &self,
         input: &UpdateStoreInfoInput,
     ) -> Result<BTreeMap<String, String>> {
+        required_nonempty("AllPayLogisticsID", &input.all_pay_logistics_id)?;
+        required_nonempty("CVSPaymentNo", &input.cvs_payment_no)?;
+        required_nonempty("CVSValidationNo", &input.cvs_validation_no)?;
+        required_nonempty("StoreType", &input.store_type)?;
+        required_nonempty("ReceiverStoreID", &input.receiver_store_id)?;
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert(
@@ -572,6 +593,9 @@ impl Ecpay {
         &self,
         input: &CancelC2cInput,
     ) -> Result<BTreeMap<String, String>> {
+        required_nonempty("AllPayLogisticsID", &input.all_pay_logistics_id)?;
+        required_nonempty("CVSPaymentNo", &input.cvs_payment_no)?;
+        required_nonempty("CVSValidationNo", &input.cvs_validation_no)?;
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert(
@@ -593,8 +617,8 @@ impl Ecpay {
         input: &ReturnCvsInput,
     ) -> Result<BTreeMap<String, String>> {
         let endpoint = format!("{}express/ReturnCVS", self.logistics_base_url());
-        self.post_logistics_form(endpoint, self.return_cvs_params(input))
-            .await
+        let params = self.return_cvs_params(input)?;
+        self.post_logistics_form(endpoint, params).await
     }
 
     /// 統一超商逆物流退貨 (`express/ReturnUniMartCVS`)。
@@ -603,8 +627,8 @@ impl Ecpay {
         input: &ReturnCvsInput,
     ) -> Result<BTreeMap<String, String>> {
         let endpoint = format!("{}express/ReturnUniMartCVS", self.logistics_base_url());
-        self.post_logistics_form(endpoint, self.return_cvs_params(input))
-            .await
+        let params = self.return_cvs_params(input)?;
+        self.post_logistics_form(endpoint, params).await
     }
 
     /// 宅配逆物流退貨 (`Express/ReturnHome`)。
@@ -612,6 +636,13 @@ impl Ecpay {
         &self,
         input: &ReturnHomeInput,
     ) -> Result<BTreeMap<String, String>> {
+        required_nonempty("AllPayLogisticsID", &input.all_pay_logistics_id)?;
+        if input.goods_amount < 0 {
+            return Err(Error::Validation("GoodsAmount cannot be negative.".into()));
+        }
+        required_nonempty("Temperature", &input.temperature)?;
+        required_nonempty("Distance", &input.distance)?;
+        required_nonempty("ServerReplyURL", &input.server_reply_url)?;
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert(
@@ -633,6 +664,32 @@ impl Ecpay {
         &self,
         input: &LogisticsCreateInput,
     ) -> Result<HashMap<String, String>> {
+        // Local validation, mirroring the payment module's: refuse invalid
+        // input BEFORE signing it. Caps are set ONLY where the official
+        // spec states one (the struct field docs); the char count is a
+        // lenient subset of any server-side unit counting (bytes or
+        // half-width units), so it never blocks a value ECPay would accept.
+        // Three fields are officially optional-empty (guides/06): trade no
+        // 可空（系統自動產生）, GoodsName/SenderCellPhone 僅 C2C 必填 —
+        // capped, never required, locally.
+        cap_str("MerchantTradeNo", &input.merchant_trade_no, 20)?;
+        required_str("MerchantTradeDate", &input.merchant_trade_date, 20)?;
+        required_nonempty("LogisticsType", &input.logistics_type)?;
+        required_nonempty("LogisticsSubType", &input.logistics_sub_type)?;
+        // A negative amount is never a valid wire value; the upper bound
+        // varies by LogisticsSubType, so the server adjudicates it.
+        if input.goods_amount < 0 {
+            return Err(Error::Validation("GoodsAmount cannot be negative.".into()));
+        }
+        cap_str("GoodsName", &input.goods_name, 50)?;
+        required_str("SenderName", &input.sender_name, 10)?;
+        cap_str("SenderCellPhone", &input.sender_cell_phone, 20)?;
+        optional_str("SenderAddress", &input.sender_address, 60)?;
+        required_str("ReceiverName", &input.receiver_name, 10)?;
+        required_str("ReceiverCellPhone", &input.receiver_cell_phone, 20)?;
+        optional_str("ReceiverAddress", &input.receiver_address, 60)?;
+        optional_str("ReceiverStoreID", &input.receiver_store_id, 6)?;
+        required_nonempty("ServerReplyURL", &input.server_reply_url)?;
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert(
@@ -681,7 +738,13 @@ impl Ecpay {
         Ok(m)
     }
 
-    fn return_cvs_params(&self, input: &ReturnCvsInput) -> HashMap<String, String> {
+    fn return_cvs_params(&self, input: &ReturnCvsInput) -> Result<HashMap<String, String>> {
+        if input.goods_amount < 0 {
+            return Err(Error::Validation("GoodsAmount cannot be negative.".into()));
+        }
+        required_nonempty("ServiceType", &input.service_type)?;
+        required_nonempty("SenderName", &input.sender_name)?;
+        required_nonempty("ServerReplyURL", &input.server_reply_url)?;
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("GoodsAmount".to_owned(), input.goods_amount.to_string());
@@ -691,7 +754,7 @@ impl Ecpay {
             m.insert("SenderCellPhone".to_owned(), phone.clone());
         }
         m.insert("ServerReplyURL".to_owned(), input.server_reply_url.clone());
-        m
+        Ok(m)
     }
 
     // --- 國內物流: browser forms ---

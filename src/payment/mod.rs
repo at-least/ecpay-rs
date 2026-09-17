@@ -7,7 +7,7 @@
 //! [`aio_check_out`]: crate::Ecpay::aio_check_out
 
 pub mod check_out;
-mod params;
+pub(crate) mod params;
 
 pub use check_out::{AioCheckOut, AioCheckOutParams, InvoiceExtend, MERCHANT_TRADE_DATE_FORMAT};
 

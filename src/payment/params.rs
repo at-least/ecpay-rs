@@ -44,6 +44,16 @@ pub(crate) fn optional_str(name: &str, v: &Option<String>, max: usize) -> Result
     Ok(())
 }
 
+/// Length cap for a plain-`String` field that is officially OPTIONAL (an
+/// empty value is valid wire input, e.g. logistics `MerchantTradeNo` 可空
+/// — 系統自動產生): check the length only when set, never emptiness.
+pub(crate) fn cap_str(name: &str, v: &str, max: usize) -> Result<(), Error> {
+    if !v.is_empty() && py_len(v) > max {
+        return Err(Error::Validation(format!("{name} max langth is {max}.")));
+    }
+    Ok(())
+}
+
 /// Required wire-code check: the official SDK's message for a missing
 /// value; the VALUE itself is adjudicated by ECPay (unknown codes pass
 /// through as `Other`), so there is no length cap.
