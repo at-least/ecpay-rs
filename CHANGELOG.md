@@ -61,7 +61,11 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
   （`RtnCode=0&RtnMsg=訂單不存在`，另有重複 `Merchant=` 欄位的怪癖），
   故 `credit_do_action` 維持不驗證並在文件記載原因——查詢類有簽、指令類
   一簽一不簽的不對稱從此有實證註解。`order_search_period`（JSON 回應）
-  無 MAC 可驗，不變。
+  無 MAC 可驗，不變。⚠ 升級注意：帶簽的查無訂單回應是唯一實測過的
+  形狀（成功回應需真實定期定額訂單，伺服器端測試無法建立）——
+  `Error::CheckMacValueMismatch` 應解讀為「不可信的回答」而非「指令未
+  執行」：伺服器可能在回應驗證失敗前已套用動作，重試或告警前請先以
+  `order_search_period` 查證。
 - **空金鑰 client 拒絕「空金鑰偽造 MAC」**（全庫審查）：
   `verify_check_mac_value` 與 `verify_logistics_check_mac_value` 在
   HashKey/HashIV 為空時一律回 `false`——知道參數集的攻擊者可自行以空金鑰

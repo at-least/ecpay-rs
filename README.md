@@ -412,11 +412,11 @@ cargo test --test stage_probes -- --ignored --test-threads=1    # 探測(手動)
 ```
 
 `stage_smoke`/`stage_probes` 不在 CI 的自動步驟裡(探測會建立真實 stage
-紀錄、消耗字軌),但可在 GitHub Actions 以 **Run workflow** 手動觸發
-`.github/workflows/ci.yml`(dispatch 事件;`stage-manual` job 帶
-`if: github.event_name == 'workflow_dispatch'`,push/PR 不會跑到),
-執行 `stage_smoke` 與 `stage_probes`,避免它們的 stage parity 無人執行
-而腐化。
+紀錄、消耗字軌),但可在 GitHub Actions 以 **Run workflow** 手動觸發整個
+workflow(dispatch 事件會執行全部 job,含離線測試;`stage-manual` job 帶
+`if: github.event_name == 'workflow_dispatch'`,push/PR 不會跑到)——
+它執行 `stage_smoke` 與 `stage_probes`,避免這兩個套件的 stage parity
+無人執行而腐化。
 
 `tests/fixtures/python_sdk_vectors.json` 由「真的」官方 Python SDK 執行產生
 (`requests` 以 stub 取代;產生腳本 `gen_vectors.py` 同目錄),重新產生方式見
