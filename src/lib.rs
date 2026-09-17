@@ -107,6 +107,19 @@ pub use invoice::{
     IssueOutput, Item, TriggerIssueInput, TriggerIssueOutput, VoidModel, VoidWithReIssueInput,
     VoidWithReIssueOutput,
 };
+// The B2B invoice types without a same-named B2C counterpart, at the root
+// like every other module's types. The seven that WOULD collide
+// (`AllowanceInput`, `InvalidInput`, `GetIssueInput`, `GetInvalidInput`,
+// `GetAllowanceInput`, `GetAllowanceInvalidInput`,
+// `GetInvoiceWordSettingInput`) stay at `ecpay::invoice_b2b` — the same
+// rule as the `_b2b` method suffixes.
+pub use invoice_b2b::{
+    AllowanceConfirmInput, B2bAllowanceDetail, B2bIssueOutput, B2bItem,
+    CancelAllowanceConfirmInput, CancelAllowanceInput, GetAllowanceConfirmInput,
+    GetAllowanceInvalidConfirmInput, GetInvalidConfirmInput, GetIssueConfirmInput,
+    GetRejectConfirmInput, GetRejectInput, InvalidConfirmInput, IssueB2bInput, IssueConfirmInput,
+    MaintainMerchantCustomerDataInput, NotifyInput, RejectConfirmInput, RejectInput,
+};
 pub use logistics::{
     AllInOneCancelC2cInput, AllInOneCreateTestDataInput, AllInOnePrintTradeDocumentInput,
     AllInOneQueryInput, AllInOneRedirectInput, AllInOneReturnCvsInput, AllInOneReturnHomeInput,

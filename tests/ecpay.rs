@@ -435,3 +435,42 @@ fn stage_constructor_sets_every_base_url_to_its_stage_endpoint() {
         "the vendor stage base is the stage 特店後台 host"
     );
 }
+
+/// The B2B invoice types WITHOUT a same-named B2C counterpart are reachable
+/// at the crate root, like every other module's types; the seven that WOULD
+/// collide (`AllowanceInput`, `InvalidInput`, `GetIssueInput`,
+/// `GetInvalidInput`, `GetAllowanceInput`, `GetAllowanceInvalidInput`,
+/// `GetInvoiceWordSettingInput`) stay at `ecpay::invoice_b2b` — the same
+/// rule as the `_b2b` method suffixes.
+#[test]
+fn b2b_types_without_a_b2c_name_collision_are_root_exported() {
+    use ecpay::{
+        AllowanceConfirmInput, B2bAllowanceDetail, B2bIssueOutput, B2bItem,
+        CancelAllowanceConfirmInput, CancelAllowanceInput, GetAllowanceConfirmInput,
+        GetAllowanceInvalidConfirmInput, GetInvalidConfirmInput, GetIssueConfirmInput,
+        GetRejectConfirmInput, GetRejectInput, InvalidConfirmInput, IssueB2bInput,
+        IssueConfirmInput, MaintainMerchantCustomerDataInput, NotifyInput, RejectConfirmInput,
+        RejectInput,
+    };
+    // Every name resolves at the root and is the right type (Default where
+    // derivable; a placeholder value where the struct has required fields).
+    let _: IssueB2bInput = IssueB2bInput::default();
+    let _: B2bItem = B2bItem::default();
+    let _: B2bIssueOutput = B2bIssueOutput::default();
+    let _: B2bAllowanceDetail = B2bAllowanceDetail::default();
+    let _: IssueConfirmInput = IssueConfirmInput::default();
+    let _: AllowanceConfirmInput = AllowanceConfirmInput::default();
+    let _: CancelAllowanceInput = CancelAllowanceInput::default();
+    let _: CancelAllowanceConfirmInput = CancelAllowanceConfirmInput::default();
+    let _: InvalidConfirmInput = InvalidConfirmInput::default();
+    let _: NotifyInput = NotifyInput::default();
+    let _: RejectInput = RejectInput::default();
+    let _: RejectConfirmInput = RejectConfirmInput::default();
+    let _: MaintainMerchantCustomerDataInput = MaintainMerchantCustomerDataInput::default();
+    let _: GetIssueConfirmInput = GetIssueConfirmInput::default();
+    let _: GetInvalidConfirmInput = GetInvalidConfirmInput::default();
+    let _: GetAllowanceConfirmInput = GetAllowanceConfirmInput::default();
+    let _: GetAllowanceInvalidConfirmInput = GetAllowanceInvalidConfirmInput::default();
+    let _: GetRejectInput = GetRejectInput::default();
+    let _: GetRejectConfirmInput = GetRejectConfirmInput::default();
+}
