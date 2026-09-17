@@ -136,6 +136,8 @@ impl Ecpay {
 /// 2. 下方 `customer_name` 等 B2C 風格的選填欄位不在現行規格頁欄位表中，
 ///    依整合慣例保留為 `Option`；未設值時整個欄位不會出現在 `Data`
 ///    （`skip_serializing_if`），不影響已驗證的必填欄位集。
+// When adding a pub type here, add it to the root re-export in lib.rs —
+// or, if it collides with a B2C name, to the collision list there.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct IssueB2bInput {
