@@ -477,9 +477,12 @@ impl Ecpay {
     /// endpoints: identical except that every payload-content-dependent
     /// failure (padding, UTF-8, JSON, URL-escape) collapses into one fixed
     /// message via `decrypt_payload_uniform`, closing the CBC padding oracle.
-    /// The non-envelope body error keeps its bounded excerpt — whether the
-    /// body parses as an envelope at all depends only on bytes the sender
-    /// already knows.
+    /// The two failures that depend only on bytes the sender already knows
+    /// keep their bounded, Debug-escaped excerpts ([`body_excerpt`]): a
+    /// non-envelope body, and a `TransCode` gate failure — the gate's
+    /// `TransMsg` is attacker bytes too (the gate triggers on the mere
+    /// presence of a `TransCode` key, before any decryption), so it must
+    /// never reach a log line unbounded or raw either.
     pub(crate) fn decode_envelope_opaque<O: DeserializeOwned>(
         body: &str,
         key: &[u8],
@@ -494,7 +497,7 @@ impl Ecpay {
         if res.trans_code != 1 {
             return Err(Error::TransCode {
                 code: res.trans_code,
-                msg: res.trans_msg,
+                msg: body_excerpt(&res.trans_msg),
             });
         }
         crate::crypto::decrypt_payload_uniform(&res.data, key, iv)

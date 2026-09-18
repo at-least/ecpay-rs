@@ -551,6 +551,43 @@ fn callback_decoders_route_through_their_own_key_pairs() {
     assert_eq!(v["RtnCode"], "1");
 }
 
+/// A well-formed envelope with `TransCode != 1` reaches the callback
+/// decoders together with the sender's `TransMsg`. On a public ReturnURL
+/// those bytes are attacker-chosen, so per the `Error::TransCode` contract
+/// the callback decoders must report a bounded, Debug-escaped excerpt —
+/// never the verbatim, unbounded message (`Display` of this error is
+/// ordinary log-line material).
+#[test]
+fn callback_transcode_error_reports_a_bounded_escaped_excerpt() {
+    let client = Ecpay {
+        hash_key: "0123456789abcdef".into(),
+        hash_iv: "0123456789abcdef".into(),
+        ..Default::default()
+    };
+    let attacker_msg = format!("boom\n{}", "x".repeat(10_000));
+    let envelope = format!(
+        r#"{{"TransCode":0,"TransMsg":{},"Data":""}}"#,
+        serde_json::to_string(&attacker_msg).unwrap()
+    );
+    let err = client
+        .decrypt_ecpg_callback::<serde_json::Value>(&envelope)
+        .expect_err("TransCode=0 must be an error");
+    match &err {
+        ecpay::Error::TransCode { code: 0, msg } => {
+            assert!(
+                msg.len() < 1_000,
+                "the callback excerpt must be bounded, got {} chars",
+                msg.len()
+            );
+            assert!(
+                !msg.contains('\n'),
+                "the callback excerpt must be escaped, got a raw newline: {msg:?}"
+            );
+        }
+        other => panic!("expected Error::TransCode(0), got {other:?}"),
+    }
+}
+
 /// An injected client's timeout policy is honored end to end: a server
 /// slower than the configured overall timeout surfaces as `Error::Http`
 /// with `is_timeout()` (the default shared client carries 10s/30s timeouts;

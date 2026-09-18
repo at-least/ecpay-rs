@@ -94,6 +94,15 @@ pub enum Error {
     /// The AES-JSON envelope's TransCode gate failed: the envelope arrived
     /// but TransCode != 1, so `Data` was never sent/decrypted (renamed from
     /// `Transport` in 0.3; Go's message called this a "transport error").
+    /// `msg` is the server's answer, and its content depends on the path:
+    /// verbatim on the API paths (the server's own TLS response), but a
+    /// bounded, Debug-escaped excerpt via the callback decoders
+    /// ([`crate::Ecpay::decrypt_ecpg_callback`] /
+    /// [`crate::Ecpay::decrypt_logistics_callback`]) — on a public
+    /// ReturnURL the msg is attacker bytes and must never reach a log line
+    /// unbounded or raw (see `crate::crypto`). Note `msg.is_empty()` is
+    /// never a meaningful test on the callback path (an empty TransMsg
+    /// arrives as `""`, Debug-quoted).
     TransCode {
         code: i64,
         msg: String,
