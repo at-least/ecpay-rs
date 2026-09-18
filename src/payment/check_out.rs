@@ -232,7 +232,8 @@ pub struct InvoiceExtend {
     pub relate_number: String,
     /// 客戶編號(最大 20 字元)。
     pub customer_id: Option<String>,
-    /// 統一編號(固定 8 碼數字;有值時 Print=1、Donation=0、不得填載具)。
+    /// 統一編號(固定 8 碼數字;有值時 Print=1、Donation=不捐贈(AIO wire
+    /// 值 `'2'`——官方 SDK 的驗證訊息誤寫 `'0'`,原樣保留)、不得填載具)。
     pub customer_identifier: Option<String>,
     /// 客戶名稱(最大 30 字元;Print=1 或有統一編號時必填)。
     pub customer_name: Option<String>,
