@@ -1748,31 +1748,72 @@ fn logistics_forms_render_deterministically() {
 }
 
 #[test]
-fn empty_key_client_rejects_empty_key_forged_logistics_mac() {
-    // Directly-empty logistics keys, and the fallback-to-empty-payment-pair
-    // shape alike: whoever knows the param set can compute the empty-key MD5
-    // preimage, so an unconfigured client must not "verify" it.
-    for mut sdk in [
-        logistics_sdk("https://logistics-stage.ecpay.com.tw/".into()),
-        logistics_sdk("https://logistics-stage.ecpay.com.tw/".into()),
-    ] {
-        sdk.logistics_hash_key = String::new();
-        sdk.logistics_hash_iv = String::new();
-        sdk.hash_key = String::new();
-        sdk.hash_iv = String::new();
-        let mut params: HashMap<String, String> = [
-            ("MerchantID", MERCHANT_ID),
-            ("AllPayLogisticsID", "1718552"),
-            ("RtnCode", "300"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), v.to_owned()))
-        .collect();
-        let forged = check_mac_value(&params, "", "", ecpay::EncryptType::Md5);
-        params.insert("CheckMacValue".to_owned(), forged);
-        assert!(
-            !sdk.verify_logistics_check_mac_value(&params),
-            "an empty-key client must reject a MAC computed with the same empty keys"
-        );
-    }
+fn empty_logistics_keys_reject_forged_mac_but_fall_back_to_payment_pair() {
+    let base_params: HashMap<String, String> = [
+        ("MerchantID", MERCHANT_ID),
+        ("AllPayLogisticsID", "1718552"),
+        ("RtnCode", "300"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    // Shape 1 — everything empty: whoever knows the param set can compute the
+    // empty-key MD5 preimage, so an unconfigured client must not "verify" it.
+    let mut sdk = logistics_sdk("https://logistics-stage.ecpay.com.tw/".into());
+    sdk.logistics_hash_key = String::new();
+    sdk.logistics_hash_iv = String::new();
+    sdk.hash_key = String::new();
+    sdk.hash_iv = String::new();
+    let mut params = base_params.clone();
+    let forged = check_mac_value(&params, "", "", ecpay::EncryptType::Md5);
+    params.insert("CheckMacValue".to_owned(), forged);
+    assert!(
+        !sdk.verify_logistics_check_mac_value(&params),
+        "an empty-key client must reject a MAC computed with the same empty keys"
+    );
+
+    // Shape 2 — the fallback itself: logistics keys empty, payment pair real.
+    // `logistics_keys` falls back per-field to the payment pair, so a MAC
+    // computed with the payment pair MUST verify through the logistics path,
+    // and a MAC computed with the (unused) logistics pair must NOT.
+    let mut sdk = logistics_sdk("https://logistics-stage.ecpay.com.tw/".into());
+    sdk.logistics_hash_key = String::new();
+    sdk.logistics_hash_iv = String::new();
+    let mut params = base_params.clone();
+    let mac = check_mac_value(
+        &params,
+        &sdk.hash_key,
+        &sdk.hash_iv,
+        ecpay::EncryptType::Md5,
+    );
+    params.insert("CheckMacValue".to_owned(), mac);
+    assert!(
+        sdk.verify_logistics_check_mac_value(&params),
+        "empty logistics keys must fall back to the payment pair, not fail closed"
+    );
+    let mut wrong = base_params.clone();
+    let wrong_mac = check_mac_value(&wrong, LOGISTICS_KEY, LOGISTICS_IV, ecpay::EncryptType::Md5);
+    wrong.insert("CheckMacValue".to_owned(), wrong_mac);
+    assert!(
+        !sdk.verify_logistics_check_mac_value(&wrong),
+        "the logistics pair is unused while the logistics keys are empty"
+    );
+
+    // Shape 3 — the fallback is PER FIELD: only the logistics KEY empty
+    // (IV kept) must mix the payment key with the logistics IV.
+    let mut sdk = logistics_sdk("https://logistics-stage.ecpay.com.tw/".into());
+    sdk.logistics_hash_key = String::new();
+    let mut params = base_params.clone();
+    let mac = check_mac_value(
+        &params,
+        &sdk.hash_key,
+        &sdk.logistics_hash_iv,
+        ecpay::EncryptType::Md5,
+    );
+    params.insert("CheckMacValue".to_owned(), mac);
+    assert!(
+        sdk.verify_logistics_check_mac_value(&params),
+        "an empty logistics key alone must fall back to the payment key, keeping the logistics IV"
+    );
 }
