@@ -424,8 +424,8 @@ submodule 只有 `.claude/skills/ecpay`(官方 ECPay-API-Skill,供 Claude Code
 `tests/stage_probes.rs`)全部 `#[ignore]`,離線環境不會失敗。需要端對端
 驗證時以 `-- --ignored` 明確執行(公開測試特店 2000132/3002607,需對外
 網路;每次執行會在 stage 建立真實沙盒資料——例如物流訂單,套件不會取消
-它們;`sandbox_ecpg` 只取號、驗證參數與查詢不存在的訂單/綁卡,不建立
-訂單——CI 的
+它們;`sandbox_ecpg` 不會驅動任何付款,但 `GetTokenbyTrade` 取號會在
+stage 留下未付款的交易與 Token(不清理)——CI 的
 `cargo test --test sandbox … -- --ignored` 步驟即以此做端對端驗證):
 
 ```bash

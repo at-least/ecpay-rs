@@ -1,8 +1,10 @@
-//! ECPay **stage（沙盒）**整合測試：驗證 encode → CheckMacValue → 真實端點
+//! ECPay **stage（沙盒）**整合測試：驗證 encode → AES 信封 → 真實端點
 //! → 回應解析的成功路徑，這部分無法用 mock 或 unreachable URL 覆蓋。
+//! （本檔全部走 B2C 發票的 AES-JSON 信封端點—— CheckMacValue 的 live
+//! 覆蓋在 `tests/sandbox_logistics.rs`（MD5 回呼）與 `stage_smoke`。）
 //!
-//! 憑證是 ECPay 官方文件公開的 stage 測試特店（與
-//! `crates/admin/tests/admin_test.rs::test_ecpay` 同一組），僅作用於
+//! 憑證是 ECPay 官方公開的 stage 測試特店 2000132/3002607（ECPay-API-Skill
+//! submodule `.claude/skills/ecpay` 的 AGENTS.md 即列出同一組），僅作用於
 //! 沙盒環境，不是機密。測試會在 stage 帳號開立真實（沙盒）發票、查詢、
 //! 再作廢，不留垃圾資料。兩個例外（皆已現場驗證、非設計疏漏）：
 //! - 作廢重開測試——ECPay 5070451 規定重開後的發票需等上傳財政部狀態更新
@@ -32,6 +34,11 @@ use ecpay::{
 fn stage_client() -> Ecpay {
     Ecpay {
         merchant_id: "2000132".into(),
+        // Inert placeholders: every test in this file calls invoice-family
+        // APIs (invoice_hash_key below), which ignore the payment pair. The
+        // values are the LOGISTICS pair, not an AIO credential for 2000132 —
+        // kept explicit so an AIO call added here fails loudly at a wrong-key
+        // MAC instead of looking configured.
         hash_key: "5294y06JbISpM5x9".into(),
         hash_iv: "v77hoKGq4kWxNNIS".into(),
         payment_api_url: PAYMENT_API_URL_STAGE.into(),

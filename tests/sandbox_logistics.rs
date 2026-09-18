@@ -23,6 +23,8 @@ const LOGISTICS_IV: &str = "v77hoKGq4kWxNNIS";
 fn sdk() -> Ecpay {
     Ecpay {
         merchant_id: MERCHANT_ID.into(),
+        // Inert placeholders: logistics calls sign/verify through
+        // logistics_keys() (the pair below); the payment pair is never used.
         hash_key: "pwFHCqoQZGmho4w6".into(),
         hash_iv: "EkRm7iFT261dpevs".into(),
         logistics_api_url: "https://logistics-stage.ecpay.com.tw/".into(),
@@ -49,6 +51,9 @@ async fn domestic_create_then_query_roundtrip() {
             receiver_name: "王小美".into(),
             receiver_cell_phone: "0933222111".into(),
             receiver_store_id: Some("006598".into()),
+            // Stage-only: ECPay's example receiver page (this suite never
+            // processes the callback). In production point server_reply_url
+            // at YOUR https endpoint.
             server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
             ..Default::default()
         })
@@ -93,6 +98,7 @@ async fn domestic_create_update_shipment_query_chain() {
             receiver_name: "王小美".into(),
             receiver_cell_phone: "0933222111".into(),
             receiver_store_id: Some("006598".into()),
+            // Stage-only receiver — see the server_reply_url note above.
             server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
             ..Default::default()
         })

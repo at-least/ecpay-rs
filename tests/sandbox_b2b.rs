@@ -8,23 +8,19 @@
 use ecpay::invoice_b2b::{GetIssueInput, InvalidInput, IssueB2bInput};
 use ecpay::Ecpay;
 mod common;
-use common::sandbox::taipei_today;
+use common::sandbox::{taipei_today, unique_no};
 
 const MERCHANT_ID: &str = "2000132";
 const B2B_KEY: &str = "ejCk326UnaZWKisg";
 const B2B_IV: &str = "q9jcZX8Ib9LM8wYk";
 
-fn unique_relate_number() -> String {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    format!("B2BSBX{n}")
-}
-
 fn sdk() -> Ecpay {
     Ecpay {
         merchant_id: MERCHANT_ID.into(),
+        // Inert placeholders: this suite only calls invoice-family APIs
+        // (invoice_hash_key below); the payment pair is never used. Keep the
+        // struct shape explicit so an AIO call added here fails loudly at a
+        // wrong-key MAC rather than silently.
         hash_key: "pwFHCqoQZGmho4w6".into(),
         hash_iv: "EkRm7iFT261dpevs".into(),
         invoice_hash_key: B2B_KEY.to_owned(),
@@ -65,7 +61,9 @@ async fn b2b_issue_then_get_then_invalid_roundtrip() {
     let client = sdk();
 
     // 1. 開立 — the wire contract proven by the probes: RtnCode=1 + 發票號.
-    let relate_number = unique_relate_number();
+    //    unique_no (tag + millis + per-process seq) instead of bare millis:
+    //    the shared helper exists because millis alone collided live.
+    let relate_number = unique_no("B2B");
     let issue = client
         .issue_b2b(&sample_issue(relate_number.clone()))
         .await

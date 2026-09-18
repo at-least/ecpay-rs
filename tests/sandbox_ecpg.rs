@@ -52,6 +52,9 @@ fn token_input() -> GetTokenbyTradeInput {
             merchant_trade_date: taipei_now(),
             merchant_trade_no: unique_no("SBX"),
             total_amount: 100,
+            // Stage-only: ECPay's example receiver page (this suite never
+            // processes the callback). In production point return_url at
+            // YOUR https endpoint and apply the README callback checklist.
             return_url: "https://www.ecpay.com.tw/example/receive".into(),
             trade_desc: "ecpay-rs sandbox".into(),
             item_name: "商品 x1".into(),
@@ -59,6 +62,7 @@ fn token_input() -> GetTokenbyTradeInput {
         card_info: Some(CardInfo {
             redeem: Some(0),
             // RememberCard=1 makes OrderResultURL required (5100010).
+            // Stage-only receiver — see the return_url note above.
             order_result_url: Some("https://www.ecpay.com.tw/example/receive".into()),
             credit_installment: Some("3,6,12".into()),
             flexible_installment: Some(30),
@@ -207,7 +211,9 @@ async fn do_action_not_found_is_in_band_on_the_ecpayment_domain() {
 /// One more ecpg-domain method beyond GetTokenbyTrade, so the `Merchant/*`
 /// family is not single-endpoint-covered: CreatePaymentWithCardID with a
 /// never-issued BindCardID answers the in-band not-found code 5100088
-/// ("The BindCard does not exist."). That answer is only reachable with
+/// ("The BindCard does not exist."; stage-captured 2026-09 — the only pin
+/// in this file without an in-test capture date, provenance: CHANGELOG's
+/// 2026-09 補充實測 notes). That answer is only reachable with
 /// `MerchantMemberID` supplied — without it stage stops at parameter
 /// validation (5100010 "The parameter [MerchantMemberID] cannot be empty")
 /// before any card lookup. Both shapes are pinned so the not-found arm
@@ -223,6 +229,7 @@ async fn create_payment_with_unknown_bind_card_id_is_rejected_in_band() {
             merchant_trade_date: taipei_now(),
             merchant_trade_no: unique_no("SBX"),
             total_amount: 100,
+            // Stage-only receiver — see the return_url note above.
             return_url: "https://www.ecpay.com.tw/example/receive".into(),
             trade_desc: "ecpay-rs sandbox".into(),
             item_name: "商品 x1".into(),
