@@ -657,7 +657,11 @@ impl Ecpay {
 /// The official SDK sets `response.encoding='big5'` for the download
 /// endpoints. Undecodable bytes become U+FFFD rather than an error.
 fn decode_big5(body: &[u8]) -> String {
-    let (text, _, _) = encoding_rs::BIG5.decode(body);
+    // `decode_without_bom_handling`, not `decode`: the official SDK decodes
+    // with Python's `big5` codec, which has no BOM sniffing. `decode` would
+    // switch the whole stream to UTF-8/UTF-16 on a leading BOM pair and
+    // silently turn a corrupt body into mojibake instead of U+FFFDs.
+    let (text, _) = encoding_rs::BIG5.decode_without_bom_handling(body);
     text.into_owned()
 }
 
@@ -740,9 +744,20 @@ mod tests {
     #[test]
     fn big5_invalid_bytes_become_replacement_chars() {
         // 0x81/0xFF have no Big5 mapping on their own; encoding_rs yields
-        // U+FFFD. (A leading 0xFF 0xFE pair is instead the UTF-16LE BOM and
-        // gets stripped by decode() — BOM sniffing, not Big5 decoding.)
+        // U+FFFD.
         assert_eq!(decode_big5(&[0x81]), "\u{FFFD}");
         assert_eq!(decode_big5(&[0xFF]), "\u{FFFD}");
+    }
+
+    #[test]
+    fn big5_decode_does_not_bom_sniff() {
+        // Python's `bytes.decode('big5')` — the contract documented on
+        // decode_big5 — has no BOM sniffing: a leading FF FE pair is invalid
+        // Big5 (two U+FFFDs) and the REST of the body keeps decoding as
+        // Big5. `Encoding::decode` instead switches the whole stream to
+        // UTF-16LE, silently turning a corrupt body into mojibake. (Bytes
+        // chosen so CPython's big5 and encoding_rs's WHATWG Big5 agree.)
+        let body = [0xFF, 0xFE, 0x2D, 0x41, 0x42]; // FF FE, then "-AB"
+        assert_eq!(decode_big5(&body), "\u{FFFD}\u{FFFD}-AB");
     }
 }
