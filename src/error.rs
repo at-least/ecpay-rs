@@ -100,8 +100,9 @@ pub enum Error {
     /// `msg` is the server's answer, and its content depends on the path:
     /// verbatim on the API paths (the server's own TLS response), but a
     /// bounded, Debug-escaped excerpt via the callback decoders
-    /// ([`crate::Ecpay::decrypt_ecpg_callback`] /
-    /// [`crate::Ecpay::decrypt_logistics_callback`]) — on a public
+    /// ([`crate::Ecpay::decrypt_ecpg_callback`],
+    /// [`crate::Ecpay::decrypt_logistics_callback`],
+    /// [`crate::Ecpay::decrypt_temp_trade_established`]) — on a public
     /// ReturnURL the msg is attacker bytes and must never reach a log line
     /// unbounded or raw (see `crate::crypto`). Note `msg.is_empty()` is
     /// never a meaningful test on the callback path (an empty TransMsg

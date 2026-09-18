@@ -513,6 +513,10 @@ impl Ecpay {
     /// auto-submitting form instead of an AES envelope (live-captured
     /// 2026-09: the form POSTs the print record / the AES selection request
     /// to the browser page). Sends the same envelope, returns the raw HTML.
+    /// The typed sibling is [`Self::post_aes_json`] — the
+    /// envelope-build/POST/status-gate block is duplicated between the two
+    /// on purpose (they differ in response handling), so change both
+    /// together.
     pub(crate) async fn post_aes_json_raw<I: Serialize>(
         &self,
         to: AesEndpoint,
@@ -558,6 +562,10 @@ impl Ecpay {
     /// families, so the caller names its own.
     /// The B2C invoice envelope (`call_invoice_api`) keeps its own Go-port
     /// path because it always sends PlatformID and pins `Revision: "3.0.0"`.
+    /// Its raw-body sibling is [`Self::post_aes_json_raw`] — the
+    /// envelope-build/POST/status-gate block below is duplicated between the
+    /// two on purpose (they differ in response handling), so change both
+    /// together.
     pub(crate) async fn post_aes_json<I: Serialize, O: DeserializeOwned>(
         &self,
         to: AesEndpoint,

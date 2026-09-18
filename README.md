@@ -1,8 +1,9 @@
 # ecpay-rs
 
-ECPay(綠界科技)All-in-One 金流 SDK 的 Rust 版本 —— 完整移植官方
-[ECPayAIO_Python](https://github.com/ECPay/ECPayAIO_Python),並額外收錄
-B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
+ECPay(綠界科技)金流/電子發票/物流 SDK 的 Rust 版本 —— 完整移植官方
+[ECPayAIO_Python](https://github.com/ECPay/ECPayAIO_Python),並對照官方
+PHP SDK 範例與 staging 實測補齊 B2C/B2B 電子發票、ECPG 站內付 2.0 與
+三家族物流(國內/全方位 v2/跨境)。MIT 授權。
 
 [![CI](https://github.com/at-least/ecpay-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/at-least/ecpay-rs/actions/workflows/ci.yml)
 
@@ -27,7 +28,7 @@ B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
   逐方法標示。
 - **物流三家族全涵蓋**:國內物流(CMV-**MD5** form:建立訂單、查詢
   QueryLogisticsTradeInfo/V2、門市清單、更新出貨/門市、C2C 取消、逆物流
-  CVS/UNIMART/HOME;瀏覽器表單:電子地圖、列印出貨單、四家 C2C 交貨便、
+  CVS/UNIMART/HOME;瀏覽器表單:建單、電子地圖、列印出貨單、四家 C2C 交貨便、
   產生測試資料)、全方位物流 v2(13 支 AES-JSON:暫存訂單建立/更新、
   查詢、逆物流、列印、物流選擇頁)與跨境物流(建立/查詢/列印/地圖)。
   staging 實測:國內建單(RtnCode=300 + AllPayLogisticsID)→查詢全程往返、
@@ -196,8 +197,9 @@ println!("RtnMsg = {}", result["RtnMsg"]);
 
 ```rust
 # use ecpay::Ecpay;
-// 注入的 client 原樣使用,內建 hardening(不跟隨轉導、逾時)不會自動套用,
-// 請自行複製同一套設定——帶簽章的 POST 被轉導就是攻擊面:
+// 注入的 client 原樣使用,內建 hardening 不會自動套用。至少要保留「不跟隨
+// 轉導」——帶簽章的 POST 被轉導就是攻擊面;逾時與連線池政策本來就是你
+// 注入的目的,依需求自訂:
 let http = reqwest::Client::builder()
     .redirect(reqwest::redirect::Policy::none())
     .connect_timeout(std::time::Duration::from_secs(10))
@@ -232,7 +234,7 @@ let client = Ecpay {
 | —(Go 版移植) | 發票:`issue`、`void_with_reissue`、`invalid`、`get_issue`、`get_invalid`、`invoice_notify`、`check_barcode`、`check_love_code`、`get_company_name_by_tax_id`、`get_gov_invoice_word_setting`、`get_invoice_word_setting` |
 | —(比對 `ECPay/SDK_PHP` 官方範例/規格頁後新增) | 發票延遲開立:`delay_issue`、`trigger_issue`、`cancel_delay_issue`;折讓:`allowance`、`allowance_invalid`、`allowance_by_collegiate`、`allowance_invalid_by_collegiate`、`get_allowance`、`get_allowance_invalid` |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **ECPG 站內付 2.0**(`ecpay::ecpg`):`get_token_by_trade`、`create_payment`、綁卡 6 支、查詢/請款動作 6 支,共 14 支 |
-| —(比對 `ECPay/SDK_PHP` 後新增) | **物流**(`ecpay::logistics`):國內 9 支 MD5 form API + 6 種瀏覽器表單、全方位物流 v2 13 支、跨境 4 支 + 表單,含 MD5 回呼驗證與 AES 回呼解密 |
+| —(比對 `ECPay/SDK_PHP` 後新增) | **物流**(`ecpay::logistics`):國內 9 支 MD5 form API + 5 種瀏覽器表單、全方位物流 v2 13 支、跨境 4 支 + 表單,含 MD5 回呼驗證與 AES 回呼解密 |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **B2B 電子發票**(`ecpay::invoice_b2b`):開立/折讓/作廢/拒收/通知/客戶資料/字軌與全部查詢,共 23 支 |
 
 **平台商(`PlatformID`)模式的支援範圍**:AIO 金流
@@ -451,7 +453,9 @@ MIT — 見 [LICENSE](LICENSE)。歡迎 PR。
 # ecpay-rs (English)
 
 A Rust port of ECPay's official [ECPayAIO_Python](https://github.com/ECPay/ECPayAIO_Python)
-payment SDK, extended with the B2C e-invoice AES-JSON APIs. MIT licensed.
+payment SDK, extended — from the official PHP SDK examples and live stage
+verification — with B2C/B2B e-invoice, ECPG 站內付 2.0, and the three
+logistics families (domestic, AllInOne v2, cross-border). MIT licensed.
 
 - **Full AIO payment surface**: checkout creation with the invoice extension,
   order search (with response CheckMacValue verification), ATM/CVS/BARCODE
@@ -535,6 +539,11 @@ confirming this crate follows ECPay's backend):
 3. Setting fields outside the active `ChoosePayment` group, or combining two
    Credit plan groups, is a loud validation error instead of being silently
    signed and sent; use `extra` for parameters this crate does not model yet.
+4. Optional fields with documented max lengths are validated client-side too
+   (the official SDK only validates required fields), so over-long values
+   fail locally with `Error::Validation("{name} max langth is {max}.")` —
+   the official SDK's message text, typo included — instead of a
+   server-side error.
 
 `AioCheckOut::html_form` also HTML-escapes attribute values (the upstream
 form breaks on `"` and is an injection vector).

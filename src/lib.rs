@@ -140,7 +140,10 @@ pub use payment::{
 };
 
 /// AIO payment (Cashier) base, production. Signed form/API calls
-/// (`aio_check_out`, `order_search`, `credit_do_action`, …) POST here.
+/// (`aio_check_out`, `order_search`, `query_trade_info`, …) POST here;
+/// the credit actions (`credit_do_action`, `search_single_transaction`,
+/// `download_*_balance`) live under [`CREDIT_API_URL_PRODUCTION`] and the
+/// vendor path instead.
 pub const PAYMENT_API_URL_PRODUCTION: &str = "https://payment.ecpay.com.tw/Cashier/";
 /// AIO payment (Cashier) base, stage (public test merchant `3002607`).
 pub const PAYMENT_API_URL_STAGE: &str = "https://payment-stage.ecpay.com.tw/Cashier/";

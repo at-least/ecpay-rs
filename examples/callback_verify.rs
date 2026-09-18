@@ -1,6 +1,11 @@
 //! Verify an inbound payment-result callback's CheckMacValue (ReturnURL) —
 //! the required check for every ECPay notification. Feed it the raw POSTed
 //! form as key=value lines on stdin, e.g. from a webhook handler's params.
+//!
+//! ⚠ MAC verification alone is NOT "paid": before fulfilling an order you
+//! must also deduplicate the notification, bind `TradeAmt`/`MerchantID` to
+//! YOUR order record, and (high-value orders) confirm via `order_search` —
+//! see the 回呼處理清單 / callback checklist in README.md, items 2–4.
 
 use std::collections::HashMap;
 use std::io::BufRead;
