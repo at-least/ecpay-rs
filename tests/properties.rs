@@ -191,7 +191,10 @@ proptest! {
 
 
     /// AES-128/192/256 round-trip: decrypt(encrypt(m)) == m for arbitrary
-    /// payloads and all three key sizes.
+    /// Latin-1-mapped payloads (every byte becomes one Unicode codepoint, so
+    /// the plaintext is always valid UTF-8 — the crate's String-typed API
+    /// cannot carry non-UTF-8 bytes through `decrypt`) and all three key
+    /// sizes.
     #[test]
     fn aes_round_trips_for_all_key_sizes(
         payload in vec(proptest::num::u8::ANY, 0..96),

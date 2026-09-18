@@ -51,7 +51,10 @@ fn fractional_values_use_the_shortest_round_trip_digits() {
 
 #[test]
 fn exponent_notation_follows_serde_json() {
-    // Positive exponents keep the `+` (serde_json/ryu convention).
+    // Positive exponents keep the `+` — a serde_json float-backend
+    // convention (zmij; pre-zmij ryu-based serde_json emits `1e21` without
+    // the `+`), so this pin is coupled to the serde_json version, not to
+    // anything ECPay specifies.
     assert_eq!(render(1e21), "1e+21");
     assert_eq!(render(1.5e21), "1.5e+21");
     assert_eq!(render(1e300), "1e+300");

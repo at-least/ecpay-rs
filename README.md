@@ -141,7 +141,8 @@ async fn return_url(params: HashMap<String, String>) -> &'static str {
 
 1. **驗 MAC**:`verify_check_mac_value`(金流)或
    `verify_logistics_check_mac_value`(國內物流,MD5);AES 信封服務用
-   `decrypt_ecpg_callback` / `decrypt_logistics_callback`(先驗 `TransCode`,
+   `decrypt_ecpg_callback` / `decrypt_logistics_callback` /
+   `decrypt_temp_trade_established`(先驗 `TransCode`,
    內層 `RtnCode` 自行檢查)。
 2. **去重**:以 `MerchantTradeNo`(或 `TradeNo`)查詢是否已處理過——綠界
    會重送通知,同一筆通知可能抵達多次;冪等處理,勿重複出貨/開發票。

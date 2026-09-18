@@ -61,10 +61,11 @@ fn form_unescape(s: &str) -> String {
                 i += 1;
             }
             b'%' if i + 2 < b.len() => {
-                // Same graceful shape as the sibling mocks (e2e_flows/full_flow/
-                // logistics_wire): an invalid hex digit emits the literal '%'
-                // and resyncs, instead of the u32::MAX sentinel overflowing in
-                // a debug build.
+                // Same graceful shape as the four sibling mocks
+                // (e2e_flows/full_flow/logistics_wire/python_conformance): an
+                // invalid hex digit emits the literal '%' and resyncs,
+                // instead of the u32::MAX sentinel overflowing in a debug
+                // build.
                 let hex = |c: u8| (c as char).to_digit(16);
                 if let (Some(hi), Some(lo)) = (hex(b[i + 1]), hex(b[i + 2])) {
                     out.push((hi * 16 + lo) as u8);
