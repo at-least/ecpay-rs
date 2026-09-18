@@ -406,7 +406,7 @@ impl Ecpay {
                     "InvoiceMark=N conflicts with the invoice fields; drop one of them.".into(),
                 ))
             }
-            (None, "Y") => {
+            (None, crate::payment::INVOICE_MARK) => {
                 return Err(Error::Validation(
                     "InvoiceMark=Y requires the invoice fields (InvoiceExtend).".into(),
                 ))
@@ -595,7 +595,7 @@ fn add_invoice_fields(
     }
     if let Some(inv) = &p.invoice {
         validate_invoice(inv)?;
-        if mark != "Y" {
+        if mark != crate::payment::INVOICE_MARK {
             // invoice present with no explicit mark: auto-fill Y.
             m.insert(
                 "InvoiceMark".to_owned(),
