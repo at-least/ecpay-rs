@@ -56,6 +56,8 @@ pub enum ChoosePayment {
 }
 
 impl ChoosePayment {
+    /// The exact wire value ECPay expects for this payment method
+    /// (e.g. `"Credit"`, `"CVS"`, `"BARCODE"`).
     pub fn as_str(&self) -> &'static str {
         match self {
             ChoosePayment::Credit => "Credit",

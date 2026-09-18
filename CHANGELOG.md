@@ -4,6 +4,20 @@
 
 _非破壞性：_
 
+- **回呼解碼器的 `TransCode != 1` 錯誤不再原樣攜帶伺服器回傳的
+  `TransMsg`**：`decrypt_ecpg_callback` / `decrypt_logistics_callback` /
+  `decrypt_temp_trade_established` 的 TransCode 閘門只需要一個 `TransCode`
+  鍵、先於任何解密就會觸發,`TransMsg` 因此是攻擊者可任填的位元組,先前
+  卻原樣放進 `Error::TransCode.msg` 並由 `Display` 無界輸出(原始換行可
+  偽造 log 行、單一未認證請求可灌入大訊息),與同一函式對非信封 body 的
+  「永不無界原樣回顯」契約不一致。現在 callback 路徑的 `msg` 與該契約
+  同款:有界、Debug 跳脫的節錄;API 呼叫路徑(自家 TLS 上的伺服器回應)
+  維持原樣。
+- **`decode_big5` 不再 BOM-sniff**:對帳檔下載(`download_merchant_balance`
+  / `download_disbursement_balance`)改用 `decode_without_bom_handling`,
+  貼齊文件所載 Python `big5` codec 契約——`Encoding::decode` 遇 `FF FE`
+  開頭會把整個 body 改成 UTF-16LE 解碼,靜默產生亂碼;現在 BOM 位元組
+  依 Big5 規則成為 U+FFFD,其餘內容照常以 Big5 解出。
 - **`Error::EmptyCiphertext` 標記 `#[deprecated]`**（審查後續）：該變體
   自 0.4 起就沒有任何生產路徑——`decrypt` 的長度閘門把空密文回報為
   `InvalidCiphertextLength(0)`（舊 unpad 路徑到不了；改用 cbc crate 後

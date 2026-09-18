@@ -386,6 +386,8 @@ pub struct InvalidOutput {
 }
 
 impl Ecpay {
+    /// 作廢發票。A command: a non-success RtnCode surfaces as a
+    /// [`crate::ApiError`] rather than being silently swallowed.
     pub async fn invalid(&self, input: &InvalidInput) -> Result<InvalidOutput> {
         let output: InvalidOutput = self.call_invoice_api("Invalid", input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
@@ -494,6 +496,9 @@ pub struct GetCompanyNameByTaxIDOutput {
 }
 
 impl Ecpay {
+    /// 統一編號查詢(營業人名稱)。A query: a non-1 RtnCode (e.g. not-found)
+    /// is a normal result, NOT an [`crate::ApiError`] — the caller inspects
+    /// RtnCode directly.
     pub async fn get_company_name_by_tax_id(
         &self,
         input: &GetCompanyNameByTaxIDInput,
@@ -543,6 +548,9 @@ pub struct GetGovInvoiceWordSettingOutput {
 }
 
 impl Ecpay {
+    /// 政府字軌設定查詢。A query: a non-1 RtnCode (e.g. not-found) is a
+    /// normal result, NOT an [`crate::ApiError`] — the caller inspects
+    /// RtnCode directly.
     pub async fn get_gov_invoice_word_setting(
         &self,
         input: &GetGovInvoiceWordSettingInput,
@@ -610,6 +618,9 @@ pub struct GetInvoiceWordSettingOutput {
 }
 
 impl Ecpay {
+    /// 字軌使用狀態查詢(自有字軌)。A query: a non-1 RtnCode (e.g.
+    /// not-found) is a normal result, NOT an [`crate::ApiError`] — the
+    /// caller inspects RtnCode directly.
     pub async fn get_invoice_word_setting(
         &self,
         input: &GetInvoiceWordSettingInput,
@@ -839,6 +850,8 @@ pub struct DelayIssueOutput {
 }
 
 impl Ecpay {
+    /// 延遲開立發票。A command: a non-success RtnCode surfaces as a
+    /// [`crate::ApiError`] rather than being silently swallowed.
     pub async fn delay_issue(&self, input: &DelayIssueInput) -> Result<DelayIssueOutput> {
         let output: DelayIssueOutput = self.call_invoice_api("DelayIssue", input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
@@ -902,6 +915,8 @@ pub struct CancelDelayIssueOutput {
 }
 
 impl Ecpay {
+    /// 取消延遲開立。A command: a non-success RtnCode surfaces as a
+    /// [`crate::ApiError`] rather than being silently swallowed.
     pub async fn cancel_delay_issue(
         &self,
         input: &CancelDelayIssueInput,
@@ -1071,6 +1086,8 @@ pub struct AllowanceOutput {
 }
 
 impl Ecpay {
+    /// 開立折讓。A command: a non-success RtnCode surfaces as a
+    /// [`crate::ApiError`] rather than being silently swallowed.
     pub async fn allowance(&self, input: &AllowanceInput) -> Result<AllowanceOutput> {
         let output: AllowanceOutput = self.call_invoice_api("Allowance", input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
@@ -1106,6 +1123,8 @@ pub struct AllowanceInvalidOutput {
 }
 
 impl Ecpay {
+    /// 作廢折讓。A command: a non-success RtnCode surfaces as a
+    /// [`crate::ApiError`] rather than being silently swallowed.
     pub async fn allowance_invalid(
         &self,
         input: &AllowanceInvalidInput,
@@ -1175,6 +1194,8 @@ pub struct AllowanceByCollegiateOutput {
 }
 
 impl Ecpay {
+    /// 線上開立折讓(合意折讓)。A command: a non-success RtnCode surfaces
+    /// as a [`crate::ApiError`] rather than being silently swallowed.
     pub async fn allowance_by_collegiate(
         &self,
         input: &AllowanceByCollegiateInput,
@@ -1220,6 +1241,9 @@ pub struct AllowanceInvalidByCollegiateOutput {
 }
 
 impl Ecpay {
+    /// 取消線上折讓(獨立端點 `AllowanceInvalidByCollegiate`,勿用
+    /// `allowance_invalid`)。A command: a non-success RtnCode surfaces as a
+    /// [`crate::ApiError`] rather than being silently swallowed.
     pub async fn allowance_invalid_by_collegiate(
         &self,
         input: &AllowanceInvalidByCollegiateInput,

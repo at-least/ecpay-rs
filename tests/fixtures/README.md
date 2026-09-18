@@ -16,10 +16,11 @@ python3 tests/fixtures/gen_vectors.py   # rewrites python_sdk_vectors.json in pl
 
 The fixture pins:
 
-* `create_order`: 17 full-scenario parameter sets (Credit / installment /
+* `create_order`: 18 full-scenario parameter sets (Credit / installment /
   period / ATM / CVS / BARCODE / ALL / WebATM / BNPL / DigitalPayment /
   TWQR / WeiXin / GooglePay / ApplePay / ALL+invoice / Credit+B2B invoice /
-  ExpireDate=0) as signed by the SDK — byte-equal except the two documented
+  Credit+`Language` / ExpireDate=0) as signed by the SDK —
+  byte-equal except the two documented
   divergences (see tests/python_conformance.rs), plus 11 validation
   exceptions with the SDK's verbatim messages.
 * `check_value`: SHA-256 and MD5 CheckMacValue digests, and the tilde

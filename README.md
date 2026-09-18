@@ -28,7 +28,7 @@ B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
 - **物流三家族全涵蓋**:國內物流(CMV-**MD5** form:建立訂單、查詢
   QueryLogisticsTradeInfo/V2、門市清單、更新出貨/門市、C2C 取消、逆物流
   CVS/UNIMART/HOME;瀏覽器表單:電子地圖、列印出貨單、四家 C2C 交貨便、
-  產生測試資料)、全方位物流 v2(14 支 AES-JSON:暫存訂單建立/更新、
+  產生測試資料)、全方位物流 v2(13 支 AES-JSON:暫存訂單建立/更新、
   查詢、逆物流、列印、物流選擇頁)與跨境物流(建立/查詢/列印/地圖)。
   staging 實測:國內建單(RtnCode=300 + AllPayLogisticsID)→查詢全程往返、
   v2 CreateTestData 成功;`1|<query>` 回應格式與 MD5 簽章範圍逐位元組釘死。
@@ -36,7 +36,7 @@ B2C 電子發票(電信式 AES-JSON 介接)API。MIT 授權。
   通知、客戶資料維護、字軌查詢與全部 Get* 查詢。staging 實測完整生命週期:
   開立(發票開立成功)→ 查詢 → 作廢全綠。
 - **以官方實作為測試基準**:測試向量由「真的」官方 Python SDK 執行產生
-  (17 種 `create_order` 情境逐欄位比對、11 條驗證錯誤訊息原樣比對、
+  (18 種 `create_order` 情境逐欄位比對、11 條驗證錯誤訊息原樣比對、
   CheckMacValue SHA-256/MD5、AES-CBC 官方向量、.NET UrlEncode 契約)。
   - `Issue`/`IssueModel` 已補齊 `ChannelPartner`、`ProductServiceID`、
     `CarrierNum2`、`ZeroTaxRateReason`、`TaxAmount` 等官方規格欄位。
@@ -196,11 +196,19 @@ println!("RtnMsg = {}", result["RtnMsg"]);
 
 ```rust
 # use ecpay::Ecpay;
+// 注入的 client 原樣使用,內建 hardening(不跟隨轉導、逾時)不會自動套用,
+// 請自行複製同一套設定——帶簽章的 POST 被轉導就是攻擊面:
+let http = reqwest::Client::builder()
+    .redirect(reqwest::redirect::Policy::none())
+    .connect_timeout(std::time::Duration::from_secs(10))
+    .timeout(std::time::Duration::from_secs(30))
+    .build()
+    .expect("reqwest client builder");
 let client = Ecpay {
     merchant_id: "3002607".into(),
     hash_key: "pwFHCqoQZGmho4w6".into(),
     hash_iv: "EkRm7iFT261dpevs".into(),
-    http: Some(reqwest::Client::new()), // 原樣使用,hardening 不套用
+    http: Some(http),
     ..Default::default()
 };
 ```
@@ -291,8 +299,10 @@ git submodule 掛在 `.claude/skills/ecpay`,讓 Claude Code 在本 repo 內直�
   10 字元、`Language` 為所有付款方式的共同選填參數(舊 SDK 限定 Credit)。
 - ⚠ 官方文件歧義:`Donation` 在 AIO 訂單(舊版)用 `'1'/'2'`、B2C 發票
   API 用 `'0'/'1'`;`ClearanceMark` 的 1/2 意義在 AIO 世代文件與現行 B2C
-  指南正好相反。本函式庫 AIO 常數依官方 Python SDK,B2C 發票欄位為自由
-  字串不做強制 — 上線前請以你的場景向綠界確認。
+  指南正好相反。本函式庫的 AIO 與 B2C 代碼欄位都是各自家族的 typed enum
+  (wire 值如上,未建模值以 `Other(String)` 原樣穿隧,見
+  [`ecpay::payment`](src/payment/mod.rs) 與 [`ecpay::invoice`](src/invoice.rs))
+  — 上線前請以你的場景向綠界確認。
 
 ## 測試強度(金流等級)
 

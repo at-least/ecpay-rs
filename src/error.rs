@@ -12,11 +12,14 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// succeeded, but the response carried a non-success RtnCode (ECPay uses
 /// RtnCode == 1 for success).
 ///
-/// Command calls (Issue, Invalid, VoidWithReIssue, InvoiceNotify) return it so
-/// callers can distinguish a genuine rejection from a transport/decode error
-/// via `matches!(err, Error::Api(_))`. Query calls such as GetIssue, where a
-/// non-1 RtnCode is a normal "not found" result, do NOT return it — the caller
-/// inspects RtnCode directly.
+/// Command calls — the B2C issue/void/notify/delay/allowance family
+/// (`issue`, `void_with_reissue`, `invalid`, `invoice_notify`, `delay_issue`,
+/// `cancel_delay_issue`, `allowance`, `allowance_invalid`,
+/// `allowance_by_collegiate`, `allowance_invalid_by_collegiate`) and the B2B
+/// issue — return it so callers can distinguish a genuine rejection from a
+/// transport/decode error via `matches!(err, Error::Api(_))`. Query calls
+/// such as GetIssue, where a non-1 RtnCode is a normal "not found" result, do
+/// NOT return it — the caller inspects RtnCode directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiError {
     pub code: i64,

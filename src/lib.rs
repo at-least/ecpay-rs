@@ -1,6 +1,8 @@
 //! Rust port of ECPay's (綠界科技) official All-in-One payment SDK
-//! ([ECPayAIO_Python]), extended with the B2C e-invoice (電子發票) AES-JSON
-//! APIs from the reference Go SDK port.
+//! ([ECPayAIO_Python]), extended — from the official PHP SDK examples and
+//! live stage probing — with the B2C e-invoice (電子發票) AES-JSON APIs from
+//! the reference Go SDK port, ECPG 站內付 2.0, B2B e-invoice, and the three
+//! logistics families (domestic, AllInOne v2, cross-border).
 //!
 //! The CheckMacValue signing, AES envelope, and every wire field name are
 //! pinned against ECPay's official test vectors; see the README for the
@@ -137,10 +139,16 @@ pub use payment::{
     SearchSingleTransactionParams, MERCHANT_TRADE_DATE_FORMAT,
 };
 
+/// AIO payment (Cashier) base, production. Signed form/API calls
+/// (`aio_check_out`, `order_search`, `credit_do_action`, …) POST here.
 pub const PAYMENT_API_URL_PRODUCTION: &str = "https://payment.ecpay.com.tw/Cashier/";
+/// AIO payment (Cashier) base, stage (public test merchant `3002607`).
 pub const PAYMENT_API_URL_STAGE: &str = "https://payment-stage.ecpay.com.tw/Cashier/";
 
+/// B2C e-invoice base, production (the AES-JSON envelope speaks
+/// `Revision: "3.0.0"`).
 pub const INVOICE_API_URL_PRODUCTION: &str = "https://einvoice.ecpay.com.tw/B2CInvoice/";
+/// B2C e-invoice base, stage (public test merchant `2000132`).
 pub const INVOICE_API_URL_STAGE: &str = "https://einvoice-stage.ecpay.com.tw/B2CInvoice/";
 
 /// B2B invoice base. Same domain as B2C, different path; the RqHeader also

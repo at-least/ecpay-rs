@@ -152,6 +152,12 @@ impl Ecpay {
         // `0|CheckMacValue驗證錯誤` on HTTP 500) — no '=' anywhere, so it never
         // parses as a query. It is the protocol's own error shape, so surface
         // it verbatim on any HTTP status, before the non-2xx gate below.
+        // Known heuristic edge (not observed live): a status-prefixed error
+        // whose message DID contain '=' (e.g. `0|The parameter [X]=required`)
+        // would fall through to the query parse + MAC check below and surface
+        // as a misleading `CheckMacValueMismatch` instead of this protocol
+        // error — the same deliberate trade documented on
+        // [`split_status_prefix`].
         if status.is_some() && !query.contains('=') {
             let status = status.unwrap_or_default();
             return Err(Error::Message(format!(
