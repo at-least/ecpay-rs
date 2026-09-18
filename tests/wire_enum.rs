@@ -68,7 +68,8 @@ fn as_str_tables_are_pinned() {
     assert_eq!(ecpay::invoice_b2b::InvType::Special.as_str(), "08");
 }
 
-/// Display → From 的往返:每個已建模 variant 的字串都映射回自己。
+/// Display → From 的往返:每個已建模 variant 的字串都映射回自己
+/// (與 `as_str_tables_are_pinned` 的真相表一一對應,一個不多、一個不少)。
 #[test]
 fn every_modeled_variant_round_trips_through_from() {
     fn rt<T>(v: T)
@@ -80,6 +81,7 @@ fn every_modeled_variant_round_trips_through_from() {
         // the modeled variant rather than tunnelling the value through `Other`.
         assert_eq!(T::from(s.as_str()), v, "round-trip failed: {s:?}");
     }
+    // AIO payment 語彙。
     for v in [
         TaxType::Dutiable,
         TaxType::ZeroRate,
@@ -88,15 +90,83 @@ fn every_modeled_variant_round_trips_through_from() {
     ] {
         rt(v);
     }
-    rt(Donation::Yes);
-    rt(Donation::No);
-    rt(PrintMark::No);
-    rt(PrintMark::Yes);
-    rt(CarruerType::Member);
-    rt(ClearanceMark::ViaCustoms);
-    rt(InvType::Special);
-    rt(PeriodType::Month);
-    rt(CreditAction::Close);
+    for v in [Donation::Yes, Donation::No] {
+        rt(v);
+    }
+    for v in [PrintMark::No, PrintMark::Yes] {
+        rt(v);
+    }
+    for v in [
+        CarruerType::Member,
+        CarruerType::Citizen,
+        CarruerType::Cellphone,
+    ] {
+        rt(v);
+    }
+    for v in [ClearanceMark::ViaCustoms, ClearanceMark::NotViaCustoms] {
+        rt(v);
+    }
+    for v in [InvType::General, InvType::Special] {
+        rt(v);
+    }
+    for v in [PeriodType::Year, PeriodType::Month, PeriodType::Day] {
+        rt(v);
+    }
+    for v in [
+        CreditAction::Close,
+        CreditAction::Refund,
+        CreditAction::Cancel,
+        CreditAction::Abandon,
+    ] {
+        rt(v);
+    }
+    // B2C 發票語彙。
+    for v in [
+        invoice::TaxType::Dutiable,
+        invoice::TaxType::ZeroRate,
+        invoice::TaxType::Free,
+        invoice::TaxType::SpecialTaxable,
+        invoice::TaxType::Mixed,
+    ] {
+        rt(v);
+    }
+    for v in [invoice::Donation::No, invoice::Donation::Yes] {
+        rt(v);
+    }
+    for v in [
+        invoice::ClearanceMark::NotViaCustoms,
+        invoice::ClearanceMark::ViaCustoms,
+    ] {
+        rt(v);
+    }
+    for v in [invoice::PrintMark::No, invoice::PrintMark::Yes] {
+        rt(v);
+    }
+    for v in [
+        invoice::CarrierType::Ecpay,
+        invoice::CarrierType::Citizen,
+        invoice::CarrierType::Cellphone,
+    ] {
+        rt(v);
+    }
+    for v in [invoice::InvType::General, invoice::InvType::Special] {
+        rt(v);
+    }
+    // B2B 語彙(B2C 減去混合 '9')。
+    for v in [
+        ecpay::invoice_b2b::TaxType::Dutiable,
+        ecpay::invoice_b2b::TaxType::ZeroRate,
+        ecpay::invoice_b2b::TaxType::Free,
+        ecpay::invoice_b2b::TaxType::SpecialTaxable,
+    ] {
+        rt(v);
+    }
+    for v in [
+        ecpay::invoice_b2b::InvType::General,
+        ecpay::invoice_b2b::InvType::Special,
+    ] {
+        rt(v);
+    }
 }
 
 /// 未知值(ECPay 未來新增的代碼)以 `Other` 原樣穿隧:序列化是裸字串、
