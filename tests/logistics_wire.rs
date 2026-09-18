@@ -739,6 +739,10 @@ async fn logistics_callback_helpers_roundtrip() {
 
     let reply = sdk.logistics_notify_reply().expect("reply builds");
     let reply_env: serde_json::Value = serde_json::from_str(&reply).unwrap();
+    // The official SDK's own ack example (PHP LogisticsStatusNotify.php)
+    // sends TransCode and the ack RtnCode as JSON STRINGS "1" — that primary
+    // source wins over the skill-guide snippet showing integers (unproven
+    // against the receiver; review 2026-09).
     assert_eq!(reply_env["TransCode"], "1");
     let reply_data: serde_json::Value = ecpay::crypto::decrypt_data(
         reply_env["Data"].as_str().unwrap(),

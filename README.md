@@ -146,7 +146,9 @@ async fn return_url(params: HashMap<String, String>) -> &'static str {
    會重送通知,同一筆通知可能抵達多次;冪等處理,勿重複出貨/開發票。
 3. **金額綁定**:將回呼的 `TradeAmt`(或 `EncryptTradeAmt`)與**你資料庫裡
    的訂單金額**比對,不是只看 `RtnCode=1`。不要信任回呼自帶的金額作為
-   出貨依據。
+   出貨依據。多租戶/多特店部署另須比對回呼的 `MerchantID`——
+   `verify_check_mac_value` 只驗簽章,不綁定特店編號(金鑰配對錯置時
+   簽章仍會通過)。
 4. **以查詢確認為準(建議)**:高價值訂單在出貨前用 `order_search` /
    `query_trade_info` 主動向綠界查詢一次交易狀態,回呼只作為觸發。
 5. **錯誤一律回同一個 HTTP 回應**:AES 回呼解密器對內容相關的解密失敗
@@ -224,6 +226,14 @@ let client = Ecpay {
 | —(比對 `ECPay/SDK_PHP` 後新增) | **ECPG 站內付 2.0**(`ecpay::ecpg`):`get_token_by_trade`、`create_payment`、綁卡 6 支、查詢/請款動作 6 支,共 14 支 |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **物流**(`ecpay::logistics`):國內 9 支 MD5 form API + 6 種瀏覽器表單、全方位物流 v2 13 支、跨境 4 支 + 表單,含 MD5 回呼驗證與 AES 回呼解密 |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **B2B 電子發票**(`ecpay::invoice_b2b`):開立/折讓/作廢/拒收/通知/客戶資料/字軌與全部查詢,共 23 支 |
+
+**平台商(`PlatformID`)模式的支援範圍**:AIO 金流
+(`AioCheckOutParams::platform_id`)與 B2C 電子發票(`Ecpay::platform_id`
+進信封)完整支援;ECPG 站內付 2.0、全方位物流 v2/跨境物流、B2B 發票的
+共用 AES-JSON 信封路徑**不送信封層 `PlatformID`**——ECPG 的 Data 層雖有
+選填 `platform_id` 欄位,但官方平台商契約的信封半邊無法表達,且 Data 層
+`MerchantID` 一律強制等於 client 的 `merchant_id`(理由見 `ecpg` 模組
+文件),完整的平台商模式在這三族目前無法組出。需要時請先開 issue 討論。
 
 代碼欄位(付款方式、課稅類別、載具、捐贈、銀聯……)在 [`ecpay::payment`](src/payment/mod.rs)
 模組,名稱對應官方 dict:`ChoosePayment`(封閉 enum:無 `Other` 穿隧,但仍

@@ -918,6 +918,13 @@ impl Ecpay {
     /// 全方位物流 v2 狀態通知的應答體:綠界要求以同格式(AES 加密 JSON)
     /// 回 `{"RtnCode":"1","RtnMsg":""}`,否則視為失敗重發。回傳值即
     /// HTTP response body(Content-Type: application/json)。
+    ///
+    /// `TransCode` 與 Data 內的 `RtnCode` 以**字串** `"1"` 上 wire——這是
+    /// 官方 PHP SDK 的出貨範例(`LogisticsStatusNotify.php`)所用的形式。
+    /// 官方 AI-skill 指南的片段寫的是整數 `1`,兩個來源矛盾,
+    /// 而無 stage 探測能證實接收端的嚴格度;本 crate 從主要來源(官方
+    /// SDK 的出貨程式碼)。若上線後觀察到 ack 被重送,先以 stage 探測整數
+    /// 形式是否被接受(全庫審查 2026-09 的調查記錄)。
     pub fn logistics_notify_reply(&self) -> Result<String> {
         let (key, iv) = self.logistics_keys();
         let data = crate::crypto::encrypt_data(

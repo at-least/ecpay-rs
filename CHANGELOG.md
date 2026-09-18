@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+_非破壞性：_
+
+- **`logistics_notify_reply` 的 ack 格式調查記錄**（全庫審查 🟡）：兩個
+  官方來源對全方位物流 v2 狀態通知應答體的 `TransCode`/`RtnCode` 型別
+  **互相矛盾**——官方 PHP SDK 的出貨範例
+  (`LogisticsStatusNotify.php`)送字串 `"1"`，官方 AI-skill 指南片段送
+  整數 `1`，且無 stage 探測能證實接收端的嚴格度。本 crate 維持與官方
+  SDK 出貨程式碼一致的**字串形式**（wire 不變），docstring 與測試註解
+  記錄衝突來源與後續動作（上線觀察到 ack 被重送時，先對 stage 探測
+  整數形式是否被接受）。
+- 文件補強（全庫審查 🟡/🟢）：README「API 一覽」精確列出平台商
+  （`PlatformID`）模式的缺口——AIO 與 B2C 發票支援帶入 PlatformID；ECPG/
+  物流 v2/
+  跨境/B2B 的共用 AES-JSON 信封路徑**不送信封層 `PlatformID`**（ECPG 的
+  Data 層雖有選填 `platform_id` 欄位，但官方平台商契約的信封半邊無法
+  表達，Data 層 `MerchantID` 並強制等於 client 的 `merchant_id`），
+  完整平台商模式在這三族目前無法組出；回呼處理清單與
+  `verify_check_mac_value` 文件補註「驗證不綁定 `MerchantID`/金額，
+  出貨前須自行比對」；crate 根文件的首個範例由物流測試帳號改為金流
+  測試帳號 3002607（原範例照抄會帳號/金鑰不符）；`Error::HttpStatus`
+  文件不再以 intra-doc 連結指向私有函數（該連結在 CI 的
+  `RUSTDOCFLAGS=-D warnings` 下使 `cargo doc` 失敗，main 的 doc 步驟
+  因此是紅的）。
+
 _breaking changes（程式碼審查後的 API 衛生修正）：_
 
 - **`Error::PaymentStatus` / `Error::InvoiceStatus` 由帶服務標籤的

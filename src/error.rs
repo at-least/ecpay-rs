@@ -82,8 +82,8 @@ pub enum Error {
     /// endpoint. `Display` renders Go's `fmt.Errorf` shape with the service
     /// named — `ecpay {service} API error: status=%d body=%s` — the body
     /// verbatim up to 512 chars, then a truncation notice with the total
-    /// size ([`crate::client::truncate_for_display`]); the field itself
-    /// keeps the full body. A non-2xx body larger than the transport's
+    /// size (the private `crate::client::truncate_for_display`); the field
+    /// itself keeps the full body. A non-2xx body larger than the transport's
     /// 1 MiB cap surfaces as the body-cap [`Error::Message`] instead (the
     /// body cannot be kept).
     HttpStatus {

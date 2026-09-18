@@ -578,7 +578,8 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
 
     // 3. ECPay notifies the status change (AES JSON); merchant decodes and
     //    answers with the encrypted ack — and the ack must decrypt back to
-    //    RtnCode "1" or ECPay would retry.
+    //    RtnCode "1" (string, the official LogisticsStatusNotify.php form)
+    //    or ECPay would retry.
     sim.lock()
         .unwrap()
         .orders

@@ -14,10 +14,11 @@
 //! use ecpay::payment::{AioCheckOutParams, ChoosePayment};
 //! use ecpay::Ecpay;
 //!
+//! // 金流 stage 測試帳號(公開測試用;正式環境請用自己的特店帳號與金鑰)。
 //! let client = Ecpay {
-//!     merchant_id: "2000132".into(),
-//!     hash_key: "5294y06JbISpM5x9".into(),
-//!     hash_iv: "v77hoKGq4kWxNNIS".into(),
+//!     merchant_id: "3002607".into(),
+//!     hash_key: "pwFHCqoQZGmho4w6".into(),
+//!     hash_iv: "EkRm7iFT261dpevs".into(),
 //!     ..Default::default()
 //! };
 //! let checkout = client
@@ -502,6 +503,12 @@ impl Ecpay {
     /// requires this on inbound payment-result callbacks. `params` is the
     /// posted form, including the "CheckMacValue" field; a missing/empty value
     /// verifies as false. (SHA-256 only: EncryptType=0 is retired.)
+    ///
+    /// Verification does NOT bind `MerchantID` (or the amount): a signature
+    /// computed with your keys over another order's params passes. Before
+    /// fulfilling, compare the posted `MerchantID`/`TradeAmt` against your
+    /// own records — multi-tenant deployments especially (see the README's
+    /// callback checklist).
     pub fn verify_check_mac_value(&self, params: &HashMap<String, String>) -> bool {
         // An unconfigured client must never "verify": whoever knows the param
         // set can compute the empty-key MAC themselves, so accepting it would
