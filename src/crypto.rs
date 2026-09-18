@@ -13,8 +13,11 @@
 
 use std::collections::HashMap;
 
-use aes::cipher::{Block, BlockCipherDecrypt, BlockCipherEncrypt, BlockSizeUser, KeyInit};
 use base64::Engine;
+use cbc::cipher::{
+    block_padding::Pkcs7, Array, BlockCipherDecrypt, BlockCipherEncrypt, BlockModeDecrypt,
+    BlockModeEncrypt, Key, KeyInit, KeyIvInit,
+};
 use md5::Md5;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -326,21 +329,14 @@ pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.ct_eq(b).into()
 }
 
-/// Go `Encrypt`: validate the key size and IV length (Go aes.NewCipher +
-/// the explicit check that keeps a misconfigured HashIV an error instead of a
-/// panic), PKCS7-pad, AES-CBC encrypt, base64.
+/// Go `Encrypt`: key size first (`aes.NewCipher`'s order), then the IV
+/// length (kept an explicit error instead of a panic for a misconfigured
+/// HashIV), PKCS7-pad, AES-CBC encrypt, base64.
 pub fn encrypt(text: &[u8], hash_key: &[u8], hash_iv: &[u8]) -> Result<String> {
-    if hash_iv.len() != AES_BLOCK_SIZE {
-        return Err(Error::InvalidIvLength {
-            got: hash_iv.len(),
-            want: AES_BLOCK_SIZE,
-        });
-    }
-    let padded = pad_pkcs7(text, AES_BLOCK_SIZE);
     let crypted = match hash_key.len() {
-        16 => cbc_encrypt::<aes::Aes128>(hash_key, hash_iv, padded)?,
-        24 => cbc_encrypt::<aes::Aes192>(hash_key, hash_iv, padded)?,
-        32 => cbc_encrypt::<aes::Aes256>(hash_key, hash_iv, padded)?,
+        16 => cbc_encrypt::<aes::Aes128>(hash_key, hash_iv, text)?,
+        24 => cbc_encrypt::<aes::Aes192>(hash_key, hash_iv, text)?,
+        32 => cbc_encrypt::<aes::Aes256>(hash_key, hash_iv, text)?,
         n => return Err(Error::AesKeySize(n)),
     };
     Ok(base64::engine::general_purpose::STANDARD.encode(crypted))
@@ -374,58 +370,48 @@ pub fn decrypt(text: &str, hash_key: &[u8], hash_iv: &[u8]) -> Result<String> {
         });
     }
     let plain = match hash_key.len() {
-        16 => cbc_decrypt::<aes::Aes128>(hash_key, hash_iv, decoded)?,
-        24 => cbc_decrypt::<aes::Aes192>(hash_key, hash_iv, decoded)?,
-        _ => cbc_decrypt::<aes::Aes256>(hash_key, hash_iv, decoded)?,
+        16 => cbc_decrypt::<aes::Aes128>(hash_key, hash_iv, &decoded)?,
+        24 => cbc_decrypt::<aes::Aes192>(hash_key, hash_iv, &decoded)?,
+        _ => cbc_decrypt::<aes::Aes256>(hash_key, hash_iv, &decoded)?,
     };
-    let unpadded = unpad_pkcs7(&plain)?;
-    String::from_utf8(unpadded.to_vec())
-        .map_err(|_| Error::Message("decrypted payload is not UTF-8".into()))
+    String::from_utf8(plain).map_err(|_| Error::Message("decrypted payload is not UTF-8".into()))
 }
 
-fn cbc_encrypt<C>(hash_key: &[u8], hash_iv: &[u8], mut data: Vec<u8>) -> Result<Vec<u8>>
+/// CBC + PKCS7 via the audited RustCrypto [`cbc`] mode crate — padding
+/// (always 1..=block bytes, empty input gets a full block) and the CBC
+/// chaining are the crate's, not hand-rolled. The official ECPay AES test
+/// vectors (tests/aes_vectors.rs) pin the exact wire bytes this must keep
+/// producing.
+fn cbc_encrypt<C>(hash_key: &[u8], hash_iv: &[u8], data: &[u8]) -> Result<Vec<u8>>
 where
-    C: KeyInit + BlockCipherEncrypt + BlockSizeUser,
+    C: BlockCipherEncrypt + KeyInit,
 {
-    let cipher = C::new_from_slice(hash_key).map_err(|_| Error::AesKeySize(hash_key.len()))?;
-    // Textbook CBC chaining over the raw AES block cipher, so PKCS7 padding
-    // and its error branches stay exactly Go's. Byte-exactness is pinned by
-    // the official ECPay AES test vectors (tests/aes_vectors.rs).
-    let mut prev = [0u8; AES_BLOCK_SIZE];
-    prev.copy_from_slice(hash_iv);
-    for chunk in data.chunks_mut(AES_BLOCK_SIZE) {
-        for (b, p) in chunk.iter_mut().zip(prev.iter()) {
-            *b ^= p;
-        }
-        let block: &mut Block<C> = chunk
-            .try_into()
-            .expect("chunk length equals the AES block size");
-        cipher.encrypt_block(block);
-        prev.copy_from_slice(chunk);
-    }
-    Ok(data)
+    let key = Key::<C>::try_from(hash_key).map_err(|_| Error::AesKeySize(hash_key.len()))?;
+    let iv = Array::<u8, C::BlockSize>::try_from(hash_iv).map_err(|_| Error::InvalidIvLength {
+        got: hash_iv.len(),
+        want: AES_BLOCK_SIZE,
+    })?;
+    Ok(cbc::Encryptor::<C>::new(&key, &iv).encrypt_padded_vec::<Pkcs7>(data))
 }
 
-fn cbc_decrypt<C>(hash_key: &[u8], hash_iv: &[u8], mut data: Vec<u8>) -> Result<Vec<u8>>
+/// [`cbc_encrypt`]'s inverse. The `block_padding::Error` the crate returns
+/// is opaque (a unit struct — the bad padding's value and shape are not
+/// reported), so mapping it to [`Error::Padding`] keeps the padding-oracle
+/// collapse: no content-dependent detail escapes (see [`decrypt`]). Runs
+/// only on ciphertext our length gate already validated as a non-empty
+/// block multiple.
+fn cbc_decrypt<C>(hash_key: &[u8], hash_iv: &[u8], data: &[u8]) -> Result<Vec<u8>>
 where
-    C: KeyInit + BlockCipherDecrypt + BlockSizeUser,
+    C: BlockCipherDecrypt + KeyInit,
 {
-    let cipher = C::new_from_slice(hash_key).map_err(|_| Error::AesKeySize(hash_key.len()))?;
-    let mut prev = [0u8; AES_BLOCK_SIZE];
-    prev.copy_from_slice(hash_iv);
-    for chunk in data.chunks_mut(AES_BLOCK_SIZE) {
-        let mut saved = [0u8; AES_BLOCK_SIZE];
-        saved.copy_from_slice(chunk);
-        let block: &mut Block<C> = chunk
-            .try_into()
-            .expect("chunk length equals the AES block size");
-        cipher.decrypt_block(block);
-        for (b, p) in chunk.iter_mut().zip(prev.iter()) {
-            *b ^= p;
-        }
-        prev.copy_from_slice(&saved);
-    }
-    Ok(data)
+    let key = Key::<C>::try_from(hash_key).map_err(|_| Error::AesKeySize(hash_key.len()))?;
+    let iv = Array::<u8, C::BlockSize>::try_from(hash_iv).map_err(|_| Error::InvalidIvLength {
+        got: hash_iv.len(),
+        want: AES_BLOCK_SIZE,
+    })?;
+    cbc::Decryptor::<C>::new(&key, &iv)
+        .decrypt_padded_vec::<Pkcs7>(data)
+        .map_err(|_| Error::Padding)
 }
 
 /// Go `EncryptData`: compact JSON with HTML escaping OFF (<, >, & literal —
@@ -482,38 +468,6 @@ fn strip_null_properties(v: serde_json::Value) -> serde_json::Value {
         }
         other => other,
     }
-}
-
-/// Go `padPKCS7`: always appends 1..=blockSize pad bytes (empty input gets a
-/// full block).
-fn pad_pkcs7(ciphertext: &[u8], block_size: usize) -> Vec<u8> {
-    let padding = block_size - ciphertext.len() % block_size;
-    let mut out = Vec::with_capacity(ciphertext.len() + padding);
-    out.extend_from_slice(ciphertext);
-    out.extend(std::iter::repeat_n(padding as u8, padding));
-    out
-}
-
-/// Go `unpadPKCS7`, with the same error BRANCHES but one opaque error:
-/// both padding failure modes (a pad value out of range, and pad bytes that
-/// do not match the claimed count) collapse into [`Error::Padding`] with no
-/// detail, because `decrypt` runs on attacker-tampered callback ciphertext
-/// and a distinguishable padding failure is a CBC padding oracle.
-fn unpad_pkcs7(ciphertext: &[u8]) -> Result<&[u8]> {
-    let length = ciphertext.len();
-    if length == 0 {
-        return Err(Error::EmptyCiphertext);
-    }
-    let unpadding = ciphertext[length - 1];
-    if unpadding == 0 || unpadding as usize > AES_BLOCK_SIZE || unpadding as usize > length {
-        return Err(Error::Padding);
-    }
-    for &b in &ciphertext[length - unpadding as usize..] {
-        if b != unpadding {
-            return Err(Error::Padding);
-        }
-    }
-    Ok(&ciphertext[..length - unpadding as usize])
 }
 
 /// [`decrypt_data`] for attacker-reachable callback bodies
@@ -679,19 +633,10 @@ mod tests {
         assert_eq!(got, vec![("A", "1"), ("a", "3"), ("b", "2")]);
     }
 
-    #[test]
-    fn unpad_rejects_bad_padding() {
-        assert!(unpad_pkcs7(b"").is_err());
-        let mut b = [0u8; 16];
-        assert!(unpad_pkcs7(&b).is_err()); // pad value 0
-        b[15] = 0x20; // 32 > block size
-        assert!(unpad_pkcs7(&b).is_err());
-        b[15] = 3;
-        b[14] = 3;
-        b[13] = 1; // claims 3 but not all 3s
-        assert!(unpad_pkcs7(&b).is_err());
-        assert_eq!(unpad_pkcs7(b"abc\x02\x02").unwrap(), b"abc");
-    }
+    // PKCS7 pad/unpad correctness is pinned through the PUBLIC decrypt API
+    // (tests/crypto.rs crafts raw-CBC ciphertexts with malformed padding and
+    // asserts the opaque Error::Padding), so the cbc crate's unpad path is
+    // covered end-to-end without exposing internals.
 
     // Characterization (pinning): the contract verify_mac depends on —
     // equal inputs true, any one-bit difference false, unequal lengths

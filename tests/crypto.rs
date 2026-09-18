@@ -35,18 +35,21 @@ fn test_encrypt_decrypt_round_trip() {
 
 #[test]
 fn test_encrypt_bad_key_length() {
+    let err = encrypt(b"data", b"too-short", CRYPTO_IV).unwrap_err();
     assert!(
-        encrypt(b"data", b"too-short", CRYPTO_IV).is_err(),
-        "Encrypt with a non-16/24/32-byte key should error"
+        matches!(err, ecpay::Error::AesKeySize(9)),
+        "Encrypt with a non-16/24/32-byte key should error: {err:?}"
     );
 }
 
 #[test]
 fn test_encrypt_bad_iv_length() {
-    // A wrong-length IV must surface as an error, never a panic.
+    // A wrong-length IV must surface as an error, never a panic. Checked
+    // after the key size (Go aes.NewCipher's order).
+    let err = encrypt(b"data", CRYPTO_KEY, b"short").unwrap_err();
     assert!(
-        encrypt(b"data", CRYPTO_KEY, b"short").is_err(),
-        "Encrypt with a non-block-size IV should error"
+        matches!(err, ecpay::Error::InvalidIvLength { got: 5, want: 16 }),
+        "{err:?}"
     );
 }
 
@@ -54,27 +57,55 @@ fn test_encrypt_bad_iv_length() {
 fn test_decrypt_bad_iv_length() {
     // Build a valid one-block ciphertext, then decrypt it with a wrong-length IV.
     let ct = encrypt(b"data", CRYPTO_KEY, CRYPTO_IV).unwrap();
+    let err = decrypt(&ct, CRYPTO_KEY, b"short").unwrap_err();
     assert!(
-        decrypt(&ct, CRYPTO_KEY, b"short").is_err(),
-        "Decrypt with a non-block-size IV should error"
+        matches!(err, ecpay::Error::InvalidIvLength { got: 5, want: 16 }),
+        "{err:?}"
     );
 }
 
 #[test]
 fn test_decrypt_invalid_base64() {
-    assert!(
-        decrypt("not!base64!!", CRYPTO_KEY, CRYPTO_IV).is_err(),
-        "Decrypt of non-base64 input should error"
-    );
+    let err = decrypt("not!base64!!", CRYPTO_KEY, CRYPTO_IV).unwrap_err();
+    assert!(matches!(err, ecpay::Error::Base64(_)), "{err:?}");
 }
 
 #[test]
 fn test_decrypt_bad_key_length() {
     // Valid base64 of a 16-byte block, but the key length is invalid.
     let ct = base64::engine::general_purpose::STANDARD.encode([0u8; 16]);
+    let err = decrypt(&ct, b"short", CRYPTO_IV).unwrap_err();
+    assert!(matches!(err, ecpay::Error::AesKeySize(5)), "{err:?}");
+}
+
+// The documented gate order (base64, key size, ciphertext length, IV
+// length, padding) is load-bearing: `decrypt_payload_uniform`'s
+// padding-oracle allowlist names the first four variants in that order.
+// Each step here pairs two faults so the reported error proves which gate
+// ran first.
+#[test]
+fn test_decrypt_error_order_is_base64_key_length_iv() {
+    // base64 before key size: a non-base64 body with a bad key reports Base64.
+    let err = decrypt("not!base64!!", b"short", b"short").unwrap_err();
+    assert!(matches!(err, ecpay::Error::Base64(_)), "{err:?}");
+    // key size before ciphertext length: an empty body with a bad key
+    // reports AesKeySize, not InvalidCiphertextLength.
+    let err = decrypt("", b"short", CRYPTO_IV).unwrap_err();
+    assert!(matches!(err, ecpay::Error::AesKeySize(5)), "{err:?}");
+    // ciphertext length before IV length: a 7-byte body with a short IV
+    // reports InvalidCiphertextLength, not InvalidIvLength.
+    let ct = base64::engine::general_purpose::STANDARD.encode([0u8; 7]);
+    let err = decrypt(&ct, CRYPTO_KEY, b"short").unwrap_err();
     assert!(
-        decrypt(&ct, b"short", CRYPTO_IV).is_err(),
-        "Decrypt with a non-16/24/32-byte key should error"
+        matches!(err, ecpay::Error::InvalidCiphertextLength(7)),
+        "{err:?}"
+    );
+    // IV length last: a valid body with a short IV reports InvalidIvLength.
+    let good = encrypt(b"data", CRYPTO_KEY, CRYPTO_IV).unwrap();
+    let err = decrypt(&good, CRYPTO_KEY, b"short").unwrap_err();
+    assert!(
+        matches!(err, ecpay::Error::InvalidIvLength { got: 5, want: 16 }),
+        "{err:?}"
     );
 }
 
@@ -82,18 +113,20 @@ fn test_decrypt_bad_key_length() {
 fn test_decrypt_non_block_multiple_length() {
     // 7 bytes is not a multiple of the AES block size (16).
     let ct = base64::engine::general_purpose::STANDARD.encode([0u8; 7]);
+    let err = decrypt(&ct, CRYPTO_KEY, CRYPTO_IV).unwrap_err();
     assert!(
-        decrypt(&ct, CRYPTO_KEY, CRYPTO_IV).is_err(),
-        "Decrypt of a ciphertext whose length is not a block multiple should error"
+        matches!(err, ecpay::Error::InvalidCiphertextLength(7)),
+        "{err:?}"
     );
 }
 
 #[test]
 fn test_decrypt_empty_ciphertext() {
     // Empty base64 decodes to zero bytes -> rejected as an invalid length.
+    let err = decrypt("", CRYPTO_KEY, CRYPTO_IV).unwrap_err();
     assert!(
-        decrypt("", CRYPTO_KEY, CRYPTO_IV).is_err(),
-        "Decrypt of empty ciphertext should error"
+        matches!(err, ecpay::Error::InvalidCiphertextLength(0)),
+        "{err:?}"
     );
 }
 

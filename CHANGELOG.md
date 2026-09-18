@@ -4,6 +4,19 @@
 
 _非破壞性：_
 
+- **AES-CBC/PKCS7 改用 RustCrypto 的 `cbc` crate**（全庫審查後的密碼學
+  衛生）：`crypto.rs` 刪除手寫的 CBC 串接迴圈與 PKCS7 pad/unpad，改用
+  RustCrypto 官方 mode crate `cbc 0.2`（與 `aes 0.9` 同為 cipher 0.5
+  世代）。公開 API（`encrypt`/`decrypt`/`encrypt_data`/`decrypt_data`）
+  簽名與行為不變：錯誤順序（`encrypt` 與 `decrypt` 一致為金鑰長度 → IV
+  長度，即 Go `aes.NewCipher` 的順序——舊 `encrypt` 是 IV 先查，雙重錯誤
+  設定下回報的錯誤類別因此改變，單一錯誤情境不受影響）、密文長度閘門與
+  `Error::Padding` 的不透明性（CBC padding oracle 防護）皆
+  保持——`block_padding::Error` 本身即不透明單元結構，直接映射。官方
+  AES 測試向量（`tests/aes_vectors.rs`）與 Go-port crypto 測試逐位元組
+  釘死，重構全程綠。padding 分支測試由公開 `decrypt` API 驅動
+  （`tests/crypto.rs` 既有 raw-CBC helper）；原先直測內部 `unpad_pkcs7`
+  的單元測試隨之移除（其契約已由公開 API 測試覆蓋）。
 - **`logistics_notify_reply` 的 ack 格式調查記錄**（全庫審查 🟡）：兩個
   官方來源對全方位物流 v2 狀態通知應答體的 `TransCode`/`RtnCode` 型別
   **互相矛盾**——官方 PHP SDK 的出貨範例
