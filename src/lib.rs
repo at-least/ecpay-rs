@@ -199,6 +199,10 @@ pub const VENDOR_API_URL_STAGE: &str = "https://vendor-stage.ecpay.com.tw/Paymen
 /// `Debug` is hand-written and redacts every signing secret (`hash_key`,
 /// `hash_iv`, `invoice_hash_key`, `invoice_hash_iv`, `logistics_hash_key`,
 /// `logistics_hash_iv`) so a stray `{:?}` on the client never logs them.
+/// Key material can additionally be scrubbed from memory explicitly via
+/// [`Self::zeroize_signing_keys`] (automatic zeroize-on-drop is impossible
+/// here: a `Drop` impl would break the `..Default::default()` construction
+/// idiom — see that method's docs).
 #[derive(Clone, Default)]
 pub struct Ecpay {
     pub platform_id: String,
@@ -319,6 +323,35 @@ pub struct Ecpay {
     /// idle-connection pooling. An injected client is used **as-is** — the
     /// hardening is not (and cannot be) applied to it.
     pub http: Option<reqwest::Client>,
+}
+
+impl Ecpay {
+    /// Zeroes the six signing-key buffers in place ([`zeroize`] semantics:
+    /// bytes become 0 and each `String` truncates), for callers that want
+    /// key material scrubbed from memory — e.g. before process exit.
+    ///
+    /// ⚠ Why **explicit** and not `Drop`: an automatic zeroize-on-drop
+    /// would forbid moving out of an `Ecpay` (E0509), breaking the crate's
+    /// documented `Ecpay { .., ..Default::default() }` construction idiom
+    /// at every call site. Scrubbing is therefore a choice the embedder
+    /// makes.
+    ///
+    /// ⚠ **Best effort, not a guarantee**: only the CURRENT buffers are
+    /// scrubbed — `Ecpay` is `Clone`, so every clone keeps its own live
+    /// copy (zeroize each clone too), and a `String` that ever reallocated
+    /// may leave stale heap copies this cannot reach. Also note a zeroized
+    /// client is not defensively unusable: `logistics_keys()` falls back to
+    /// the (now empty) payment pair, so reusing it signs with an empty key
+    /// and ships a MAC the server will reject. Zeroize, then drop.
+    pub fn zeroize_signing_keys(&mut self) {
+        use zeroize::Zeroize;
+        self.hash_key.zeroize();
+        self.hash_iv.zeroize();
+        self.invoice_hash_key.zeroize();
+        self.invoice_hash_iv.zeroize();
+        self.logistics_hash_key.zeroize();
+        self.logistics_hash_iv.zeroize();
+    }
 }
 
 impl std::fmt::Debug for Ecpay {
@@ -546,6 +579,35 @@ impl Ecpay {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zeroize_signing_keys_empties_all_six_key_buffers() {
+        // The pinned contract of the public scrub API: after it runs, none
+        // of the six key `String`s may retain their bytes (zeroize zeroes
+        // the buffer and truncates). This is the only safely observable
+        // part — zeroize-on-DROP itself is not observable in safe Rust.
+        let mut client = Ecpay {
+            merchant_id: "3002607".into(),
+            hash_key: "pwFHCqoQZGmho4w6".into(),
+            hash_iv: "EkRm7iFT261dpevs".into(),
+            invoice_hash_key: "ejCk326UnaZWKisg".into(),
+            invoice_hash_iv: "q9jcZX8Ib9LM8wYk".into(),
+            logistics_hash_key: "5294y06JbISpM5x9".into(),
+            logistics_hash_iv: "v77hoKGq4kWxNNIS".into(),
+            ..Default::default()
+        };
+        client.zeroize_signing_keys();
+        for (name, key) in [
+            ("hash_key", &client.hash_key),
+            ("hash_iv", &client.hash_iv),
+            ("invoice_hash_key", &client.invoice_hash_key),
+            ("invoice_hash_iv", &client.invoice_hash_iv),
+            ("logistics_hash_key", &client.logistics_hash_key),
+            ("logistics_hash_iv", &client.logistics_hash_iv),
+        ] {
+            assert!(key.is_empty(), "{name} must be zeroized, got {key:?}");
+        }
+    }
 
     #[test]
     fn debug_redacts_the_signing_secrets() {
