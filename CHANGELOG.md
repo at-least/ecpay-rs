@@ -4,6 +4,12 @@
 
 _非破壞性：_
 
+- **`Error::EmptyCiphertext` 標記 `#[deprecated]`**（審查後續）：該變體
+  自 0.4 起就沒有任何生產路徑——`decrypt` 的長度閘門把空密文回報為
+  `InvalidCiphertextLength(0)`（舊 unpad 路徑到不了；改用 cbc crate 後
+  連路徑本身都沒了）。0.5 先以 deprecation 警告使用者並以 `compile_fail`
+  doctest 釘住（與三個 deprecated client 欄位同一套釘法），未來 breaking
+  release 再移除變體。
 - **AES-CBC/PKCS7 改用 RustCrypto 的 `cbc` crate**（全庫審查後的密碼學
   衛生）：`crypto.rs` 刪除手寫的 CBC 串接迴圈與 PKCS7 pad/unpad，改用
   RustCrypto 官方 mode crate `cbc 0.2`（與 `aes 0.9` 同為 cipher 0.5

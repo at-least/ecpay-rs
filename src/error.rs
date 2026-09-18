@@ -112,6 +112,30 @@ pub enum Error {
     /// Go: `invalid ciphertext length: %d`.
     InvalidCiphertextLength(usize),
     /// Go: `empty ciphertext`.
+    ///
+    /// ⚠ **Never produced by this crate**: `decrypt` rejects an empty
+    /// ciphertext as [`Error::InvalidCiphertextLength`]`(0)` — and always
+    /// has (the gate runs before the old unpad path that carried this
+    /// error, and that hand-rolled path is gone entirely since the cbc
+    /// crate took over). Kept for source compatibility until the next
+    /// breaking release; match [`Error::InvalidCiphertextLength`] instead.
+    ///
+    /// 這個 compile_fail 釘住 deprecation 本身：屬性若被移除而變體仍無
+    /// 生產者，此測試會編譯成功 = 失敗（與 [`crate::Ecpay::return_url`]
+    /// 等三個 deprecated 欄位的同一套釘法）。
+    ///
+    /// ```compile_fail
+    /// # use ecpay::Error;
+    /// #[deny(deprecated)]
+    /// fn empty_ciphertext_is_never_produced() {
+    ///     let _ = Error::EmptyCiphertext;
+    /// }
+    /// # fn main() { empty_ciphertext_is_never_produced() }
+    /// ```
+    #[deprecated(
+        since = "0.5.0",
+        note = "never produced by this crate; decrypt rejects an empty ciphertext as Error::InvalidCiphertextLength(0) — match that variant instead"
+    )]
     EmptyCiphertext,
     /// Invalid PKCS7 padding. One opaque variant for every padding failure:
     /// the value and shape of the bad padding is **not** reported, because
@@ -161,6 +185,9 @@ impl fmt::Display for Error {
                 write!(f, "invalid IV length: {got} (must be {want})")
             }
             Error::InvalidCiphertextLength(n) => write!(f, "invalid ciphertext length: {n}"),
+            // The variant is deprecated (never produced); the arm stays for
+            // as long as the variant does.
+            #[allow(deprecated)]
             Error::EmptyCiphertext => write!(f, "empty ciphertext"),
             Error::Padding => write!(f, "invalid PKCS7 padding"),
             Error::UrlEscape(esc) => write!(f, "invalid URL escape {esc:?}"),
