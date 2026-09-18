@@ -353,7 +353,8 @@ pub fn encrypt(text: &[u8], hash_key: &[u8], hash_iv: &[u8]) -> Result<String> {
 /// use this directly on attacker-reachable callback bodies — a distinguishable
 /// padding failure there is a CBC padding oracle. Use the callback decoders
 /// ([`crate::Ecpay::decrypt_ecpg_callback`],
-/// [`crate::Ecpay::decrypt_logistics_callback`]), which collapse every
+/// [`crate::Ecpay::decrypt_logistics_callback`],
+/// [`crate::Ecpay::decrypt_temp_trade_established`]), which collapse every
 /// payload-content-dependent failure into one fixed message.
 pub fn decrypt(text: &str, hash_key: &[u8], hash_iv: &[u8]) -> Result<String> {
     let decoded = base64::engine::general_purpose::STANDARD.decode(text)?;
