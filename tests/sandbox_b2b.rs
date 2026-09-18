@@ -60,6 +60,13 @@ fn sample_issue(relate_number: String) -> IssueB2bInput {
 async fn b2b_issue_then_get_then_invalid_roundtrip() {
     let client = sdk();
 
+    // Sample the date ONCE and use it for every leg: B2B Issue takes no
+    // caller date and B2bIssueOutput returns none, so re-reading the local
+    // clock per leg let a run straddling Taipei midnight query/void with a
+    // different date than the invoice was recorded under (6070004). One
+    // sample narrows that window to test-start → server receipt.
+    let issue_date = taipei_today();
+
     // 1. 開立 — the wire contract proven by the probes: RtnCode=1 + 發票號.
     //    unique_no (tag + millis + per-process seq) instead of bare millis:
     //    the shared helper exists because millis alone collided live.
@@ -81,7 +88,7 @@ async fn b2b_issue_then_get_then_invalid_roundtrip() {
             merchant_id: MERCHANT_ID.into(),
             invoice_category: 0,
             invoice_number: issue.invoice_number.clone(),
-            invoice_date: taipei_today(),
+            invoice_date: issue_date.clone(),
         })
         .await
         .expect("GetIssue decodes");
@@ -97,7 +104,7 @@ async fn b2b_issue_then_get_then_invalid_roundtrip() {
         .invalid_b2b(&InvalidInput {
             merchant_id: MERCHANT_ID.into(),
             invoice_number: issue.invoice_number.clone(),
-            invoice_date: taipei_today(),
+            invoice_date: issue_date,
             reason: "sandbox test".into(), // ≤20 chars (2103005 otherwise)
         })
         .await

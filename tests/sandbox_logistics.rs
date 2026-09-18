@@ -76,7 +76,19 @@ async fn domestic_create_then_query_roundtrip() {
         .await
         .expect("QueryLogisticsTradeInfo/V2 round-trips the MAC");
     println!("query = {info:?}");
+    // The reply must actually carry the trade back, not just "not a status
+    // prefix": the queried id is echoed (spec guides/06: the reply includes
+    // AllPayLogisticsID), and the core status field decoded.
     assert!(!info.contains_key("_status_prefix"));
+    assert_eq!(
+        info.get("AllPayLogisticsID").map(String::as_str),
+        Some(logistics_id.as_str()),
+        "spec: the reply carries AllPayLogisticsID (guides/06) — got {info:?}"
+    );
+    assert!(
+        info.contains_key("LogisticsStatus"),
+        "a decode regression to an empty map must fail here: {info:?}"
+    );
 }
 
 #[tokio::test]
@@ -118,12 +130,17 @@ async fn domestic_create_update_shipment_query_chain() {
     // 完成門市確認) answers a SHORT UNSIGNED rejection `0|資料處理中，無法
     // 更新貨資訊` — surfaced as Error::Message, not a misleading MAC error.
     match update {
-        Ok(v) => println!("update accepted = {v:?}"),
+        // Spec (ECPay-API-Skill guides/06): this endpoint answers PLAIN TEXT
+        // (`1|OK` accepted, `0|...` rejected), which the crate surfaces as
+        // Error::Message either way — never a parsed query.
+        Ok(v) => panic!("UpdateShipmentInfo answered a parsed query — new server shape: {v:?}"),
         Err(ecpay::Error::Message(m)) => {
-            println!("update rejected while 資料處理中: {m}");
+            println!("update answered (plain-text contract) = {m}");
             assert!(
-                m.contains("無法更新") || m.contains("處理中"),
-                "documented OTP-flow rejection, got: {m}"
+                m.contains("status 1")        // accepted — spec `1|OK`
+                    || m.contains("無法更新")
+                    || m.contains("處理中"), // OTP-flow rejection (2026-09)
+                "documented outcomes only, got: {m}"
             );
         }
         Err(e) => panic!("unexpected error: {e:?}"),
@@ -131,12 +148,21 @@ async fn domestic_create_update_shipment_query_chain() {
 
     let info = client
         .logistics_query_logistics_trade_info(&DomesticQueryInput {
-            all_pay_logistics_id: logistics_id,
+            all_pay_logistics_id: logistics_id.clone(),
             time_stamp: None,
         })
         .await
         .expect("query after update");
     println!("query after update = {info:?}");
+    assert_eq!(
+        info.get("AllPayLogisticsID").map(String::as_str),
+        Some(logistics_id.as_str()),
+        "spec: the reply carries AllPayLogisticsID (guides/06) — got {info:?}"
+    );
+    assert!(
+        info.contains_key("LogisticsStatus"),
+        "the post-update query must decode the trade state: {info:?}"
+    );
 }
 
 #[tokio::test]
@@ -153,6 +179,14 @@ async fn get_store_list_answers_json() {
         out.as_object().map(|o| o.keys().collect::<Vec<_>>())
     );
     assert!(out.is_object() || out.is_array(), "JSON response: {out}");
+    // A FAMI store list is never empty on stage; an empty container means
+    // the decode regressed, which must fail here rather than pass silently.
+    let empty = match &out {
+        serde_json::Value::Array(a) => a.is_empty(),
+        serde_json::Value::Object(o) => o.is_empty(),
+        _ => true,
+    };
+    assert!(!empty, "store list must carry entries: {out}");
 }
 
 #[tokio::test]
@@ -168,6 +202,12 @@ async fn allinone_v2_endpoints_answer_with_the_aes_envelope() {
         .await
         .expect("v2 envelope accepted (TransCode gate)");
     println!("allinone create_test_data = {out:?}");
+    // Live-captured shape (stage_probes 2026-09): a successful CreateTestData
+    // mints a `LogisticsID` string — pin it so a shape regression fails.
+    assert!(
+        out["LogisticsID"].as_str().is_some_and(|s| !s.is_empty()),
+        "CreateTestData must mint a LogisticsID: {out}"
+    );
 
     // Query with a not-yet-existing logistics id: the server answers HTTP 500
     // with a VALID envelope (captured live 2026-09) whose Data carries the

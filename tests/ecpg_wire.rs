@@ -219,6 +219,14 @@ async fn data_plaintext_keeps_the_struct_field_order() {
                     i += 1;
                 }
                 b'%' => {
+                    // Unlike the sibling mocks (which resync), this decoder
+                    // VERIFIES the crate's encoder, so malformed input must
+                    // fail loudly — but with a bounds assert, not a cryptic
+                    // index panic.
+                    assert!(
+                        i + 2 < b.len(),
+                        "aesURLEncode never emits a truncated escape"
+                    );
                     let hi = hex(b[i + 1]).expect("encoder always writes 2 hex digits");
                     let lo = hex(b[i + 2]).expect("encoder always writes 2 hex digits");
                     plain.push(hi * 16 + lo);

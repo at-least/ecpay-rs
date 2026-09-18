@@ -95,7 +95,16 @@ async fn get_token_by_trade_issues_a_real_token() {
         .get_token_by_trade(&token_input())
         .await
         .expect("typed GetTokenbyTrade round-trips (TransCode gate)");
-    println!("token out = {out:?}");
+    // Redacted print: the Token is a reusable card-binding credential and
+    // ConsumerInfo carries buyer contact data — never dump them under
+    // --nocapture (log aggregation turns stage output into a key store).
+    println!(
+        "token out = {{ rtn_code: {}, rtn_msg: {:?}, token: <{} chars redacted>, expire: {:?} }}",
+        out.rtn_code,
+        out.rtn_msg,
+        out.token.len(),
+        out.token_expire_date
+    );
     assert_eq!(out.rtn_code, 1, "RtnMsg={:?}", out.rtn_msg);
     assert!(!out.token.is_empty(), "a token was issued");
     assert!(
@@ -136,7 +145,13 @@ async fn missing_consumer_info_is_named_by_stage_only_with_remember_card() {
         .get_token_by_trade(&input)
         .await
         .expect("the envelope decodes (TransCode=1)");
-    println!("RememberCard=0, no ConsumerInfo = {out:?}");
+    // Redacted print — this success path carries a real token.
+    println!(
+        "RememberCard=0, no ConsumerInfo = {{ rtn_code: {}, rtn_msg: {:?}, token: <{} chars redacted> }}",
+        out.rtn_code,
+        out.rtn_msg,
+        out.token.len()
+    );
     assert_eq!(out.rtn_code, 1, "RtnMsg={:?}", out.rtn_msg);
     assert!(
         !out.token.is_empty(),

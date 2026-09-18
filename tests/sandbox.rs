@@ -456,8 +456,16 @@ async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
                 "{label}: {out:?}"
             ),
             // Format rejection: the server decoded our exact bytes and
-            // judged them, which is the encoding proof.
-            2019001 => assert!(!out.rtn_msg.is_empty(), "{label}: {out:?}"),
+            // judged them, which is the encoding proof. The well-formed
+            // probe must never land here — a stage rejecting ALL barcodes
+            // as format errors would otherwise pass vacuously.
+            2019001 => {
+                assert!(!out.rtn_msg.is_empty(), "{label}: {out:?}");
+                assert_ne!(
+                    label, "well-formed",
+                    "the well-formed barcode must reach the business answer, not a format rejection: {out:?}"
+                );
+            }
             other => panic!("{label}: expected RtnCode 1 or 2019001, got {other}: {out:?}"),
         }
         tokio::time::sleep(std::time::Duration::from_millis(120)).await;
