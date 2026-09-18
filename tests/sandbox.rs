@@ -477,7 +477,7 @@ async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
     assert!(
         matches!(
             err,
-            ecpay::Error::InvoiceStatus { .. } | ecpay::Error::TransCode { .. }
+            ecpay::Error::HttpStatus { .. } | ecpay::Error::TransCode { .. }
         ) && text.contains("decrypt"),
         "expected stage to reject the wrong-key payload at decrypt, got {err:?}"
     );

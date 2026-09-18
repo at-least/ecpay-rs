@@ -49,7 +49,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{api_error, Error, Result};
+use crate::error::{api_error, Error, Result, Service};
 use crate::wire::wire_enum;
 use crate::Ecpay;
 
@@ -117,8 +117,18 @@ impl Ecpay {
             "Revision": "1.0.0",
         });
         let (key, iv) = self.invoice_keys();
-        self.post_aes_json(&endpoint, rq_header, &self.merchant_id, data, key, iv)
-            .await
+        self.post_aes_json(
+            crate::client::AesEndpoint {
+                service: Service::B2bInvoice,
+                url: endpoint,
+            },
+            rq_header,
+            &self.merchant_id,
+            data,
+            key,
+            iv,
+        )
+        .await
     }
 }
 

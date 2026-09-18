@@ -78,7 +78,9 @@ pub(crate) fn query_unescape(s: &str) -> Result<String> {
     String::from_utf8(out).map_err(|_| Error::Message("invalid UTF-8 in unescaped query".into()))
 }
 
-fn hex_val(c: u8) -> Option<u8> {
+/// Hex nibble decoder shared with [`crate::client`]'s lenient
+/// `unquote_plus` (single source for both `%XX` readers).
+pub(crate) fn hex_val(c: u8) -> Option<u8> {
     match c {
         b'0'..=b'9' => Some(c - b'0'),
         b'a'..=b'f' => Some(c - b'a' + 10),

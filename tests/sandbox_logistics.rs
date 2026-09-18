@@ -225,8 +225,8 @@ async fn wrong_aes_key_is_answered_in_band_by_the_v2_envelope() {
 /// caller as one shape whatever HTTP status they ride on: stage answers
 /// `0|找不到訂單` and `0|CheckMacValue驗證錯誤` on HTTP 500 but `0|TimeStamp
 /// Is Expired` on HTTP 200 (captured 2026-09). Before the fix the 500s
-/// surfaced as `PaymentStatus` and the 200 as `Message` — the same protocol
-/// error in two variants.
+/// surfaced as a payment-family status error and the 200 as `Message` — the
+/// same protocol error in two shapes.
 #[tokio::test]
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn domestic_rejections_share_one_shape_on_any_http_status() {

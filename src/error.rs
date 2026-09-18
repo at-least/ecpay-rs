@@ -32,6 +32,38 @@ impl fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
+/// The ECPay service family an [`Error::HttpStatus`] came from — the label
+/// its `Display` shows. Deliberately closed and exhaustive over the
+/// service families this crate talks to (a new family is a new module and
+/// a new variant either way — no `Other` passthrough, matching
+/// [`crate::EncryptType`]'s closedness).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Service {
+    /// AIO/Cashier 金流 APIs（`call_payment_api`、`order_search`、
+    /// `credit_do_action`、餘額下載…）。
+    Payment,
+    /// B2C 電子發票（`call_invoice_api` 的 Go-parity 路徑）。
+    Invoice,
+    /// 國內 / 全方位 v2 / 跨境物流（CMV-MD5 form 與 AES-JSON 皆此標籤）。
+    Logistics,
+    /// 站內付 2.0（ECPG）的兩個網域。
+    Ecpg,
+    /// B2B 電子發票。
+    B2bInvoice,
+}
+
+impl fmt::Display for Service {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Service::Payment => "payment",
+            Service::Invoice => "invoice",
+            Service::Logistics => "logistics",
+            Service::Ecpg => "ecpg",
+            Service::B2bInvoice => "b2b invoice",
+        })
+    }
+}
+
 /// Everything this crate can return as `error`. `#[non_exhaustive]`: new
 /// variants may be added in any minor release.
 #[derive(Debug)]
@@ -46,17 +78,16 @@ pub enum Error {
     /// (`order_search` verifies it; the Python SDK raises
     /// `"CheckMacValue is error!"`).
     CheckMacValueMismatch,
-    /// Go: `fmt.Errorf("ecpay payment API error: status=%d body=%s", ...)`.
-    /// `Display` renders the body verbatim up to 512 chars, then a
-    /// truncation notice with the total size ([`crate::client::
-    /// truncate_for_display`]); the field itself keeps the full body.
-    PaymentStatus {
-        status: u16,
-        body: String,
-    },
-    /// Go: `fmt.Errorf("ecpay invoice API error: status=%d body=%s", ...)`.
-    /// `Display` bounds the body like [`Error::PaymentStatus`].
-    InvoiceStatus {
+    /// An HTTP-level failure (non-2xx status) of one ECPay service's
+    /// endpoint. `Display` renders Go's `fmt.Errorf` shape with the service
+    /// named — `ecpay {service} API error: status=%d body=%s` — the body
+    /// verbatim up to 512 chars, then a truncation notice with the total
+    /// size ([`crate::client::truncate_for_display`]); the field itself
+    /// keeps the full body. A non-2xx body larger than the transport's
+    /// 1 MiB cap surfaces as the body-cap [`Error::Message`] instead (the
+    /// body cannot be kept).
+    HttpStatus {
+        service: Service,
         status: u16,
         body: String,
     },
@@ -110,14 +141,13 @@ impl fmt::Display for Error {
             Error::Api(e) => write!(f, "{e}"),
             Error::Validation(m) => write!(f, "ecpay: {m}"),
             Error::CheckMacValueMismatch => write!(f, "ecpay: CheckMacValue is error!"),
-            Error::PaymentStatus { status, body } => write!(
+            Error::HttpStatus {
+                service,
+                status,
+                body,
+            } => write!(
                 f,
-                "ecpay payment API error: status={status} body={}",
-                crate::client::truncate_for_display(body)
-            ),
-            Error::InvoiceStatus { status, body } => write!(
-                f,
-                "ecpay invoice API error: status={status} body={}",
+                "ecpay {service} API error: status={status} body={}",
                 crate::client::truncate_for_display(body)
             ),
             Error::TransCode { code, msg } => {

@@ -35,7 +35,7 @@ use serde_json::Value;
 
 use crate::client::{body_excerpt, render_auto_submit_form, truncate_for_display, unix_now};
 use crate::crypto::{check_mac_value, verify_mac, EncryptType};
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, Service};
 use crate::payment::params::{cap_str, optional_str, required_nonempty, required_str};
 use crate::Ecpay;
 
@@ -155,7 +155,8 @@ impl Ecpay {
             )));
         }
         if !(200..300).contains(&http_status) {
-            return Err(Error::PaymentStatus {
+            return Err(Error::HttpStatus {
+                service: Service::Logistics,
                 status: http_status,
                 body: text.into_owned(),
             });
@@ -222,7 +223,10 @@ impl Ecpay {
         });
         let (key, iv) = self.logistics_keys();
         self.post_aes_json(
-            &endpoint,
+            crate::client::AesEndpoint {
+                service: Service::Logistics,
+                url: endpoint,
+            },
             rq_header,
             &self.merchant_id,
             input,
@@ -251,7 +255,10 @@ impl Ecpay {
         });
         let (key, iv) = self.logistics_keys();
         self.post_aes_json_raw(
-            &endpoint,
+            crate::client::AesEndpoint {
+                service: Service::Logistics,
+                url: endpoint,
+            },
             rq_header,
             &self.merchant_id,
             input,
@@ -540,7 +547,7 @@ impl Ecpay {
         m.insert("CvsType".to_owned(), input.cvs_type.clone());
         self.sign_logistics(&mut m)?;
         let endpoint = format!("{}Helper/GetStoreList", self.logistics_base_url());
-        let body = self.post_form(&endpoint, &m).await?;
+        let body = self.post_form(Service::Logistics, &endpoint, &m).await?;
         Ok(serde_json::from_slice(&body)?)
     }
 

@@ -804,11 +804,15 @@ async fn test_api_non_2xx_errors() {
         .await
         .expect_err("expected an error on a non-2xx payment API response");
     match &err {
-        ecpay::Error::PaymentStatus { status, body } => {
+        ecpay::Error::HttpStatus {
+            service: ecpay::Service::Payment,
+            status,
+            body,
+        } => {
             assert_eq!(*status, 500);
             assert_eq!(body, "boom");
         }
-        other => panic!("expected Error::PaymentStatus, got {other:?}"),
+        other => panic!("expected Error::HttpStatus(Payment), got {other:?}"),
     }
     assert!(
         err.to_string() == "ecpay payment API error: status=500 body=boom",

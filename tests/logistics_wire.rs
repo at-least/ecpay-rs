@@ -206,7 +206,7 @@ async fn status_prefixed_rejections_share_one_shape_on_any_http_status() {
 /// and on a non-2xx status alike. On non-2xx the HTTP status is not
 /// surfaced separately: the TransMsg is the useful signal (before the
 /// key-presence gate, a 500 carrying such a body came back as a bare
-/// `InvoiceStatus`). This pins that choice.
+/// HTTP-status error). This pins that choice.
 #[tokio::test]
 async fn transcode_zero_envelope_is_an_envelope_on_any_status() {
     for status in [200u16, 500] {
@@ -290,13 +290,17 @@ async fn gateway_json_without_transcode_is_not_mistaken_for_an_envelope() {
             logistics_id: "1".into(),
         })
         .await
-        .expect_err("gateway 502 must surface as InvoiceStatus");
+        .expect_err("gateway 502 must surface as an HttpStatus error");
     match err {
-        ecpay::Error::InvoiceStatus { status, body } => {
+        ecpay::Error::HttpStatus {
+            service: ecpay::Service::Logistics,
+            status,
+            body,
+        } => {
             assert_eq!(status, 502);
             assert!(body.contains("bad gateway"), "{body}");
         }
-        other => panic!("expected InvoiceStatus, got {other:?}"),
+        other => panic!("expected HttpStatus(Logistics), got {other:?}"),
     }
 }
 
@@ -1587,7 +1591,7 @@ async fn empty_data_merchant_id_is_refused_before_any_bytes_go_out() {
 /// A `0|` rejection whose message text is huge (a hostile or misbehaving
 /// endpoint behind the configured logistics URL) must not be able to push
 /// megabytes of text into one error string: like every other server-body
-/// echo in this crate (`PaymentStatus`/`InvoiceStatus` Display), the
+/// echo in this crate (the `HttpStatus` Display), the
 /// message carries at most [`ecpay`] BODY_EXCERPT_CHARS (512) chars
 /// verbatim plus the truncation notice with the total size.
 #[tokio::test]

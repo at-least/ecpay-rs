@@ -9,7 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::{aes_url_encode, decrypt_data, encrypt, query_unescape};
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, Service};
 use crate::Ecpay;
 
 /// Go `Request` — the outer AES-JSON envelope CallInvoiceAPI sends.
@@ -68,6 +68,14 @@ pub struct Response {
 pub struct RqHeaderResponse {
     #[serde(rename = "Timestamp", default)]
     pub timestamp: i64,
+}
+
+/// Where an AES-JSON request goes: the endpoint URL plus the [`Service`]
+/// that labels the non-2xx [`Error::HttpStatus`] — one parameter instead of
+/// two keeps the shared helpers within `clippy::too_many_arguments`.
+pub(crate) struct AesEndpoint {
+    pub service: Service,
+    pub url: String,
 }
 
 impl Ecpay {
@@ -257,7 +265,10 @@ fn unquote_plus(s: &str) -> String {
                 out.push(b' ');
                 i += 1;
             }
-            b'%' if i + 2 < b.len() => match (hex_val(b[i + 1]), hex_val(b[i + 2])) {
+            b'%' if i + 2 < b.len() => match (
+                crate::crypto::hex_val(b[i + 1]),
+                crate::crypto::hex_val(b[i + 2]),
+            ) {
                 (Some(hi), Some(lo)) => {
                     out.push(hi * 16 + lo);
                     i += 3;
@@ -276,15 +287,6 @@ fn unquote_plus(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn hex_val(c: u8) -> Option<u8> {
-    match c {
-        b'0'..=b'9' => Some(c - b'0'),
-        b'a'..=b'f' => Some(c - b'a' + 10),
-        b'A'..=b'F' => Some(c - b'A' + 10),
-        _ => None,
-    }
-}
-
 /// Read at most 1 MiB of the body. A body that EXCEEDS the cap is an error,
 /// never a silent truncation: a settlement report cut mid-row is data
 /// corruption, and a truncated CheckMacValue would only fail later (or,
@@ -295,6 +297,11 @@ fn hex_val(c: u8) -> Option<u8> {
 /// Content-Length is checked up front, and the bytes hyper actually
 /// delivers are counted — the counter is authoritative when Content-Length
 /// is absent or lying (chunked encoding).
+///
+/// Because this runs BEFORE any status gate, an over-cap non-2xx error page
+/// surfaces as this body-cap [`crate::Error::Message`], not the endpoint's
+/// usual [`crate::Error::HttpStatus`] — the body cannot be kept, so there
+/// is nothing to attach a status to.
 async fn read_body_limited(resp: &mut reqwest::Response) -> Result<Vec<u8>> {
     const LIMIT: usize = 1 << 20;
     if let Some(len) = resp.content_length() {
@@ -335,15 +342,20 @@ impl Ecpay {
     /// POST the params as a urlencoded form (Python `requests.post(url,
     /// data=params)` / BasePayment.send_post): plain POST, no envelope,
     /// [`encode_query`] wire bytes. Returns the raw body bytes; the caller
-    /// decodes (query string, JSON, or Big5 text).
+    /// decodes (query string, JSON, or Big5 text). `service` labels the
+    /// [`Error::HttpStatus`] a non-2xx answer becomes — the form endpoints
+    /// are shared by the payment APIs and logistics (`get_store_list`), so
+    /// the caller names its family.
     pub(crate) async fn post_form(
         &self,
+        service: Service,
         endpoint: &str,
         params: &HashMap<String, String>,
     ) -> Result<Vec<u8>> {
         let (status, body) = self.post_form_raw(endpoint, params).await?;
         if !(200..300).contains(&status) {
-            return Err(Error::PaymentStatus {
+            return Err(Error::HttpStatus {
+                service,
                 status,
                 body: String::from_utf8_lossy(&body).into_owned(),
             });
@@ -404,7 +416,11 @@ impl Ecpay {
         let body = body_string(&mut resp).await?;
         let status = resp.status().as_u16();
         if !(200..300).contains(&status) {
-            return Err(Error::PaymentStatus { status, body });
+            return Err(Error::HttpStatus {
+                service: Service::Payment,
+                status,
+                body,
+            });
         }
         parse_query(&body)
     }
@@ -491,7 +507,7 @@ impl Ecpay {
     /// to the browser page). Sends the same envelope, returns the raw HTML.
     pub(crate) async fn post_aes_json_raw<I: Serialize>(
         &self,
-        endpoint: &str,
+        to: AesEndpoint,
         rq_header: serde_json::Value,
         merchant_id: &str,
         input: &I,
@@ -506,7 +522,7 @@ impl Ecpay {
         });
         let mut resp = self
             .http()
-            .post(endpoint)
+            .post(&to.url)
             .header("Content-Type", "application/json; charset=utf-8")
             .body(envelope.to_string())
             .send()
@@ -514,7 +530,11 @@ impl Ecpay {
         let status = resp.status().as_u16();
         let body = body_string(&mut resp).await?;
         if !(200..300).contains(&status) {
-            return Err(Error::InvoiceStatus { status, body });
+            return Err(Error::HttpStatus {
+                service: to.service,
+                status,
+                body,
+            });
         }
         Ok(body)
     }
@@ -525,11 +545,14 @@ impl Ecpay {
     /// shape the official PHP examples wire for these services — encrypts
     /// `input` into `Data` (with [`Self::encrypt_checked`]'s Data-level
     /// MerchantID guard), POSTs, gates on TransCode, decrypts into `O`.
+    /// `to` carries the endpoint and the [`Service`] labelling the non-2xx
+    /// [`Error::HttpStatus`] — the helper is shared by four service
+    /// families, so the caller names its own.
     /// The B2C invoice envelope (`call_invoice_api`) keeps its own Go-port
     /// path because it always sends PlatformID and pins `Revision: "3.0.0"`.
     pub(crate) async fn post_aes_json<I: Serialize, O: DeserializeOwned>(
         &self,
-        endpoint: &str,
+        to: AesEndpoint,
         rq_header: serde_json::Value,
         merchant_id: &str,
         input: &I,
@@ -544,7 +567,7 @@ impl Ecpay {
         });
         let mut resp = self
             .http()
-            .post(endpoint)
+            .post(&to.url)
             .header("Content-Type", "application/json; charset=utf-8")
             .body(envelope.to_string())
             .send()
@@ -560,7 +583,13 @@ impl Ecpay {
             // body keeps its real status and content.
             match Self::parse_envelope(&body) {
                 Some(res) => return Self::decode_aes_response(res, key, iv),
-                None => return Err(Error::InvoiceStatus { status, body }),
+                None => {
+                    return Err(Error::HttpStatus {
+                        service: to.service,
+                        status,
+                        body,
+                    })
+                }
             }
         }
         Self::decode_envelope(&body, key, iv)
@@ -600,7 +629,11 @@ impl Ecpay {
         if !(200..300).contains(&status) {
             // Go reads the body for the message; a failed read is wrapped.
             return Err(match body_string(&mut resp).await {
-                Ok(body) => Error::InvoiceStatus { status, body },
+                Ok(body) => Error::HttpStatus {
+                    service: Service::Invoice,
+                    status,
+                    body,
+                },
                 Err(source) => Error::Message(format!(
                     "ecpay invoice API error: status={status} (body read failed: {source})"
                 )),
@@ -647,7 +680,7 @@ pub(crate) const BODY_EXCERPT_CHARS: usize = 512;
 /// characters cannot reach a log line raw. The callback decoders feed
 /// attacker-controlled POST bodies (a public ServerReplyURL/ReturnURL) into
 /// this, so the echo must never be unbounded or verbatim. The non-envelope
-/// status errors (`Error::PaymentStatus`/`InvoiceStatus`) instead render
+/// status errors (`Error::HttpStatus`) instead render
 /// their bodies through [`truncate_for_display`] — verbatim-but-bounded,
 /// keeping the Go-parity `body=%s` shape for normal server responses.
 pub(crate) fn body_excerpt(body: &str) -> String {
@@ -665,7 +698,7 @@ pub(crate) fn body_excerpt(body: &str) -> String {
 /// size. Unlike [`body_excerpt`] it does NOT escape control characters —
 /// keeping the Go-parity `body=%s` shape for normal server responses (these
 /// bodies arrive over the merchant's own TLS connection, not a public
-/// callback endpoint). The `PaymentStatus`/`InvoiceStatus` fields keep the
+/// callback endpoint). The `HttpStatus` fields keep the
 /// full body for programmatic access; only the rendered message is bounded,
 /// so a hostile or misbehaving endpoint cannot flood a log line with
 /// megabytes of HTML.
@@ -709,6 +742,11 @@ pub(crate) fn unix_now() -> i64 {
 /// of failure — an acceptable trade for a payment/invoice SDK's low-QPS,
 /// call-then-wait usage pattern. Callers that need pooling inject their own
 /// client via [`Ecpay::http`].
+///
+/// Panics (lazily, on the first request) only if the reqwest builder itself
+/// fails — with the pinned rustls-tls feature set this is in practice
+/// unreachable; there is no meaningful recovery for "no usable HTTP client"
+/// in a payment SDK, so the failure is made loud rather than swallowed.
 fn shared_http_client() -> &'static reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT.get_or_init(|| {

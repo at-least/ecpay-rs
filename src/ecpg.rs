@@ -47,7 +47,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::error::{Result, Service};
 use crate::Ecpay;
 
 // --- 共用子物件（巢狀 JSON 物件） ---
@@ -483,7 +483,10 @@ impl Ecpay {
         input: &I,
     ) -> Result<O> {
         self.post_aes_json(
-            &endpoint,
+            crate::client::AesEndpoint {
+                service: Service::Ecpg,
+                url: endpoint,
+            },
             serde_json::json!({ "Timestamp": crate::client::unix_now() }),
             &self.merchant_id,
             input,

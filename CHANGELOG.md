@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+_breaking changes（程式碼審查後的 API 衛生修正）：_
+
+- **`Error::PaymentStatus` / `Error::InvoiceStatus` 由帶服務標籤的
+  `Error::HttpStatus { service, status, body }` 取代**（全庫審查 🟢）：
+  `service` 是新的 closed enum `ecpay::Service::{Payment, Invoice,
+  Logistics, Ecpg, B2bInvoice}`。動機：共用 helper 的服務歸屬只有呼叫端
+  知道——先前 `logistics_create` 的 HTTP 500 會渲染成「ecpay **payment**
+  API error」（`post_logistics_form` 重用 `PaymentStatus`）、ECPG/物流
+  v2/B2B 的非 2xx 會渲染成「ecpay **invoice** API error」（`post_aes_json`
+  重用 `InvoiceStatus`），log 與告警會被錯誤標籤誤導。現在每個服務族
+  以正確標籤呈現：`ecpay {service} API error: status=… body=…`——Go 參考
+  移植的 `payment`/`invoice` 兩族文字逐字不變，`body` 欄位與 512 字元
+  bounded Display 契約不變（`tests/api_error.rs::http_status_display_
+  names_the_service` 逐服務釘住）。移轉：`Error::PaymentStatus { status,
+  body }` → `Error::HttpStatus { service: Service::Payment, status, body }`、
+  `InvoiceStatus` → `Service::Invoice`。
+- **reqwest 移除未用的 `json` feature**（全庫審查 🟢）：全庫從不呼叫
+  `.json()`（信封與表單 body 皆自行序列化），依賴面照舊、feature 標記
+  如實。
+
+_非破壞性：_
+
+- **`Ecpay::relate_number` / `return_url` / `payment_info_url` 標記
+  `#[deprecated]`**（全庫審查 🟡）：grep 全庫證實這三個 client 欄位是
+  write-only——除 `Debug` 外沒有任何程式路徑讀取，從官方 SDK 移植的
+  使用者把回呼網址設在 client 上會**靜默無效**（最壞情況：簽出一張沒有
+  `ReturnURL` 的付款表單）。現在欄位帶 deprecation 警告與指向正確位置
+  的文件（`AioCheckOutParams::return_url`、`InvoiceExtend::relate_number`
+  等），並以 `compile_fail` doctest 釘住：移除 `#[deprecated]` 而不讓欄位
+  真正生效會使該測試失敗。欄位本體保留（`Debug` 仍顯示，已有設定值不
+  受影響）；是否在未來版本改為「params 留空時 fallback 到 client 欄位」
+  需先實證 Go 參考移植的行為，目前不做。
+- 內部整理（全庫審查 🟢）：`hex_val` 收斂為 `crypto.rs` 單一定義（
+  `client.rs` 的 lenient `unquote_plus` 改用之）；`read_body_limited`
+  文件補註「超過 1 MiB 的非 2xx 錯誤頁會以 body 上限的 `Error::Message`
+  呈現、而非該端點的 `Error::HttpStatus`」；`shared_http_client` 文件
+  補註 builder 失敗時 lazy panic 的取捨（無可用 HTTP client 時大聲失敗
+  優於靜默吞掉）。
+
 _breaking changes（程式碼審查後的安全/一致性修正）：_
 
 - **`EncryptType` enum 取代 `check_mac_value` 的 `encrypt_type: i64`**：

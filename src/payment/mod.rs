@@ -14,7 +14,7 @@ pub use check_out::{AioCheckOut, AioCheckOutParams, InvoiceExtend, MERCHANT_TRAD
 use std::collections::{BTreeMap, HashMap};
 
 use crate::client::parse_qsl;
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, Service};
 use crate::wire::wire_enum;
 use crate::Ecpay;
 use params::{insert_optional_str, optional_str, required_code, required_str};
@@ -417,7 +417,7 @@ impl Ecpay {
         let mac = self.generate_check_value(&m)?;
         m.insert("CheckMacValue".to_owned(), mac);
 
-        let body = self.post_form(endpoint, &m).await?;
+        let body = self.post_form(Service::Payment, endpoint, &m).await?;
         let mut query = parse_qsl(&String::from_utf8_lossy(&body));
 
         let got = query
@@ -455,7 +455,7 @@ impl Ecpay {
     ) -> Result<Vec<u8>> {
         let mac = self.generate_check_value(m)?;
         m.insert("CheckMacValue".to_owned(), mac);
-        self.post_form(&endpoint, m).await
+        self.post_form(Service::Payment, &endpoint, m).await
     }
 
     /// Shared request map for [`Self::order_search`] and

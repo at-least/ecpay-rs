@@ -90,8 +90,12 @@ async fn redirects_are_not_followed() {
         .await
         .expect_err("a 302 must surface as an error, not be followed");
     match err {
-        ecpay::Error::PaymentStatus { status, .. } => assert_eq!(status, 302, "{err:?}"),
-        other => panic!("expected PaymentStatus(302), got {other:?}"),
+        ecpay::Error::HttpStatus {
+            service: ecpay::Service::Payment,
+            status,
+            ..
+        } => assert_eq!(status, 302, "{err:?}"),
+        other => panic!("expected HttpStatus(Payment, 302), got {other:?}"),
     }
     assert!(
         !hit.load(std::sync::atomic::Ordering::SeqCst),
@@ -369,8 +373,8 @@ async fn invoice_2xx_non_envelope_bodies_are_reported_with_the_body() {
 
 /// A non-2xx body is kept in full on the error FIELD (programmatic access)
 /// but its DISPLAY rendering is bounded: a hostile or misbehaving endpoint
-/// answering a megabyte of HTML cannot flood a log line through a
-/// `PaymentStatus`/`InvoiceStatus` message.
+/// answering a megabyte of HTML cannot flood a log line through an
+/// `HttpStatus` message.
 #[tokio::test]
 async fn status_error_display_is_bounded_but_the_field_keeps_the_body() {
     let big = "x".repeat(100_000);
@@ -386,11 +390,15 @@ async fn status_error_display_is_bounded_but_the_field_keeps_the_body() {
         .await
         .expect_err("a non-2xx payment reply must surface as an error");
     match &err {
-        ecpay::Error::PaymentStatus { status, body } => {
+        ecpay::Error::HttpStatus {
+            service: ecpay::Service::Payment,
+            status,
+            body,
+        } => {
             assert_eq!(*status, 500);
             assert_eq!(body.len(), 100_000, "the field keeps the full body");
         }
-        other => panic!("expected Error::PaymentStatus, got {other:?}"),
+        other => panic!("expected Error::HttpStatus(Payment), got {other:?}"),
     }
     let rendered = err.to_string();
     assert!(

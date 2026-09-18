@@ -92,7 +92,7 @@ pub use ecpg::{
     GetTokenbyTradeInput, GetTokenbyTradeOutput, GetTokenbyUserInput, OrderInfo,
     QueryTradeMediaInput, UnionPayInfo,
 };
-pub use error::{ApiError, Error, Result};
+pub use error::{ApiError, Error, Result, Service};
 pub use invoice::{
     AllowanceByCollegiateInput, AllowanceByCollegiateOutput, AllowanceInfoItem, AllowanceInput,
     AllowanceInvalidByCollegiateInput, AllowanceInvalidByCollegiateOutput, AllowanceInvalidInput,
@@ -197,9 +197,75 @@ pub struct Ecpay {
     pub invoice_api_url: String,
     pub invoice_hash_key: String,
     pub invoice_hash_iv: String,
-    /// 特店自訂編號
+    /// 特店自訂編號。⚠ **從未被讀取**（同 [`Self::return_url`] 的說明）：
+    /// 發票自訂編號要設在各請求參數上，例如
+    /// [`crate::payment::InvoiceExtend::relate_number`]、
+    /// [`crate::invoice::IssueInput::relate_number`]。
+    ///
+    /// 與 [`Self::return_url`] 同款的 `compile_fail` 釘住：
+    ///
+    /// ```compile_fail
+    /// # use ecpay::Ecpay;
+    /// #[deny(deprecated)]
+    /// fn client_fields_must_not_silently_noop() {
+    ///     let _ = Ecpay {
+    ///         relate_number: "Tea0001".into(),
+    ///         ..Default::default()
+    ///     };
+    /// }
+    /// # fn main() { client_fields_must_not_silently_noop() }
+    /// ```
+    #[deprecated(
+        since = "0.5.0",
+        note = "this field is never read; set the request params instead (e.g. AioCheckOutParams / InvoiceExtend / IssueInput)"
+    )]
     pub relate_number: String,
+    /// ⚠ **從未被讀取**（全庫審查 2026-09 的發現）：client 級欄位在本 crate
+    /// 沒有任何程式路徑使用——回呼網址要設在**各請求參數**上，例如
+    /// [`crate::payment::AioCheckOutParams::return_url`]、
+    /// [`crate::ecpg::OrderInfo::return_url`]、
+    /// [`crate::logistics::LogisticsCreateInput::server_reply_url`]。
+    /// 從官方 SDK 移植時若把網址留在 client 上，簽出的請求會靜默帶空回呼。
+    ///
+    /// 這個 doc test 釘住「欄位帶 deprecated」：若有人移除 `#[deprecated]`
+    /// 而沒有真的讓欄位生效，此測試會失敗（編譯成功 = 設定值依舊無效）。
+    ///
+    /// ```compile_fail
+    /// # use ecpay::Ecpay;
+    /// #[deny(deprecated)]
+    /// fn client_fields_must_not_silently_noop() {
+    ///     let _ = Ecpay {
+    ///         return_url: "https://example.com/callback".into(),
+    ///         ..Default::default()
+    ///     };
+    /// }
+    /// # fn main() { client_fields_must_not_silently_noop() }
+    /// ```
+    #[deprecated(
+        since = "0.5.0",
+        note = "this field is never read; set AioCheckOutParams::return_url (or the request params') instead"
+    )]
     pub return_url: String,
+    /// ⚠ **從未被讀取**：同 [`Self::return_url`]——付款人繳費通知網址要設在
+    /// [`crate::payment::AioCheckOutParams::payment_info_url`]。
+    ///
+    /// 與 [`Self::return_url`] 同款的 `compile_fail` 釘住：
+    ///
+    /// ```compile_fail
+    /// # use ecpay::Ecpay;
+    /// #[deny(deprecated)]
+    /// fn client_fields_must_not_silently_noop() {
+    ///     let _ = Ecpay {
+    ///         payment_info_url: "https://example.com/notify".into(),
+    ///         ..Default::default()
+    ///     };
+    /// }
+    /// # fn main() { client_fields_must_not_silently_noop() }
+    /// ```
+    #[deprecated(
+        since = "0.5.0",
+        note = "this field is never read; set AioCheckOutParams::payment_info_url instead"
+    )]
     pub payment_info_url: String,
     /// Base URL for the CreditDetail endpoints; empty = production.
     pub credit_api_url: String,
@@ -244,6 +310,11 @@ pub struct Ecpay {
 }
 
 impl std::fmt::Debug for Ecpay {
+    // The three deprecated legacy fields are still debug-printed: they carry
+    // whatever the caller configured, and hiding them would make a stray
+    // config harder to spot. Reading them here is not a use that changes
+    // behavior (nothing else reads them — see the field docs).
+    #[allow(deprecated)]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = f.debug_struct("Ecpay");
         s.field("platform_id", &self.platform_id)
@@ -291,6 +362,10 @@ impl Ecpay {
     /// `logistics_hash_key`/`logistics_hash_iv`) and the B2B `b2b_rq_id`
     /// remain per-service settings on top of this base, exactly like on a
     /// hand-built client.
+    // The struct literal names every field, including the three deprecated
+    // legacy ones — zero-value init keeps the literal exhaustive against
+    // future fields (see above).
+    #[allow(deprecated)]
     pub fn stage(
         merchant_id: impl Into<String>,
         hash_key: impl Into<String>,
