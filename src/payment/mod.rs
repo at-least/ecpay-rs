@@ -754,12 +754,25 @@ mod tests {
     #[test]
     fn big5_decode_does_not_bom_sniff() {
         // Python's `bytes.decode('big5')` — the contract documented on
-        // decode_big5 — has no BOM sniffing: a leading FF FE pair is invalid
+        // decode_big5 — has no BOM sniffing: a UTF-16LE BOM pair is invalid
         // Big5 (two U+FFFDs) and the REST of the body keeps decoding as
         // Big5. `Encoding::decode` instead switches the whole stream to
         // UTF-16LE, silently turning a corrupt body into mojibake. (Bytes
         // chosen so CPython's big5 and encoding_rs's WHATWG Big5 agree.)
         let body = [0xFF, 0xFE, 0x2D, 0x41, 0x42]; // FF FE, then "-AB"
         assert_eq!(decode_big5(&body), "\u{FFFD}\u{FFFD}-AB");
+        // The other two BOM forms get the same no-sniffing treatment
+        // (expected values are CPython's `big5`/`replace` output):
+        // EF BB BF decodes as the Big5 pair EF-BB, NOT stripped as a UTF-8
+        // BOM; FE FF (UTF-16BE BOM) is two invalid Big5 bytes.
+        let body = [0xEF, 0xBB, 0xBF, 0x2D, 0x41, 0x42];
+        assert_eq!(decode_big5(&body), "\u{569C}\u{FFFD}-AB");
+        // FE FF (UTF-16BE BOM) must not switch the stream to UTF-16BE
+        // either. WHATWG Big5 (encoding_rs) consumes the invalid FE-FF pair
+        // as ONE U+FFFD where CPython's `big5` emits two (it does not treat
+        // FE as a lead) — the documented lenient-decode approximation; the
+        // load-bearing property is that "-AB" survives as Big5, not mojibake.
+        let body = [0xFE, 0xFF, 0x2D, 0x41, 0x42];
+        assert_eq!(decode_big5(&body), "\u{FFFD}-AB");
     }
 }
