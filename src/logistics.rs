@@ -118,6 +118,11 @@ fn split_status_prefix(body: &str) -> (Option<String>, &str) {
     }
 }
 
+/// The AES-JSON envelope revision the AllInOne-v2 / cross-border logistics
+/// services speak (live-pinned 2026-09; B2C invoice speaks `3.0.0` instead —
+/// see [`crate::client::B2C_INVOICE_REVISION`]).
+const LOGISTICS_AES_REVISION: &str = "1.0.0";
+
 impl Ecpay {
     /// Signs `params` with the logistics keys and MD5 (`EncryptType=0` —
     /// the ONLY service family using MD5), appends CheckMacValue.
@@ -199,7 +204,7 @@ impl Ecpay {
     }
 
     /// Core AES-JSON call for logistics v2 / CrossBorder: RqHeader carries
-    /// `Timestamp` + `Revision: "1.0.0"`, signed with the logistics keys.
+    /// `Timestamp` + `Revision`, signed with the logistics keys.
     /// `path` is appended to the logistics base verbatim, e.g.
     /// `Express/v2/QueryLogisticsTradeInfo` or `CrossBorder/Create`.
     /// `data_merchant_id` is the input's own `MerchantID` field when its
@@ -219,7 +224,7 @@ impl Ecpay {
         let endpoint = format!("{}{}", self.logistics_base_url(), path);
         let rq_header = serde_json::json!({
             "Timestamp": unix_now(),
-            "Revision": "1.0.0",
+            "Revision": LOGISTICS_AES_REVISION,
         });
         let (key, iv) = self.logistics_keys();
         self.post_aes_json(
@@ -251,7 +256,7 @@ impl Ecpay {
         let endpoint = format!("{}{}", self.logistics_base_url(), path);
         let rq_header = serde_json::json!({
             "Timestamp": unix_now(),
-            "Revision": "1.0.0",
+            "Revision": LOGISTICS_AES_REVISION,
         });
         let (key, iv) = self.logistics_keys();
         self.post_aes_json_raw(

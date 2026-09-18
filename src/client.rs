@@ -25,6 +25,11 @@ pub struct Request {
     pub data: String,
 }
 
+/// The B2C invoice envelope's `RqHeader.Revision` (the B2C service speaks
+/// `3.0.0`; the AES-JSON families in `ecpg`/`logistics`/`invoice_b2b` speak
+/// `1.0.0` — see the constants in those modules).
+pub(crate) const B2C_INVOICE_REVISION: &str = "3.0.0";
+
 /// Go's anonymous `Request.RqHeader` struct.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct RqHeader {
@@ -615,7 +620,7 @@ impl Ecpay {
             merchant_id: self.merchant_id.clone(),
             data,
             rq_header: RqHeader {
-                revision: "3.0.0".to_owned(),
+                revision: B2C_INVOICE_REVISION.to_owned(),
                 timestamp: crate::client::unix_now(),
                 rq_id: String::new(),
             },

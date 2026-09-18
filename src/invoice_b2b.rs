@@ -81,6 +81,11 @@ wire_enum! {
     }
 }
 
+/// The AES-JSON envelope revision the B2B invoice service speaks
+/// (live-pinned 2026-09; B2C invoice speaks `3.0.0` instead — see
+/// [`crate::client::B2C_INVOICE_REVISION`]).
+const B2B_AES_REVISION: &str = "1.0.0";
+
 impl Ecpay {
     /// B2B 的 `MerchantID` 要同時出現在信封與 `Data` 內（見模組文件）。
     /// 帶空值或與 client 的 `merchant_id` 不一致時，ECPay 只會回不帶訊息的
@@ -91,7 +96,7 @@ impl Ecpay {
     }
 
     /// 每個 B2B 端點共用的出網路徑：`Data` 層 `MerchantID` 防呆 → 組
-    /// `RqHeader`（`Timestamp`/`RqID`/`Revision: "1.0.0"`）→
+    /// `RqHeader`（`Timestamp`/`RqID`/`Revision`）→
     /// AES-JSON POST 到 `{b2b_base_url}{action}`。
     async fn b2b_post<I: Serialize, O: DeserializeOwned>(
         &self,
@@ -114,7 +119,7 @@ impl Ecpay {
         let rq_header = serde_json::json!({
             "Timestamp": crate::client::unix_now(),
             "RqID": self.b2b_rq_id.clone(),
-            "Revision": "1.0.0",
+            "Revision": B2B_AES_REVISION,
         });
         let (key, iv) = self.invoice_keys();
         self.post_aes_json(
