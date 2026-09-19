@@ -4,6 +4,27 @@
 
 _非破壞性：_
 
+- **新增 `Ecpay::zeroize_signing_keys()`**:就地清零六組簽章金鑰緩衝區
+  (bytes 歸零、字串截斷),供嵌入端在程序結束前主動清除記憶體中的金鑰
+  材料。刻意做成**顯式**方法而非 `Drop`:對 `Ecpay` 實作 `Drop` 會禁止
+  從結構體搬出欄位(E0509),破壞全庫與 README 的
+  `Ecpay { .., ..Default::default() }` 慣用法。文件如實記載其「盡力而為」
+  邊界(僅清當前緩衝區;clone 各自保有一份;曾重新配置的字串可能有清不到
+  的殘留副本),以及清零後的 client 並未設防(logistics 金鑰會 fallback 到
+  空的 payment 組)。
+- **staging 測試覆蓋補全**:`tests/sandbox_payment.rs`(唯讀的 Big5 對帳
+  下載往返,CI 每次 push 都會重釘「空報表 = `Ok("")`」契約)、B2C 發票
+  三支無狀態查詢(統編/政府字軌/自有字軌)、國內物流 C2C 取消與更新門市
+  (未確認訂單的 judged-rejection 形狀)、物流 v2 取消/更新門市/逆物流的
+  in-band 錯誤形狀;既有 sandbox 測試同步加強斷言(查詢回應須回
+  `AllPayLogisticsID` 與 `LogisticsStatus`、門市清單不得為空、
+  `CreateTestData` 須鑄出 `LogisticsID`、條碼 well-formed 探測不得落入
+  格式錯誤臂、B2B lifecycle 單次取日防跨日、ECPG 成功路徑 print 遮蔽
+  Token/ConsumerInfo)。
+- **CI:新增 `sandbox_payment` 至 sandbox 步驟;`stage_smoke` 改為每月
+  排程自動執行**(不建物流訂單、不消耗字軌,但會在 stage 註冊待付款的
+  checkout 交易——與 `sandbox_ecpg` 同類的殘留),`stage_probes` 因會建立
+  真實 stage 紀錄、消耗字軌,維持僅手動 `workflow_dispatch` 觸發。
 - **回呼解碼器的 `TransCode != 1` 錯誤不再原樣攜帶伺服器回傳的
   `TransMsg`**：`decrypt_ecpg_callback` / `decrypt_logistics_callback` /
   `decrypt_temp_trade_established` 的 TransCode 閘門只需要一個 `TransCode`

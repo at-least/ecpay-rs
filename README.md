@@ -420,26 +420,27 @@ submodule 只有 `.claude/skills/ecpay`(官方 ECPay-API-Skill,供 Claude Code
 
 `cargo test` 預設**完全離線**:打真實 ECPay stage 的套件
 (`tests/sandbox.rs`、`tests/sandbox_b2b.rs`、`tests/sandbox_logistics.rs`、
-`tests/sandbox_ecpg.rs`、`tests/stage_smoke.rs`,以及探測用的
-`tests/stage_probes.rs`)全部 `#[ignore]`,離線環境不會失敗。需要端對端
-驗證時以 `-- --ignored` 明確執行(公開測試特店 2000132/3002607,需對外
-網路;每次執行會在 stage 建立真實沙盒資料——例如物流訂單,套件不會取消
-它們;`sandbox_ecpg` 不會驅動任何付款,但 `GetTokenbyTrade` 取號會在
-stage 留下未付款的交易與 Token(不清理)——CI 的
+`tests/sandbox_ecpg.rs`、`tests/sandbox_payment.rs`、`tests/stage_smoke.rs`,
+以及探測用的 `tests/stage_probes.rs`)全部 `#[ignore]`,離線環境不會失敗。
+需要端對端驗證時以 `-- --ignored` 明確執行(公開測試特店 2000132/3002607,
+需對外網路;每次執行會在 stage 建立真實沙盒資料——例如物流訂單,套件不會
+取消它們;`sandbox_ecpg` 不會驅動任何付款,但 `GetTokenbyTrade` 取號會在
+stage 留下未付款的交易與 Token(不清理);`sandbox_b2b` 每次消耗一個
+stage 字軌號——CI 的
 `cargo test --test sandbox … -- --ignored` 步驟即以此做端對端驗證):
 
 ```bash
-cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics --test sandbox_ecpg -- --ignored
+cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics --test sandbox_ecpg --test sandbox_payment -- --ignored
 cargo test --test stage_smoke -- --ignored --nocapture          # 煙霧
 cargo test --test stage_probes -- --ignored --test-threads=1    # 探測(手動)
 ```
 
-`stage_smoke`/`stage_probes` 不在 CI 的自動步驟裡(探測會建立真實 stage
-紀錄、消耗字軌),但可在 GitHub Actions 以 **Run workflow** 手動觸發整個
-workflow(dispatch 事件會執行全部 job,含離線測試;`stage-manual` job 帶
-`if: github.event_name == 'workflow_dispatch'`,push/PR 不會跑到)——
-它執行 `stage_smoke` 與 `stage_probes`,避免這兩個套件的 stage parity
-無人執行而腐化。
+`stage_smoke`(AIO 煙霧——不建物流訂單、不消耗字軌,但會在 stage 註冊待
+付款的 checkout 交易)已在 CI 以**每月排程**自動執行,也可手動
+**Run workflow** 觸發。`stage_probes` 會建立真實 stage
+紀錄、消耗字軌,維持僅手動觸發(Actions tab -> CI -> Run workflow;
+`stage-manual` job 帶 `if: github.event_name == 'workflow_dispatch'`,
+push/PR/排程不會跑到)。
 
 `tests/fixtures/python_sdk_vectors.json` 由「真的」官方 Python SDK 執行產生
 (`requests` 以 stub 取代;產生腳本 `gen_vectors.py` 同目錄),重新產生方式見

@@ -27,8 +27,10 @@ use ecpay::{
     AllowanceByCollegiateInput, AllowanceInput, AllowanceInvalidByCollegiateInput,
     AllowanceInvalidInput, AllowanceItem, CancelDelayIssueInput, CheckBarcodeInput,
     CheckLoveCodeInput, DelayIssueInput, Ecpay, Error, GetAllowanceInput, GetAllowanceInvalidInput,
-    GetInvalidInput, GetIssueInput, InvalidInput, IssueInput, IssueModel, Item, TriggerIssueInput,
-    VoidModel, VoidWithReIssueInput, INVOICE_API_URL_STAGE, PAYMENT_API_URL_STAGE,
+    GetCompanyNameByTaxIDInput, GetGovInvoiceWordSettingInput, GetInvalidInput,
+    GetInvoiceWordSettingInput, GetIssueInput, InvalidInput, IssueInput, IssueModel, Item,
+    TriggerIssueInput, VoidModel, VoidWithReIssueInput, INVOICE_API_URL_STAGE,
+    PAYMENT_API_URL_STAGE,
 };
 
 fn stage_client() -> Ecpay {
@@ -837,4 +839,67 @@ async fn issue_then_void_with_reissue_roundtrip() {
     // 沙盒實測(2026-09):立刻作廢會得到 ECPay 5070451「註銷重開的發票請於
     // 上傳財政部狀態更新後，再嘗試作廢」——這是 ECPay 端的非同步批次上傳
     // 限制，不是本函式庫能控制的時序，故此處刻意省略清理。
+}
+
+/// The three stateless B2C query APIs had no live coverage; each is a
+/// signed AES-envelope round-trip that never creates data. Query semantics
+/// (see the method docs): a non-1 RtnCode is a normal result — the pinned
+/// contract is "the envelope round-trips and the answer decodes + carries a
+/// judged RtnCode", not specific business data.
+#[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
+async fn invoice_stateless_queries_round_trip() {
+    let client = stage_client();
+
+    // 統一編號查詢: the sample buyer UB used across this suite; whether
+    // stage knows the name is server state (RtnCode 1 = found).
+    let company = client
+        .get_company_name_by_tax_id(&GetCompanyNameByTaxIDInput {
+            merchant_id: "2000132".into(),
+            unified_business_no: "23165448".into(),
+        })
+        .await
+        .expect("GetCompanyNameByTaxID decodes");
+    println!("company = {company:?}");
+    assert!(
+        company.rtn_code != 0,
+        "a judged answer, not a decode failure: {company:?}"
+    );
+
+    // 自有字軌使用狀態: this account issues live invoices in this very
+    // suite, so its year-115 word settings exist (term 0 = 全部, status
+    // 0 = 全部, category 1 = B2C).
+    let words = client
+        .get_invoice_word_setting(&GetInvoiceWordSettingInput {
+            merchant_id: "2000132".into(),
+            invoice_year: "115".into(),
+            invoice_term: 0,
+            use_status: 0,
+            invoice_category: 1,
+            inv_type: ecpay::invoice::InvType::General,
+            invoice_header: String::new(),
+        })
+        .await
+        .expect("GetInvoiceWordSetting decodes");
+    println!("word settings = {} records", words.invoice_info.len());
+    assert_eq!(words.rtn_code, 1, "RtnMsg={:?}", words.rtn_msg);
+    assert!(
+        !words.invoice_info.is_empty(),
+        "the issuing account must have word settings"
+    );
+
+    // 政府字軌設定: same year; the allocation list MAY be empty (server
+    // state) — pin decode + judged RtnCode only.
+    let gov = client
+        .get_gov_invoice_word_setting(&GetGovInvoiceWordSettingInput {
+            merchant_id: "2000132".into(),
+            invoice_year: "115".into(),
+        })
+        .await
+        .expect("GetGovInvoiceWordSetting decodes");
+    println!("gov word settings = {} records", gov.invoice_info.len());
+    assert!(
+        gov.rtn_code != 0,
+        "a judged answer, not a decode failure: {gov:?}"
+    );
 }

@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Monthly AIO smoke (see the stage-smoke job): no logistics orders or
+  # 字軌 consumed (it does register pending checkout trades on the stage
+  # account — the same residue class as sandbox_ecpg). Note the `test` job
+  # also runs on schedule — its sandbox suites burn one B2B 字軌 number per
+  # run; this is the accepted cadence.
+  schedule:
+    - cron: "0 18 4 * *" # monthly, 4th 18:00 UTC (= 台灣時間 5 日 02:00)
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,11 +30,12 @@ jobs:
       # Fully offline: every live-stage suite is #[ignore]d.
       - run: cargo test --all-targets
       # Live E2E against ECPay's stage server (public test accounts): the
-      # four sandbox suites, via -- --ignored, at the default parallelism the
-      # first three always ran at (sandbox_ecpg's unique_no carries a
-      # per-process counter; its 5 tests were verified in a parallel run).
-      # stage_smoke / stage_probes stay a manual run (see README).
-      - run: cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics --test sandbox_ecpg -- --ignored
+      # five sandbox suites, via -- --ignored, at the default parallelism the
+      # first four always ran at (sandbox_ecpg's unique_no carries a
+      # per-process counter; its tests were verified in a parallel run).
+      # stage_smoke (AIO smoke) and stage_probes (record-creating probes)
+      # stay in their own jobs below.
+      - run: cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics --test sandbox_ecpg --test sandbox_payment -- --ignored
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
@@ -47,12 +55,22 @@ jobs:
           tool: cargo-audit
       - run: cargo generate-lockfile
       - run: cargo audit
-  # The remaining live suites (stage_smoke / stage_probes) stay OUT of the
-  # automatic runs: they print raw server answers and the probes create
-  # REAL stage-side records (logistics orders, B2B invoices consuming 字軌
-  # numbers, never cancelled). They run ONLY on a manual workflow_dispatch
-  # (Actions tab -> CI -> Run workflow; the `if:` below skips this job on
-  # push/PR events), so their stage parity cannot silently rot either.
+  # The AIO smoke answers queries and registers pending checkout trades on
+  # the stage account (no logistics orders, no 字軌 consumed), so it also
+  # runs on the monthly schedule, keeping its stage parity from rotting
+  # between manual runs.
+  stage-smoke:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --test stage_smoke -- --ignored --nocapture
+  # The probes print raw server answers AND create REAL stage-side records
+  # (logistics orders, B2B invoices consuming 字軌 numbers, never cancelled),
+  # so they run ONLY on a manual workflow_dispatch (Actions tab -> CI ->
+  # Run workflow; the `if:` below skips this job on push/PR/schedule events).
   stage-manual:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -61,5 +79,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # Probes must run serially (see tests/stage_probes.rs header).
-      - run: cargo test --test stage_smoke -- --ignored --nocapture
       - run: cargo test --test stage_probes -- --ignored --test-threads=1 --nocapture

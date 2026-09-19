@@ -9,8 +9,9 @@
 //! B2C CVS order.
 
 use ecpay::logistics::{
-    AllInOneCreateTestDataInput, AllInOneQueryInput, CrossBorderCreateTestDataInput,
-    DomesticQueryInput, GetStoreListInput, LogisticsCreateInput,
+    AllInOneCancelC2cInput, AllInOneCreateTestDataInput, AllInOneQueryInput,
+    AllInOneUpdateStoreInfoInput, CancelC2cInput, CrossBorderCreateTestDataInput,
+    DomesticQueryInput, GetStoreListInput, LogisticsCreateInput, UpdateStoreInfoInput,
 };
 use ecpay::Ecpay;
 mod common;
@@ -165,6 +166,77 @@ async fn domestic_create_update_shipment_query_chain() {
     );
 }
 
+/// C2C 取消/更新門市 need the store-confirmation codes (CVSPaymentNo/
+/// CVSValidationNo) that only exist after the consumer completes store
+/// selection. An OTP order that never confirmed cannot provide them, so
+/// these pin the SIGNED REQUEST + judged-rejection shape with placeholder
+/// codes: what must NOT happen is a MAC error, a local panic, or a local
+/// validation error — the server must decode and judge the request.
+/// (The exact stage rejection text is deliberately not pinned; the update
+/// test captured `0|資料處理中…` for the same flow position.)
+async fn judged_rejection_of_unconfirmed_c2c(
+    client: &Ecpay,
+    logistics_id: String,
+) -> (String, String) {
+    let cancel = client
+        .logistics_cancel_c2c_order(&CancelC2cInput {
+            all_pay_logistics_id: logistics_id.clone(),
+            cvs_payment_no: "F0012345".into(),
+            cvs_validation_no: "1234".into(),
+        })
+        .await;
+    match &cancel {
+        Ok(v) => assert!(v.contains_key("RtnCode"), "decoded query: {v:?}"),
+        Err(ecpay::Error::Message(m)) => assert!(!m.trim().is_empty(), "protocol text: {m}"),
+        Err(e) => panic!("cancel must be judged by the server, got: {e:?}"),
+    }
+    let update_store = client
+        .logistics_update_store_info(&UpdateStoreInfoInput {
+            all_pay_logistics_id: logistics_id.clone(),
+            cvs_payment_no: "F0012345".into(),
+            cvs_validation_no: "1234".into(),
+            store_type: "01".into(),
+            receiver_store_id: "006598".into(),
+        })
+        .await;
+    match &update_store {
+        Ok(v) => assert!(v.contains_key("RtnCode"), "decoded query: {v:?}"),
+        Err(ecpay::Error::Message(m)) => assert!(!m.trim().is_empty(), "protocol text: {m}"),
+        Err(e) => panic!("update store must be judged by the server, got: {e:?}"),
+    }
+    (format!("{cancel:?}"), format!("{update_store:?}"))
+}
+
+#[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
+async fn cancel_and_update_store_on_unconfirmed_order_are_judged() {
+    let client = sdk();
+    let created = client
+        .logistics_create(&LogisticsCreateInput {
+            merchant_trade_no: unique_no("SBXC"),
+            merchant_trade_date: taipei_now(),
+            logistics_type: "CVS".into(),
+            logistics_sub_type: "FAMI".into(),
+            goods_amount: 100,
+            goods_name: "綠界 SDK 範例商品".into(),
+            sender_name: "陳大明".into(),
+            sender_cell_phone: "0911222333".into(),
+            receiver_name: "王小美".into(),
+            receiver_cell_phone: "0933222111".into(),
+            receiver_store_id: Some("006598".into()),
+            // Stage-only receiver — see the server_reply_url note above.
+            server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("create");
+    assert_eq!(created["RtnCode"], "300");
+    let (cancel, update_store) =
+        judged_rejection_of_unconfirmed_c2c(&client, created["AllPayLogisticsID"].clone()).await;
+    println!("cancel = {cancel}");
+    println!("update store = {update_store}");
+}
+
 #[tokio::test]
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn get_store_list_answers_json() {
@@ -208,6 +280,49 @@ async fn allinone_v2_endpoints_answer_with_the_aes_envelope() {
         out["LogisticsID"].as_str().is_some_and(|s| !s.is_empty()),
         "CreateTestData must mint a LogisticsID: {out}"
     );
+    let logistics_id = out["LogisticsID"].as_str().unwrap().to_owned();
+
+    // The C2C mutation endpoints on the minted TEST order: the disposable
+    // test order carries no store-confirmation codes, so these answer the
+    // in-band business shape (integer RtnCode) rather than success — and if
+    // stage ever DID accept one, both actions are no-ops/cleanup on the
+    // disposable order itself. (ReturnCVS is deliberately NOT driven here:
+    // a successful return MINTS a new stage-side return order — record-
+    // creating flows stay in the manual stage_probes.) The exact rejection
+    // code is server state, not pinned.
+    for (name, out) in [
+        (
+            "cancel",
+            client
+                .allinone_cancel_c2c_order(&AllInOneCancelC2cInput {
+                    merchant_id: MERCHANT_ID.into(),
+                    logistics_id: logistics_id.clone(),
+                    cvs_payment_no: "F0012345".into(),
+                    cvs_validation_no: "1234".into(),
+                })
+                .await,
+        ),
+        (
+            "update store",
+            client
+                .allinone_update_store_info(&AllInOneUpdateStoreInfoInput {
+                    merchant_id: MERCHANT_ID.into(),
+                    logistics_id: logistics_id.clone(),
+                    cvs_payment_no: "F0012345".into(),
+                    cvs_validation_no: "1234".into(),
+                    store_type: "01".into(),
+                    receiver_store_id: "006598".into(),
+                })
+                .await,
+        ),
+    ] {
+        let v = out.expect("v2 envelope decodes (TransCode gate)");
+        println!("{name} on the test order = {v:?}");
+        assert!(
+            v.get("RtnCode").is_some(),
+            "{name}: in-band integer RtnCode required: {v}"
+        );
+    }
 
     // Query with a not-yet-existing logistics id: the server answers HTTP 500
     // with a VALID envelope (captured live 2026-09) whose Data carries the
