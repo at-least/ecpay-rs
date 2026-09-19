@@ -54,6 +54,9 @@ PHP SDK 範例與 staging 實測補齊 B2C/B2B 電子發票、ECPG 站內付 2.0
   非 `Option` 型別;空值/長度以官方 SDK 同款訊息在執行期驗證),另有
   `extra: BTreeMap<String, String>` 收容未模型化的新參數;
   低階的 `hash_mac` / `check_mac_value` / `call_payment_api` 也直接公開。
+- **金鑰記憶體清除**: `Ecpay::zeroize_signing_keys()` 就地清零六組簽章
+  金鑰緩衝(顯式呼叫——自動 zeroize-on-drop 與 `..Default::default()`
+  慣用法不相容,盡力而為的邊界見方法文件)。
 
 ## 安裝
 
@@ -237,6 +240,7 @@ let client = Ecpay {
 | —(比對 `ECPay/SDK_PHP` 後新增) | **ECPG 站內付 2.0**(`ecpay::ecpg`):`get_token_by_trade`、`create_payment`、綁卡 6 支、查詢/請款動作 6 支,共 14 支 |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **物流**(`ecpay::logistics`):國內 9 支 MD5 form API + 5 種瀏覽器表單、全方位物流 v2 13 支、跨境 4 支 + 表單,含 MD5 回呼驗證與 AES 回呼解密 |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **B2B 電子發票**(`ecpay::invoice_b2b`):開立/折讓/作廢/拒收/通知/客戶資料/字軌與全部查詢,共 23 支 |
+| —(金流安全強化) | `Ecpay::zeroize_signing_keys`:就地清零六組簽章金鑰緩衝(顯式呼叫;自動 zeroize-on-drop 與 `..Default::default()` 慣用法不相容,盡力而為的邊界見方法文件) |
 
 **平台商(`PlatformID`)模式的支援範圍**:AIO 金流
 (`AioCheckOutParams::platform_id`)與 B2C 電子發票(`Ecpay::platform_id`
@@ -493,6 +497,10 @@ logistics families (domestic, AllInOne v2, cross-border). MIT licensed.
 - **Typed API with an escape hatch**: required fields are non-`Option`
   (validated at runtime with the official SDK's messages),
   unknown/new ECPay params ride in `extra: BTreeMap<String, String>`.
+- **Key-material scrubbing**: `Ecpay::zeroize_signing_keys()` zeroes the
+  six signing-key buffers in place (an explicit call — automatic
+  zeroize-on-drop is incompatible with the `..Default::default()`
+  construction idiom; best-effort caveats in the method docs).
 
 ## Quick start
 
@@ -549,6 +557,22 @@ confirming this crate follows ECPay's backend):
 
 `AioCheckOut::html_form` also HTML-escapes attribute values (the upstream
 form breaks on `"` and is an injection vector).
+
+## Testing
+
+`cargo test` is fully offline by default: the live-stage suites — five
+`sandbox_*` suites plus `stage_smoke` (AIO smoke, scheduled monthly in CI)
+and `stage_probes` (record-creating, manual only) — are all `#[ignore]`d and
+hit ECPay's stage server with the public test accounts only when invoked
+with `-- --ignored`. CI runs the five sandbox suites on every push, which
+consumes one stage 字軌 number per push (sandbox_b2b) and leaves disposable
+sandbox records behind. The full staging walkthrough (what each suite does,
+what residue it leaves, every pinned server truth) is in the Chinese section
+above.
+
+Key material can be scrubbed from memory explicitly via
+`client.zeroize_signing_keys()` — see the method docs for the deliberate
+best-effort caveats.
 
 ## License
 
