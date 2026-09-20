@@ -164,7 +164,11 @@ pub struct AioCheckOutParams {
 
     /// Escape hatch for parameters this SDK version does not model yet
     /// (ECPay adds fields over time). These are signed and sent as-is; a key
-    /// colliding with a modeled field is a validation error.
+    /// colliding with a field this request already carries is a validation
+    /// error. The check is against the built wire map, so e.g.
+    /// `RelateNumber` collides only when an `invoice` block is present —
+    /// without one, an `extra` RelateNumber is the only one sent and is
+    /// accepted.
     pub extra: BTreeMap<String, String>,
 }
 

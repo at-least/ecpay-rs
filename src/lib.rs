@@ -339,10 +339,15 @@ impl Ecpay {
     /// ⚠ **Best effort, not a guarantee**: only the CURRENT buffers are
     /// scrubbed — `Ecpay` is `Clone`, so every clone keeps its own live
     /// copy (zeroize each clone too), and a `String` that ever reallocated
-    /// may leave stale heap copies this cannot reach. Also note a zeroized
-    /// client is not defensively unusable: `logistics_keys()` falls back to
-    /// the (now empty) payment pair, so reusing it signs with an empty key
-    /// and ships a MAC the server will reject. Zeroize, then drop.
+    /// may leave stale heap copies this cannot reach. Beyond the fields,
+    /// every signing/verification call builds transient unzeroed buffers
+    /// that contain key bytes (the CheckMacValue preimage and its
+    /// url-encoded copy, AES/base64 work buffers) — inherent to the
+    /// string-based protocol and unreachable from here. Also note a
+    /// zeroized client is not defensively unusable: `logistics_keys()`
+    /// falls back to the (now empty) payment pair, so reusing it signs
+    /// with an empty key and ships a MAC the server will reject. Zeroize,
+    /// then drop.
     pub fn zeroize_signing_keys(&mut self) {
         use zeroize::Zeroize;
         self.hash_key.zeroize();

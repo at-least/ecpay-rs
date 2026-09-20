@@ -226,9 +226,12 @@ pub fn hash_mac(params: &HashMap<String, String>, hash_key: &str, hash_iv: &str)
 /// constant-time compare against `got`, upper-casing the inbound value
 /// defensively (ECPay sends uppercase, but a received value's case isn't a
 /// signal worth failing on). Empty `got` verifies as `false`;
-/// `encrypt_type` is chosen by the caller (payment responses derive it from
-/// the response's `EncryptType`, logistics hardcodes MD5, the AIO
-/// callback verifies SHA-256 only).
+/// `encrypt_type` is chosen by the caller — **never** by the verified
+/// message itself (a verifier must not take its algorithm selector from
+/// the very message it is verifying): payment query responses verify with
+/// the digest the REQUEST was signed under (`post_cmv_verified` reads the
+/// request's `EncryptType`, defaulting to SHA-256), logistics hardcodes
+/// MD5, the AIO callback verifies SHA-256 only.
 pub(crate) fn verify_mac<'a>(
     got: &str,
     params: impl IntoIterator<Item = (&'a str, &'a str)>,

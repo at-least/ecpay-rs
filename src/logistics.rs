@@ -1269,6 +1269,8 @@ impl Ecpay {
     /// 交易記錄(MD5 CheckMacValue)並自動 POST 到
     /// `Helper/PrintTradeDocument` 顯示列印頁 —— 不是 AES 信封。把回傳的
     /// HTML 原文輸出給瀏覽器即可(官方 PHP `echo $response['body']`)。
+    /// 這是綠界產出的 HTML;不想讓它直接跑在你的頁面 origin 時,以
+    /// sandboxed `<iframe sandbox="allow-scripts allow-forms">` 呈現。
     pub async fn allinone_print_trade_document(
         &self,
         input: &AllInOnePrintTradeDocumentInput,
@@ -1287,7 +1289,9 @@ impl Ecpay {
     /// `Express/v2/LogisticsSelection` —— 不是 AES 信封。把回傳的 HTML
     /// 原文輸出給瀏覽器;消費者選完門市後,結果以 `TempTradeEstablished`
     /// 形式 POST 到 `ClientReplyURL`(見
-    /// [`Self::decrypt_temp_trade_established`])。
+    /// [`Self::decrypt_temp_trade_established`])。同
+    /// [`Self::allinone_print_trade_document`]:需要隔離時以 sandboxed
+    /// `<iframe>` 呈現(自動提交表單需 `allow-scripts allow-forms`)。
     pub async fn allinone_redirect_to_logistics_selection(
         &self,
         input: &AllInOneRedirectInput,
