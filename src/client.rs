@@ -774,16 +774,14 @@ pub(crate) fn body_excerpt(body: &str) -> String {
 pub(crate) fn truncate_for_display(body: &str) -> String {
     let mut chars = body.chars();
     let mut head = String::with_capacity(BODY_EXCERPT_CHARS);
-    let mut taken = 0usize;
     let mut truncated = false;
-    for c in chars.by_ref() {
-        if taken >= BODY_EXCERPT_CHARS {
+    for (i, c) in chars.by_ref().enumerate() {
+        if i >= BODY_EXCERPT_CHARS {
             // The char that tripped the cap was already consumed by the
             // loop, so it will never reach `chars.next()` — flag it here.
             truncated = true;
             break;
         }
-        taken += 1;
         if c.is_control() {
             head.extend(c.escape_debug());
         } else {
