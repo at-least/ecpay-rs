@@ -594,14 +594,16 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
     let (st, ack) = post_json(&format!("{merchant_url}server-reply"), notify.to_string()).await;
     assert_eq!(st, 200);
     let ack_env: serde_json::Value = serde_json::from_str(&ack).unwrap();
-    assert_eq!(ack_env["TransCode"], "1");
+    // Ack types follow the receiver's contract (developers.ecpay.com.tw/
+    // 10127.md 特店Response): TransCode Int, Data RtnCode Int.
+    assert_eq!(ack_env["TransCode"], serde_json::json!(1));
     let ack_data: serde_json::Value = ecpay::crypto::decrypt_data(
         ack_env["Data"].as_str().unwrap(),
         LOG_KEY.as_bytes(),
         LOG_IV.as_bytes(),
     )
     .unwrap();
-    assert_eq!(ack_data["RtnCode"], "1", "encrypted ack accepted");
+    assert_eq!(ack_data["RtnCode"], serde_json::json!(1), "encrypted ack accepted");
 
     // 4. Query shows the delivered status.
     let info = client

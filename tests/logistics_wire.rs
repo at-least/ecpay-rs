@@ -805,18 +805,21 @@ async fn logistics_callback_helpers_roundtrip() {
 
     let reply = sdk.logistics_notify_reply().expect("reply builds");
     let reply_env: serde_json::Value = serde_json::from_str(&reply).unwrap();
-    // The official SDK's own ack example (PHP LogisticsStatusNotify.php)
-    // sends TransCode and the ack RtnCode as JSON STRINGS "1" — that primary
-    // source wins over the skill-guide snippet showing integers (unproven
-    // against the receiver; review 2026-09).
-    assert_eq!(reply_env["TransCode"], "1");
+    // The official receiver's contract (developers.ecpay.com.tw/10127.md,
+    // 物流狀態(貨態)通知 — 特店Response參數說明, fetched 2026-09) types the
+    // ack TransCode **Int** and the Data RtnCode **Int** ("1 代表 API 傳輸
+    // 資料接收成功"), with the example body carrying `"TransCode": 1`. That
+    // beats the PHP SDK example's string form (LogisticsStatusNotify.php
+    // sends `'TransCode' => '1'`); the AI-skill guide's ack snippets agree
+    // with the spec.
+    assert_eq!(reply_env["TransCode"], serde_json::json!(1));
     let reply_data: serde_json::Value = ecpay::crypto::decrypt_data(
         reply_env["Data"].as_str().unwrap(),
         LOGISTICS_KEY.as_bytes(),
         LOGISTICS_IV.as_bytes(),
     )
     .unwrap();
-    assert_eq!(reply_data["RtnCode"], "1");
+    assert_eq!(reply_data["RtnCode"], serde_json::json!(1));
 
     // TempTradeEstablished: form POST's ResultData field is the AES envelope,
     // urlencoded like any form value (+ for spaces is not enough — %XX for

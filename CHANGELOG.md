@@ -102,14 +102,18 @@ _非破壞性：_
   釘死，重構全程綠。padding 分支測試由公開 `decrypt` API 驅動
   （`tests/crypto.rs` 既有 raw-CBC helper）；原先直測內部 `unpad_pkcs7`
   的單元測試隨之移除（其契約已由公開 API 測試覆蓋）。
-- **`logistics_notify_reply` 的 ack 格式調查記錄**（全庫審查 🟡）：兩個
+- **`logistics_notify_reply` 的 ack 型別改從接收端規格：字串 `"1"` →
+  整數 `1`**（程式碼審查 🟢，推翻全庫審查 2026-09 的字串選擇）：兩個
   官方來源對全方位物流 v2 狀態通知應答體的 `TransCode`/`RtnCode` 型別
   **互相矛盾**——官方 PHP SDK 的出貨範例
   (`LogisticsStatusNotify.php`)送字串 `"1"`，官方 AI-skill 指南片段送
-  整數 `1`，且無 stage 探測能證實接收端的嚴格度。本 crate 維持與官方
-  SDK 出貨程式碼一致的**字串形式**（wire 不變），docstring 與測試註解
-  記錄衝突來源與後續動作（上線觀察到 ack 被重送時，先對 stage 探測
-  整數形式是否被接受）。
+  整數 `1`。程式碼審查補抓**接收端自己的規格頁**
+  (developers.ecpay.com.tw/10127.md，物流狀態(貨態)通知，
+  特店Response參數說明，2026-09)：`TransCode` 與 Data 內 `RtnCode`
+  皆型別為 **Int**（「1 代表 API 傳輸資料接收成功」），範例 body 即
+  `"TransCode": 1`——規格壓過 SDK 範例。同頁規格的 Response 信封寫
+  `RpHeader`，SDK 範例與本函式送 `RqHeader`，鍵名矛盾維持 SDK 形式並
+  記錄於 docstring（上線觀察到 ack 被重送時連同鍵名一併以 stage 探測）。
 - 文件補強（全庫審查 🟡/🟢）：README「API 一覽」精確列出平台商
   （`PlatformID`）模式的缺口——AIO 與 B2C 發票支援帶入 PlatformID；ECPG/
   物流 v2/

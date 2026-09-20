@@ -937,26 +937,33 @@ impl Ecpay {
     }
 
     /// 全方位物流 v2 狀態通知的應答體:綠界要求以同格式(AES 加密 JSON)
-    /// 回 `{"RtnCode":"1","RtnMsg":""}`,否則視為失敗重發。回傳值即
-    /// HTTP response body(Content-Type: application/json)。
+    /// 回 `{"RtnCode":1,"RtnMsg":""}`,否則視為失敗重發(重發間隔 60 分鐘)。
+    /// 回傳值即 HTTP response body(Content-Type: application/json)。
     ///
-    /// `TransCode` 與 Data 內的 `RtnCode` 以**字串** `"1"` 上 wire——這是
-    /// 官方 PHP SDK 的出貨範例(`LogisticsStatusNotify.php`)所用的形式。
-    /// 官方 AI-skill 指南的片段寫的是整數 `1`,兩個來源矛盾,
-    /// 而無 stage 探測能證實接收端的嚴格度;本 crate 從主要來源(官方
-    /// SDK 的出貨程式碼)。若上線後觀察到 ack 被重送,先以 stage 探測整數
-    /// 形式是否被接受(全庫審查 2026-09 的調查記錄)。
+    /// `TransCode` 與 Data 內的 `RtnCode` 以**整數** `1` 上 wire——這是
+    /// 接收端自己的契約:官方規格頁(developers.ecpay.com.tw/10127.md,
+    /// 物流狀態(貨態)通知,特店Response參數說明,2026-09 抓取)把兩者都
+    /// 型別為 **Int**("1 代表 API 傳輸資料接收成功"),範例 body 即
+    /// `"TransCode": 1`;官方 AI-skill 指南的三語言應答範例同樣是整數。
+    /// 官方 PHP SDK 的出貨範例(`LogisticsStatusNotify.php`)送的是字串
+    /// `"1"`,與規格相悖——全庫審查(2026-09)曾從字串形式,程式碼審查
+    /// 補抓規格頁後改從接收端規格。
+    ///
+    /// ⚠ 同頁規格的 Response 信封寫的是 `RpHeader`,而官方 PHP SDK 範例與
+    /// 本函式送的是 `RqHeader`(指南明言「依 SDK 範例使用 RqHeader(非
+    /// RpHeader)」)——規格與 SDK 在這個鍵名上同樣矛盾,維持 SDK 形式;
+    /// 若上線後觀察到 ack 被重送,連同鍵名一併以 stage 探測。
     pub fn logistics_notify_reply(&self) -> Result<String> {
         let (key, iv) = self.logistics_keys();
         let data = crate::crypto::encrypt_data(
-            &serde_json::json!({"RtnCode": "1", "RtnMsg": ""}),
+            &serde_json::json!({"RtnCode": 1, "RtnMsg": ""}),
             key.as_bytes(),
             iv.as_bytes(),
         )?;
         Ok(serde_json::json!({
             "MerchantID": self.merchant_id,
             "RqHeader": {"Timestamp": unix_now()},
-            "TransCode": "1",
+            "TransCode": 1,
             "TransMsg": "",
             "Data": data,
         })
