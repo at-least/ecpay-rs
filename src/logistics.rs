@@ -153,21 +153,27 @@ impl Ecpay {
         // Server-truth (2026-09): business errors arrive as a SHORT UNSIGNED
         // string after the status prefix (`0|ReceiverStoreID Is Null`,
         // `0|TimeStamp Is Expired` on HTTP 200; `0|找不到訂單`,
-        // `0|CheckMacValue驗證錯誤` on HTTP 500) — no '=' anywhere, so it never
-        // parses as a query. It is the protocol's own error shape, so surface
-        // it verbatim on any HTTP status, before the non-2xx gate below.
-        // Known heuristic edge (not observed live): a status-prefixed error
-        // whose message DID contain '=' (e.g. `0|The parameter [X]=required`)
-        // would fall through to the query parse + MAC check below and surface
-        // as a misleading `CheckMacValueMismatch` instead of this protocol
-        // error — the same deliberate trade documented on
-        // [`split_status_prefix`].
-        if status.is_some() && !query.contains('=') {
-            let status = status.unwrap_or_default();
-            return Err(Error::Message(format!(
-                "ecpay logistics: status {status}: {}",
-                truncate_for_display(query.trim())
-            )));
+        // `0|CheckMacValue驗證錯誤` on HTTP 500) — it is the protocol's own
+        // error shape, so surface it verbatim on any HTTP status, before the
+        // non-2xx gate below. The discriminator is NOT "no '=' in the body"
+        // (ECPay parameter errors like `0|The parameter [X]=required` do
+        // contain '=') but "no usable CheckMacValue and no RtnCode key":
+        // anything that looks like a signed query — a non-empty
+        // CheckMacValue, or an RtnCode-bearing query (whose missing/empty
+        // MAC is an integrity failure, not a protocol message) — falls
+        // through to the query parse + MAC check below.
+        if let Some(status) = &status {
+            let fields = crate::client::parse_qsl(query);
+            let looks_like_a_signed_query = fields
+                .get("CheckMacValue")
+                .is_some_and(|v| !v.is_empty())
+                || fields.contains_key("RtnCode");
+            if !looks_like_a_signed_query {
+                return Err(Error::Message(format!(
+                    "ecpay logistics: status {status}: {}",
+                    truncate_for_display(query.trim())
+                )));
+            }
         }
         if !(200..300).contains(&http_status) {
             return Err(Error::HttpStatus {

@@ -200,6 +200,72 @@ async fn status_prefixed_rejections_share_one_shape_on_any_http_status() {
     }
 }
 
+/// A status-prefixed rejection whose MESSAGE contains '=' (the former code
+/// documented this shape as a not-observed-live heuristic edge; ECPay's
+/// parameter errors elsewhere use the `The parameter [X]=required`
+/// phrasing) must still surface as the protocol's own `Error::Message` —
+/// not as `Error::CheckMacValueMismatch`, which would send the merchant
+/// chasing a key/config corruption for a body whose MAC was never even
+/// checked. The precise discriminator is not "no '=' in the body" but "no
+/// usable CheckMacValue and no RtnCode key": a query-shaped body carrying
+/// `RtnCode` without a (non-empty) CheckMacValue IS an unsigned
+/// signed-query and stays a `CheckMacValueMismatch` — pinned too,
+/// including the present-but-empty `CheckMacValue=` shape.
+#[tokio::test]
+async fn status_prefixed_error_message_containing_equals_is_not_a_mac_mismatch() {
+    let server = spawn_http_server(move |_path, _body| {
+        (
+            200,
+            "text/html; charset=utf-8".into(),
+            "0|The parameter [ReceiverStoreID]=required".as_bytes().to_vec(),
+        )
+    });
+    let err = logistics_sdk(server)
+        .logistics_query_logistics_trade_info(&DomesticQueryInput {
+            all_pay_logistics_id: "1".into(),
+            time_stamp: None,
+        })
+        .await
+        .expect_err("a 0| rejection must fail");
+    match &err {
+        ecpay::Error::Message(m) => {
+            assert!(
+                m.contains("The parameter [ReceiverStoreID]=required"),
+                "the server's message must surface verbatim: {m}"
+            );
+        }
+        other => panic!("expected Error::Message, got {other:?}"),
+    }
+
+    // Query-shaped bodies are a different thing: an unsigned signed-query
+    // (RtnCode present, CheckMacValue absent or empty) is an integrity
+    // failure and must stay CheckMacValueMismatch.
+    for body in [
+        "1|RtnCode=300&AllPayLogisticsID=1",
+        "1|RtnCode=300&CheckMacValue=",
+    ] {
+        let payload = body.to_owned();
+        let server = spawn_http_server(move |_path, _body| {
+            (
+                200,
+                "text/html; charset=utf-8".into(),
+                payload.clone().into_bytes(),
+            )
+        });
+        let err = logistics_sdk(server)
+            .logistics_query_logistics_trade_info(&DomesticQueryInput {
+                all_pay_logistics_id: "1".into(),
+                time_stamp: None,
+            })
+            .await
+            .expect_err("an unsigned query must fail");
+        assert!(
+            matches!(err, ecpay::Error::CheckMacValueMismatch),
+            "{body}: expected CheckMacValueMismatch, got {err:?}"
+        );
+    }
+}
+
 /// A real envelope whose TransCode is literally 0 (ECPay's 查無資料 shape)
 /// IS an envelope — the gate keys on the presence of the `TransCode` key,
 /// not its value — so it surfaces as `Error::TransCode{code:0}` on a 2xx

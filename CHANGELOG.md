@@ -4,6 +4,17 @@
 
 _非破壞性：_
 
+- **國內物流的協定錯誤判別不再依賴 `=` 啟發式**(程式碼審查 🟢):
+  status 前綴(`0|`/`1|`)回應過去以「body 內沒有 `=`」判定為協定自身的
+  錯誤訊息;帶 `=` 的錯誤訊息(如
+  `0|The parameter [ReceiverStoreID]=required`)因此誤判成
+  `Error::CheckMacValueMismatch`,把商戶導向金鑰/簽章排查。改以精確
+  判別:解析後**沒有非空 `CheckMacValue` 且沒有 `RtnCode` 鍵**才是協定
+  訊息;查詢形狀的 body(帶 `RtnCode` 而 MAC 缺漏/空值)維持
+  `CheckMacValueMismatch`(完整性失敗),帶有效 MAC 的簽章查詢照舊驗證。
+  已知行為放寬:status 前綴、含 `=` 但兩者皆無的 body,由
+  `CheckMacValueMismatch`(2xx)/`HttpStatus`(非 2xx)改為協定訊息——
+  該形狀從未在 live 觀察過,新映射更誠實(本來就沒驗過任何 MAC)。
 - **`Error::HttpStatus` 的 Display 跳脫控制字元**(程式碼審查 🟢):節錄
   渲染(`truncate_for_display`)過去對控制字元原樣輸出,依據是「body 來自
   商戶自己的 TLS 連線」——該假設可被注入的 HTTP client 或被擊穿的傳輸
