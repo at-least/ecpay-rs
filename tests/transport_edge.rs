@@ -516,9 +516,12 @@ async fn status_error_display_is_bounded_but_the_field_keeps_the_body() {
 /// padding oracle — any distinguishable difference between a payload that
 /// failed padding and one that failed a later stage — lets an attacker forge
 /// payload encryption (CBC-R) without the key. Every payload-content-dependent
-/// failure must therefore collapse into ONE fixed message. Base64/length/key
-/// errors stay distinct: they depend only on inputs the attacker already
-/// knows (their own ciphertext's shape), so they carry no plaintext signal.
+/// failure must therefore collapse into ONE fixed message. Base64/length/
+/// key-size errors stay distinct: they carry no payload-dependent signal
+/// (base64 and ciphertext length mirror the attacker's own input shape;
+/// key/IV size is a constant of the merchant's configuration, never of the
+/// ciphertext), and the detailed config errors keep a misconfigured
+/// deployment debuggable — see the allowlist pin below.
 #[test]
 fn callback_payload_failures_are_indistinguishable() {
     use base64::Engine;
@@ -587,6 +590,75 @@ fn callback_payload_failures_are_indistinguishable() {
     ] {
         assert_eq!(e, errs[0], "callback decoders must share one uniform error");
     }
+}
+
+/// The allowlist on the callback boundary is deliberate, and pinned here:
+/// config-size errors (key/IV length) and attacker-known-shape errors
+/// (base64, ciphertext length) stay DETAILED — they carry no
+/// payload-dependent signal (the key/IV size is a constant of the
+/// merchant's configuration, never of the ciphertext, so there is no
+/// oracle; the worst they fingerprint is a broken deployment), and keeping
+/// them visible is what makes a misconfigured key pair debuggable. Only
+/// payload-CONTENT-dependent failures collapse into the uniform message
+/// (see the uniformity test above).
+#[test]
+fn callback_allowlist_keeps_config_and_shape_errors_detailed() {
+    let client = Ecpay {
+        hash_key: "0123456789abcdef".into(),
+        hash_iv: "0123456789abcdef".into(),
+        ..Default::default()
+    };
+    let envelope = |d: &str| format!(r#"{{"TransCode":1,"TransMsg":"","Data":"{d}"}}"#);
+    let uniform = "ecpay: callback payload failed to decrypt or parse";
+
+    let good = (b"0123456789abcdef".as_slice(), b"0123456789abcdef".as_slice());
+    let data = ecpay::encrypt(b"payload", good.0, good.1).unwrap();
+
+    // Misconfigured key size → detailed AesKeySize, not the uniform message.
+    let bad_key = Ecpay {
+        hash_key: "short".into(),
+        hash_iv: "0123456789abcdef".into(),
+        ..Default::default()
+    };
+    let e = bad_key
+        .decrypt_ecpg_callback::<serde_json::Value>(&envelope(&data))
+        .expect_err("bad key size must fail");
+    assert!(
+        e.to_string().contains("invalid key size") && !e.to_string().contains(uniform),
+        "AesKeySize must stay detailed, got {e}"
+    );
+
+    // Misconfigured IV length → detailed InvalidIvLength.
+    let bad_iv = Ecpay {
+        hash_key: "0123456789abcdef".into(),
+        hash_iv: "0123456789abcdef0".into(),
+        ..Default::default()
+    };
+    let e = bad_iv
+        .decrypt_ecpg_callback::<serde_json::Value>(&envelope(&data))
+        .expect_err("bad IV length must fail");
+    assert!(
+        e.to_string().contains("invalid IV length") && !e.to_string().contains(uniform),
+        "InvalidIvLength must stay detailed, got {e}"
+    );
+
+    // Attacker's own ciphertext shape: not a block multiple → detailed
+    // InvalidCiphertextLength; not base64 → detailed Base64 error.
+    let e = client
+        .decrypt_ecpg_callback::<serde_json::Value>(&envelope("MTIzNDU="))
+        .expect_err("non-block-multiple must fail");
+    assert!(
+        e.to_string().contains("invalid ciphertext length")
+            && !e.to_string().contains(uniform),
+        "InvalidCiphertextLength must stay detailed, got {e}"
+    );
+    let e = client
+        .decrypt_ecpg_callback::<serde_json::Value>(&envelope("!!!not base64!!!"))
+        .expect_err("non-base64 must fail");
+    assert!(
+        !e.to_string().contains(uniform),
+        "Base64 errors must stay detailed, got {e}"
+    );
 }
 
 /// The callback decoders must decrypt with their OWN key pair (payment for

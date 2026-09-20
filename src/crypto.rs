@@ -480,12 +480,16 @@ fn strip_null_properties(v: serde_json::Value) -> serde_json::Value {
 /// `Data`, so a distinguishable failure between "bad padding" and a later
 /// stage (UTF-8, JSON, URL-escape) would let a caller on a public endpoint
 /// forge payload encryption without the key (CBC padding oracle / CBC-R).
-/// ALLOWLIST the errors that depend only on inputs the attacker already
-/// knows — their own ciphertext's base64 shape and the configured key/IV
-/// sizes — and collapse EVERYTHING else into one fixed message, so a future
-/// variant fails closed instead of silently reopening the oracle. The
-/// accepted residual is timing (padding fails before parsing); handlers must
-/// additionally answer every callback error uniformly (see README).
+/// ALLOWLIST the errors that carry no payload-dependent signal and collapse
+/// EVERYTHING else into one fixed message, so a future variant fails closed
+/// instead of silently reopening the oracle. The allowlist: base64 and
+/// ciphertext-length errors mirror the attacker's own input shape; key/IV
+/// size errors are constants of the merchant's configuration — never of the
+/// ciphertext — and staying detailed is what keeps a misconfigured key pair
+/// debuggable (at worst they fingerprint a broken deployment; they reveal
+/// nothing about key content). The accepted residual is timing (padding
+/// fails before parsing); handlers must additionally answer every callback
+/// error uniformly (see README).
 pub(crate) fn decrypt_payload_uniform<T: DeserializeOwned>(
     data: &str,
     hash_key: &[u8],
