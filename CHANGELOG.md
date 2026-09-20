@@ -119,9 +119,12 @@ _非破壞性：_
   (developers.ecpay.com.tw/10127.md，物流狀態(貨態)通知，
   特店Response參數說明，2026-09)：`TransCode` 與 Data 內 `RtnCode`
   皆型別為 **Int**（「1 代表 API 傳輸資料接收成功」），範例 body 即
-  `"TransCode": 1`——規格壓過 SDK 範例。同頁規格的 Response 信封寫
-  `RpHeader`，SDK 範例與本函式送 `RqHeader`，鍵名矛盾維持 SDK 形式並
-  記錄於 docstring（上線觀察到 ack 被重送時連同鍵名一併以 stage 探測）。
+  `"TransCode": 1`——規格壓過 SDK 範例。**注意 wire bytes 因此改變**
+  （`"TransCode":"1"` → `"TransCode":1`、Data 內 `"RtnCode":"1"` →
+  `1`）：自行比較/快取應答體序列化形式的整合端請同步。同頁規格的
+  Response 信封寫 `RpHeader`，SDK 範例與本函式送 `RqHeader`，鍵名矛盾
+  維持 SDK 形式並記錄於 docstring（上線觀察到 ack 被重送時連同鍵名
+  一併以 stage 探測）。
 - 文件補強（全庫審查 🟡/🟢）：README「API 一覽」精確列出平台商
   （`PlatformID`）模式的缺口——AIO 與 B2C 發票支援帶入 PlatformID；ECPG/
   物流 v2/

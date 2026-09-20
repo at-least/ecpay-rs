@@ -254,9 +254,7 @@ pub struct InvoiceExtend {
     /// 載具類別(見 [`crate::payment::CarruerType`];`None`=無載具)。
     pub carruer_type: Option<CarruerType>,
     /// 載具編號(最大 64 字元)。官方規則:CarruerType 為 2/3 時必填——
-    /// 本函式庫**僅檢查長度**,必填性由綠界裁定(官方 SDK 同樣不在本地
-    /// 檢查這條;與下方 Print=1、CustomerIdentifier 等本地有實作的條件式
-    /// 必填規則不同)。
+    /// 本函式庫**僅檢查長度**,必填性與格式由綠界裁定。
     pub carruer_num: Option<String>,
     /// 捐贈註記(必填,見 [`crate::payment::Donation`])。
     pub donation: Donation,
