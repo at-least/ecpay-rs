@@ -361,7 +361,7 @@ async fn injected_http_client_is_used() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let seen2 = seen.clone();
     let srv = spawn_http_server_with_head(move |_path, head, _body| {
-        *seen2.lock().unwrap() = head.to_owned();
+        *seen2.lock().unwrap_or_else(|e| e.into_inner()) = head.to_owned();
         // query_trade_info verifies the response CheckMacValue, so the body
         // must be correctly signed; the header assertion is the point.
         let mut respond = std::collections::HashMap::new();
@@ -380,7 +380,7 @@ async fn injected_http_client_is_used() {
         ..sdk()
     };
     client.query_trade_info("x").await.expect("decodes");
-    let head = seen.lock().unwrap().clone();
+    let head = seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
     assert!(
         head.contains("ecpay-test-injected-client"),
         "the injected client's User-Agent must reach the server, head: {head}"
@@ -390,7 +390,7 @@ async fn injected_http_client_is_used() {
     let seen3 = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let seen4 = seen3.clone();
     let srv = spawn_http_server_with_head(move |_path, head, _body| {
-        *seen4.lock().unwrap() = head.to_owned();
+        *seen4.lock().unwrap_or_else(|e| e.into_inner()) = head.to_owned();
         let res = ecpay::client::Response {
             trans_code: 1,
             data: ecpay::encrypt_data(
@@ -418,7 +418,7 @@ async fn injected_http_client_is_used() {
         .get_issue(&Default::default())
         .await
         .expect("envelope decodes");
-    let head = seen3.lock().unwrap().clone();
+    let head = seen3.lock().unwrap_or_else(|e| e.into_inner()).clone();
     assert!(
         head.contains("ecpay-test-injected-client"),
         "the AES path must also ride the injected client, head: {head}"

@@ -132,7 +132,7 @@ async fn get_token_by_trade_round_trips_the_proven_envelope() {
     let seen_path: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
     let path = seen_path.clone();
     let srv = spawn_http_server(move |p, body| {
-        *path.lock().unwrap() = p.to_owned();
+        *path.lock().unwrap_or_else(|e| e.into_inner()) = p.to_owned();
         let data = assert_envelope_and_decrypt(body);
         assert_eq!(
             data["MerchantID"], MERCHANT,
@@ -190,7 +190,7 @@ async fn get_token_by_trade_round_trips_the_proven_envelope() {
     assert_eq!(out.rtn_msg, "");
     assert_eq!(out.token, "37c33c79195f40339279dae54a96e39c");
     assert_eq!(out.token_expire_date, "2026/09/11 06:57:06");
-    assert_eq!(*seen_path.lock().unwrap(), "/Merchant/GetTokenbyTrade");
+    assert_eq!(*seen_path.lock().unwrap_or_else(|e| e.into_inner()), "/Merchant/GetTokenbyTrade");
 }
 
 /// The encrypted `Data` plaintext must keep the STRUCT's field-declaration
@@ -262,7 +262,7 @@ async fn unset_optional_pieces_are_omitted_from_the_wire() {
     let datas: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
     let seen = datas.clone();
     let srv = spawn_http_server(move |_p, body| {
-        seen.lock().unwrap().push(assert_envelope_and_decrypt(body));
+        seen.lock().unwrap_or_else(|e| e.into_inner()).push(assert_envelope_and_decrypt(body));
         envelope_reply(json!({
             "MerchantID": "3002607", "RtnCode": 1, "RtnMsg": "",
             "Token": "t", "TokenExpireDate": "x",
@@ -284,7 +284,7 @@ async fn unset_optional_pieces_are_omitted_from_the_wire() {
     });
     ec.get_token_by_trade(&with_pieces).await.unwrap();
 
-    let d = datas.lock().unwrap();
+    let d = datas.lock().unwrap_or_else(|e| e.into_inner());
     let minimal = d[0].as_object().unwrap();
     for absent in [
         "CardInfo",
@@ -429,7 +429,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
     let recorded = seen.clone();
     let srv = spawn_http_server(move |p, body| {
         let data = assert_envelope_and_decrypt(body);
-        recorded.lock().unwrap().push((p.to_owned(), data));
+        recorded.lock().unwrap_or_else(|e| e.into_inner()).push((p.to_owned(), data));
         envelope_reply(json!({
             "MerchantID": "3002607", "RtnCode": 1, "RtnMsg": "",
             "Token": "t", "TokenExpireDate": "x",
@@ -541,7 +541,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
         );
     }
 
-    let calls = seen.lock().unwrap();
+    let calls = seen.lock().unwrap_or_else(|e| e.into_inner());
     let got_paths: Vec<&str> = calls.iter().map(|(p, _)| p.as_str()).collect();
     assert_eq!(
         got_paths,

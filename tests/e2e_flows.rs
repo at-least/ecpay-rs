@@ -204,7 +204,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
                 "{}|{}",
                 fields["AllPayLogisticsID"], fields["LogisticsStatus"]
             );
-            let mut log = log.lock().unwrap();
+            let mut log = log.lock().unwrap_or_else(|e| e.into_inner());
             if !log.iter().any(|(k, _)| *k == key) {
                 log.push((key, fields["AllPayLogisticsID"].clone()));
             }
@@ -227,7 +227,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
                 "request must carry a valid MD5 CMV: computed={computed} sent={sent_mac} fields={fields:?}"
             );
 
-            let mut state = sim.lock().unwrap();
+            let mut state = sim.lock().unwrap_or_else(|e| e.into_inner());
             if path.ends_with("/Express/Create") {
                 state.next_id += 1;
                 let id = format!("9000{}", state.next_id);
@@ -324,7 +324,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
         let sim = sim.clone();
         async move {
             // ECPay-side state change happens BEFORE the callback fires.
-            sim.lock().unwrap().orders.get_mut(&logistics_id).unwrap().1 = status.to_string();
+            sim.lock().unwrap_or_else(|e| e.into_inner()).orders.get_mut(&logistics_id).unwrap().1 = status.to_string();
             let fields: HashMap<String, String> = [
                 ("MerchantID", MERCHANT_ID.to_string()),
                 ("MerchantTradeNo", trade_no),
@@ -350,7 +350,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
     let (_, reply2) = deliver("310").await;
     assert_eq!(reply2, "1|OK");
     {
-        let log = merchant_log.lock().unwrap();
+        let log = merchant_log.lock().unwrap_or_else(|e| e.into_inner());
         assert_eq!(
             log.iter().filter(|(k, _)| k.contains("|310")).count(),
             1,
@@ -374,7 +374,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
         let (st, reply) = post_form(&url, &forged).await;
         assert_eq!(st, 200);
         assert_eq!(reply, "0|ERR", "forged MAC must not be accepted");
-        let log = merchant_log.lock().unwrap();
+        let log = merchant_log.lock().unwrap_or_else(|e| e.into_inner());
         assert!(
             !log.iter().any(|(k, _)| k.contains("|999")),
             "rejected callback must not be processed"
@@ -450,7 +450,7 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
             let env: serde_json::Value = serde_json::from_slice(body).unwrap();
             let rq = &env["RqHeader"];
             assert_eq!(rq["Revision"], "1.0.0", "v2 RqHeader pins Revision");
-            let mut state = sim.lock().unwrap();
+            let mut state = sim.lock().unwrap_or_else(|e| e.into_inner());
             if path.ends_with("/Express/v2/RedirectToLogisticsSelection") {
                 let temp = format!("T{}", state.next + 1);
                 state.temps.insert(temp, false);
@@ -671,7 +671,7 @@ async fn ecpg_full_flow_from_token_to_paid_query() {
                 PAY_IV.as_bytes(),
             )
             .unwrap();
-            let mut state = sim.lock().unwrap();
+            let mut state = sim.lock().unwrap_or_else(|e| e.into_inner());
             if path.ends_with("/Merchant/GetTokenbyTrade") {
                 state.merchant_trade_no = payload["OrderInfo"]["MerchantTradeNo"]
                     .as_str()
@@ -863,7 +863,7 @@ async fn b2b_issue_get_invalid_getinvalid_chain() {
                 B2B_IV.as_bytes(),
             )
             .unwrap();
-            let mut state = sim.lock().unwrap();
+            let mut state = sim.lock().unwrap_or_else(|e| e.into_inner());
             let aes_reply = |data: serde_json::Value| {
                 (
                     200u16,

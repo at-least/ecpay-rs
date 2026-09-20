@@ -135,7 +135,7 @@ fn new_payment_mock(
         let got_mac = params.remove("CheckMacValue").unwrap_or_default();
         let want_mac = hash_mac(&params, TEST_PAYMENT_HASH_KEY, TEST_PAYMENT_HASH_IV);
         assert_eq!(got_mac, want_mac, "mock: CheckMacValue signing mismatch");
-        *captured.lock().unwrap() = Some(params);
+        *captured.lock().unwrap_or_else(|e| e.into_inner()) = Some(params);
         // The response carries its own CheckMacValue over the fields as
         // sent, like the real server (the client verifies it).
         let mut signed = respond.clone();
@@ -634,7 +634,7 @@ async fn test_invoice_request_envelope() {
             let _ = path; // /GetIssue
             let req: ecpay::client::Request =
                 serde_json::from_slice(body).expect("decode envelope");
-            *got.lock().unwrap() =
+            *got.lock().unwrap_or_else(|e| e.into_inner()) =
                 Some(serde_json::to_value(&req).expect("encode captured envelope"));
             let data = encrypt_data(
                 &GetIssueOutput {
@@ -724,7 +724,7 @@ async fn test_query_trade_info_request_params() {
     assert_eq!(out.trade_status, "1");
     assert_eq!(out.merchant_trade_no, "order_abc");
 
-    let got = captured.lock().unwrap().clone().expect("params captured");
+    let got = captured.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("params captured");
     for k in ["MerchantID", "MerchantTradeNo", "TimeStamp"] {
         assert!(
             got.contains_key(k),

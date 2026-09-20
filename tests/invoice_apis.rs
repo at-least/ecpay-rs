@@ -49,7 +49,7 @@ fn mock(data: serde_json::Value) -> (Ecpay, Arc<Mutex<Vec<String>>>) {
         let req: ecpay::client::Request = serde_json::from_slice(body).expect("decode envelope");
         assert_eq!(req.merchant_id, "2000132");
         assert_eq!(req.rq_header.revision, "3.0.0");
-        seen.lock().unwrap().push(path.to_owned());
+        seen.lock().unwrap_or_else(|e| e.into_inner()).push(path.to_owned());
         envelope(
             encrypt_data(
                 &data,
@@ -84,7 +84,7 @@ async fn commands_raise_api_errors_and_hit_their_action_names() {
                 .await
                 .expect_err(concat!($name, " is a command: RtnCode!=1 must be an error"));
             assert_api_rejection(err, $name);
-            let last = paths.lock().unwrap().last().cloned().unwrap();
+            let last = paths.lock().unwrap_or_else(|e| e.into_inner()).last().cloned().unwrap();
             assert_eq!(last, concat!("/", $name), "wire action name");
         }};
     }
@@ -112,7 +112,7 @@ async fn commands_raise_api_errors_and_hit_their_action_names() {
         "AllowanceInvalidByCollegiate"
     );
     assert_eq!(
-        paths.lock().unwrap().len(),
+        paths.lock().unwrap_or_else(|e| e.into_inner()).len(),
         10,
         "every command was sent once"
     );
@@ -132,7 +132,7 @@ async fn queries_return_rtn_code_verbatim_and_hit_their_action_names() {
                 .expect(concat!($name, " is a query: RtnCode!=1 must be Ok"));
             assert_eq!(out.rtn_code, 2, $name);
             assert_eq!(out.rtn_msg, "查無資料", $name);
-            let last = paths.lock().unwrap().last().cloned().unwrap();
+            let last = paths.lock().unwrap_or_else(|e| e.into_inner()).last().cloned().unwrap();
             assert_eq!(last, concat!("/", $name), "wire action name");
         }};
     }
@@ -159,7 +159,7 @@ async fn queries_return_rtn_code_verbatim_and_hit_their_action_names() {
         ec.get_allowance_invalid(&Default::default()),
         "GetAllowanceInvalid"
     );
-    assert_eq!(paths.lock().unwrap().len(), 10, "every query was sent once");
+    assert_eq!(paths.lock().unwrap_or_else(|e| e.into_inner()).len(), 10, "every query was sent once");
 }
 
 /// A successful command returns the decoded output (RtnCode 1 plus the
@@ -277,7 +277,7 @@ async fn envelope_carries_the_platform_id() {
     let seen = captured.clone();
     let srv = spawn_http_server(move |_path, body| {
         let req: ecpay::client::Request = serde_json::from_slice(body).unwrap();
-        seen.lock().unwrap().push(req.platform_id);
+        seen.lock().unwrap_or_else(|e| e.into_inner()).push(req.platform_id);
         envelope(
             encrypt_data(
                 &serde_json::json!({"RtnCode": 1}),
@@ -299,7 +299,7 @@ async fn envelope_carries_the_platform_id() {
     .await
     .unwrap();
     assert_eq!(
-        *captured.lock().unwrap(),
+        *captured.lock().unwrap_or_else(|e| e.into_inner()),
         vec![String::new(), "3002599".to_owned()]
     );
 }

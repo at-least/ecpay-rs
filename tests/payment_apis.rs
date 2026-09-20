@@ -197,7 +197,7 @@ async fn order_search_request_is_signed_and_routed() {
             ("TradeStatus", "0"),
         ]);
         let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
-        *captured2.lock().unwrap() = Some(format!("{path}|{body}"));
+        *captured2.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("{path}|{body}"));
         (
             200,
             "application/x-www-form-urlencoded".to_owned(),
@@ -219,7 +219,7 @@ async fn order_search_request_is_signed_and_routed() {
         })
         .await
         .expect("order_search");
-    let got = captured.lock().unwrap().clone().expect("captured");
+    let got = captured.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("captured");
     assert!(
         got.starts_with("/QueryTradeInfo/V5|"),
         "endpoint path: {got}"
@@ -335,7 +335,7 @@ async fn query_payment_info_request_is_signed_and_routed() {
     let captured2 = captured.clone();
     let srv = spawn_http_server(move |path, body| {
         let body = String::from_utf8_lossy(body).into_owned();
-        *captured2.lock().unwrap() = Some(format!("{path}|{body}"));
+        *captured2.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("{path}|{body}"));
         let respond = map(&[("MerchantID", MERCHANT_ID), ("RtnCode", "10200047")]);
         let mac = ecpay::check_mac_value(&respond, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256);
         (
@@ -356,7 +356,7 @@ async fn query_payment_info_request_is_signed_and_routed() {
         })
         .await
         .expect("query_payment_info");
-    let got = captured.lock().unwrap().clone().expect("captured");
+    let got = captured.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("captured");
     assert!(
         got.starts_with("/QueryPaymentInfo|"),
         "endpoint path: {got}"
@@ -400,7 +400,7 @@ async fn json_apis_parse_their_replies() {
     let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let captured2 = captured.clone();
     let srv = spawn_http_server(move |path, _body| {
-        *captured2.lock().unwrap() = Some(path.to_owned());
+        *captured2.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.to_owned());
         (
             200,
             "application/json".to_owned(),
@@ -422,7 +422,7 @@ async fn json_apis_parse_their_replies() {
     assert_eq!(got["RtnCode"], 1);
     assert_eq!(got["CreditAmount"], 100);
     assert_eq!(
-        captured.lock().unwrap().as_deref(),
+        captured.lock().unwrap_or_else(|e| e.into_inner()).as_deref(),
         Some("/QueryTrade/V2"),
         "CreditDetail routes under credit_api_url"
     );
@@ -474,7 +474,7 @@ async fn action_apis_route_and_parse() {
     let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let captured2 = captured.clone();
     let srv = spawn_http_server(move |path, _body| {
-        *captured2.lock().unwrap() = Some(path.to_owned());
+        *captured2.lock().unwrap_or_else(|e| e.into_inner()) = Some(path.to_owned());
         if path == "/CreditCardPeriodAction" {
             // This endpoint SIGNS its answers (stage probe 2026-09) — the
             // client verifies and strips the MAC.
@@ -515,7 +515,7 @@ async fn action_apis_route_and_parse() {
         .await
         .expect("credit_do_action");
     assert_eq!(got.get("RtnCode").map(String::as_str), Some("1"));
-    assert_eq!(captured.lock().unwrap().as_deref(), Some("/DoAction"));
+    assert_eq!(captured.lock().unwrap_or_else(|e| e.into_inner()).as_deref(), Some("/DoAction"));
 
     let got = client
         .credit_card_period_action(&ecpay::payment::CreditCardPeriodActionParams {
@@ -528,7 +528,7 @@ async fn action_apis_route_and_parse() {
         .expect("credit_card_period_action");
     assert_eq!(got.get("RtnMsg").map(String::as_str), Some("OK"));
     assert_eq!(
-        captured.lock().unwrap().as_deref(),
+        captured.lock().unwrap_or_else(|e| e.into_inner()).as_deref(),
         Some("/CreditCardPeriodAction")
     );
 }
@@ -544,7 +544,7 @@ async fn call_payment_api_signature_covers_the_sent_fields() {
     let captured: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
     let seen = captured.clone();
     let srv = spawn_http_server(move |_path, body| {
-        *seen.lock().unwrap() = String::from_utf8_lossy(body).into_owned();
+        *seen.lock().unwrap_or_else(|e| e.into_inner()) = String::from_utf8_lossy(body).into_owned();
         (
             200,
             "application/x-www-form-urlencoded".to_owned(),
@@ -565,7 +565,7 @@ async fn call_payment_api_signature_covers_the_sent_fields() {
 
     // Recompute the MAC over exactly what went on the wire (values here are
     // form-escape-free, so splitting on & and = reconstructs the fields).
-    let body = captured.lock().unwrap().clone();
+    let body = captured.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let mut sent: HashMap<String, String> = body
         .split('&')
         .map(|pair| pair.split_once('=').unwrap_or((pair, "")))
@@ -807,7 +807,7 @@ async fn platform_id_is_sent_only_when_non_empty() {
             .await
             .expect("order_search");
     }
-    let bodies = captured.lock().unwrap().clone();
+    let bodies = captured.lock().unwrap_or_else(|e| e.into_inner()).clone();
     assert_eq!(bodies.len(), 3);
     assert!(!bodies[0].contains("PlatformID"), "{}", bodies[0]);
     assert!(

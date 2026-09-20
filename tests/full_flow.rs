@@ -204,14 +204,14 @@ fn spawn_simulator(state: Arc<Mutex<SimulatorState>>) -> String {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0);
                 let return_url = params.get("ReturnURL").cloned().unwrap_or_default();
-                state.lock().unwrap().orders.insert(
+                state.lock().unwrap_or_else(|e| e.into_inner()).orders.insert(
                     key,
                     Order {
                         total_amount: amount,
                         paid: false,
                     },
                 );
-                state.lock().unwrap().callback_log.push((
+                state.lock().unwrap_or_else(|e| e.into_inner()).callback_log.push((
                     format!("__return_url:{trade_no}"),
                     return_url,
                     String::new(),
@@ -226,7 +226,7 @@ fn spawn_simulator(state: Arc<Mutex<SimulatorState>>) -> String {
                 // callback to the ReturnURL on file.
                 let trade_no = params.get("trade_no").cloned().unwrap_or_default();
                 let (return_url, callback_body) = {
-                    let mut st = state.lock().unwrap();
+                    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
                     let Some(order) = st.orders.get_mut(&trade_no) else {
                         respond(&mut stream, "text/plain", "no such order");
                         continue;
@@ -271,7 +271,7 @@ fn spawn_simulator(state: Arc<Mutex<SimulatorState>>) -> String {
                     .unwrap_or("")
                     .trim()
                     .to_owned();
-                state.lock().unwrap().callback_log.push((
+                state.lock().unwrap_or_else(|e| e.into_inner()).callback_log.push((
                     format!("__callback:{trade_no}"),
                     callback_body,
                     reply_body,
@@ -288,7 +288,7 @@ fn spawn_simulator(state: Arc<Mutex<SimulatorState>>) -> String {
                     continue;
                 }
                 let trade_no = params.get("MerchantTradeNo").cloned().unwrap_or_default();
-                let st = state.lock().unwrap();
+                let st = state.lock().unwrap_or_else(|e| e.into_inner());
                 let order = st.orders.get(&trade_no);
                 let mut response: HashMap<String, String> = HashMap::new();
                 response.insert("MerchantID".into(), MERCHANT_ID.into());
@@ -380,7 +380,7 @@ fn spawn_return_url(verified: Arc<Mutex<Vec<HashMap<String, String>>>>) -> Strin
             let ok = client.verify_check_mac_value(&params)
                 && params.get("RtnCode").map(String::as_str) == Some("1")
                 && params.get("SimulatePaid").map(String::as_str) == Some("1");
-            verified.lock().unwrap().push(params);
+            verified.lock().unwrap_or_else(|e| e.into_inner()).push(params);
             respond(&mut stream, "text/html", if ok { "1|OK" } else { "0|ERR" });
         }
     });
@@ -496,7 +496,7 @@ async fn full_payment_flow_end_to_end() {
     // MAC) and answered ECPay's expected `1|OK`. Guards are scoped so no
     // std MutexGuard is alive across the awaits below (clippy awaits lint).
     let callback_seen = {
-        let seen = verified.lock().unwrap();
+        let seen = verified.lock().unwrap_or_else(|e| e.into_inner());
         (
             seen.len(),
             seen.first()
@@ -507,7 +507,7 @@ async fn full_payment_flow_end_to_end() {
     assert_eq!(callback_seen.0, 1, "exactly one callback delivered");
     assert_eq!(callback_seen.1, trade_no);
     let (sent, reply) = {
-        let log = state.lock().unwrap();
+        let log = state.lock().unwrap_or_else(|e| e.into_inner());
         log.callback_log
             .iter()
             .find(|(k, _, _)| k == &format!("__callback:{trade_no}"))

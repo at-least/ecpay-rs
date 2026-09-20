@@ -20,6 +20,10 @@ where
 /// into opaque connection errors. Takes the payload Box by VALUE — a
 /// `&Box<dyn Any>` coerced to `&dyn Any` produces a trait object pointing
 /// at the Box itself, and every downcast then misses.
+///
+/// Corollary: a test that EXPECTS an `HttpStatus { status: 500 }` must not
+/// assert inside its handler — a handler panic would satisfy it with the
+/// panic body. Keep handler assertions in tests whose success path is 200.
 fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
     let msg = if let Some(s) = panic.downcast_ref::<&str>() {
         (*s).to_owned()
