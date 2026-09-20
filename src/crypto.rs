@@ -510,6 +510,18 @@ pub(crate) fn decrypt_payload_uniform<T: DeserializeOwned>(
 /// been accepted (2026-09) — which is why the former Go-`encoding/json`
 /// byte emulation was dropped.
 ///
+/// Values whose rendering would use **exponent notation** (probed on
+/// serde_json 1.0.151: below 1e-5 or from 1e16 up, e.g. `0.000001` →
+/// `1e-6`) are also rejected loudly. That window is a serde_json
+/// implementation detail that has already shifted between releases, so the
+/// guard inspects the *actual* rendering instead of a magnitude bound:
+/// whichever serde_json the consumer resolves, no exponent form ever
+/// reaches the wire, because one has never been verified against ECPay's
+/// parser. Spec-legal-but-absurd values (e.g. a 7-decimal `0.000001` TWD
+/// unit price) therefore fail locally with an `exponent notation` error
+/// instead of silently sending an unverified wire shape — pass a value
+/// within the field's documented range.
+///
 /// ⚠ Float-money hygiene for callers: shortest-round-trip means an f64
 /// arithmetic artifact goes on the wire verbatim — `3 * 19.99` serializes
 /// as `59.970000000000006`. Construct these fields by parsing the decimal
@@ -520,13 +532,20 @@ pub mod finite_f64 {
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
-        if v.is_finite() {
-            s.serialize_f64(*v)
-        } else {
-            Err(serde::ser::Error::custom(format_args!(
+        if !v.is_finite() {
+            return Err(serde::ser::Error::custom(format_args!(
                 "non-finite float {v} cannot be serialized to JSON"
-            )))
+            )));
         }
+        let rendered = serde_json::to_string(v).map_err(serde::ser::Error::custom)?;
+        if rendered.contains('e') || rendered.contains('E') {
+            return Err(serde::ser::Error::custom(format_args!(
+                "float money value {v} renders as {rendered} in exponent notation, \
+                 which this crate refuses to put on the wire unverified; \
+                 use a value within the field's documented range"
+            )));
+        }
+        s.serialize_f64(*v)
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {

@@ -5,10 +5,13 @@
 //! values now carry a trailing `.0` (`1.0`, not Go's `1`). ECPay's server
 //! json-parses the decrypted payload, so `1.0` and `1` are the same JSON
 //! number — and the B2B module has sent serde_json-formatted floats to the
-//! stage server and been accepted (2026-09, RtnCode=1). The one property
-//! carried over from `go_float`: a NON-FINITE value (JSON cannot hold
-//! NaN/Infinity; serde_json would silently write `null`) is a serialization
-//! error, never a silently-corrupted payment field.
+//! stage server and been accepted (2026-09, RtnCode=1). Two properties are
+//! always serialization errors, never a silently-corrupted payment field:
+//! a NON-FINITE value (JSON cannot hold NaN/Infinity; serde_json would
+//! silently write `null`), and a value whose rendering would use EXPONENT
+//! notation (the plain-decimal window is a serde_json detail that shifts
+//! between releases — the consumer's dependency resolution must not decide
+//! the wire bytes, and no exponent form has been verified against ECPay).
 
 use ecpay::Item;
 
@@ -50,16 +53,27 @@ fn fractional_values_use_the_shortest_round_trip_digits() {
 }
 
 #[test]
-fn exponent_notation_follows_serde_json() {
-    // Positive exponents keep the `+` — a serde_json float-backend
-    // convention (zmij; pre-zmij ryu-based serde_json emits `1e21` without
-    // the `+`), so this pin is coupled to the serde_json version, not to
-    // anything ECPay specifies.
-    assert_eq!(render(1e21), "1e+21");
-    assert_eq!(render(1.5e21), "1.5e+21");
-    assert_eq!(render(1e300), "1e+300");
-    assert_eq!(render(1e-7), "1e-7");
-    assert_eq!(render(5e-324), "5e-324");
+fn exponent_notation_is_rejected_so_the_wire_form_is_version_stable() {
+    // serde_json switches to exponent notation outside its plain-decimal
+    // window (probed on 1.0.151: 1e-5 renders plain, 1e-6 exponent;
+    // 1e15 plain, 1e16 exponent) and that window has already shifted
+    // between releases (the former pin here recorded `1e+21` on the zmij
+    // backend vs `1e21` on pre-zmij ryu). The consumer's dependency
+    // resolution must not decide a payment field's wire bytes, and an
+    // exponent-form wire value has never been verified against ECPay's
+    // parser — so any rendering containing an exponent is a loud local
+    // serialization error instead.
+    for v in [1e-6, 1e-7, 5e-324, 1e16, 1e21, 1.5e21, 1e300] {
+        let err = serde_json::to_string(&F { v })
+            .expect_err("exponent rendering must not serialize");
+        let msg = err.to_string();
+        assert!(msg.contains("exponent notation"), "{v}: {msg}");
+    }
+    // The plain-decimal window itself is not pinned beyond this pair —
+    // the boundary is a serde_json detail and may shift; the guarantee
+    // is only "no exponent ever reaches the wire".
+    assert_eq!(render(1e15), "1000000000000000.0");
+    assert_eq!(render(1e-5), "0.00001");
 }
 
 #[test]

@@ -4,6 +4,17 @@
 
 _非破壞性：_
 
+- **`finite_f64` 拒絕指數記法量級**(程式碼審查 🟡):AES-JSON 金額欄位
+  (`ItemCount`/`ItemPrice`/`ItemAmount`/`GoodsWeight`)的 wire 形式過去
+  完全交給 serde_json 的預設浮點渲染——其十進位/指數切換窗口是實作細節
+  且已隨版本漂移(zmij 後 `1e+21`、前 ryu `1e21`,舊測試自己就載明了這個
+  耦合),而指數形式的 wire 值從未對綠界驗證過。現在 `serialize` 檢查
+  **實際渲染結果**,凡含指數記法(serde_json 1.0.151 實測:小於 1e-5 或
+  1e16 以上,如 `0.000001` → `1e-6`)一律在本機以 serialization error
+  拒絕——規格合法但離譜的量級(七位小數的 `0.000001` 元單價)從「悄悄
+  送出未驗證的 wire 形狀」變成「本機大聲失敗」。原 `1e21`/`1e-7` 等指數
+  釘子改為錯誤斷言;`1e15`/`1e-5` 的 plain 釘子保留(僅記錄現行窗口,
+  不作保證)。
 - **`ensure_https` 修補 userinfo 繞道**(程式碼審查 🔴):守衛以手寫字串
   切割取 host(`rsplit_once(':')`),`http://127.0.0.1:80@evil.com/x` 這類
   「userinfo 長得像 loopback」的 URL 會被誤判為 host `127.0.0.1` 而放行,

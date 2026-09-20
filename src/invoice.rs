@@ -178,6 +178,12 @@ pub struct Item {
     #[serde(rename = "ItemWord")]
     pub item_word: String, // 商品單位
     /// 若 vat=0(未稅)，商品金額需為未稅金額 若 vat=1(含稅)，商品金額需為含稅金額
+    ///
+    /// 所有 `finite_f64` 欄位(含本欄位):會以**指數記法**上 wire 的量級
+    /// (serde_json 1.0.151 實測:小於 1e-5 或 1e16 以上,如 `0.000001`)
+    /// 一律在本機以 serialization error 拒絕——指數形式從未對綠界驗證過,
+    /// 且其十進位窗口會隨 serde_json 版本漂移。請帶文件範圍內、十進位
+    /// 記法可完整表示的值。
     #[serde(rename = "ItemPrice", with = "crate::crypto::finite_f64")]
     pub item_price: f64, // 商品單價 支援整數 8 位小數 7 位
     #[serde(rename = "ItemTaxType")]
