@@ -14,6 +14,23 @@ where
     spawn_http_server_with_head(move |path, _head, body| handler(path, body))
 }
 
+/// Renders a caught handler panic as the 500 body: a panicking wire
+/// assertion must reach the test as THIS error (an HttpStatus carrying the
+/// message), not kill the listener and degrade the test's later requests
+/// into opaque connection errors. Takes the payload Box by VALUE — a
+/// `&Box<dyn Any>` coerced to `&dyn Any` produces a trait object pointing
+/// at the Box itself, and every downcast then misses.
+fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
+    let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+        (*s).to_owned()
+    } else if let Some(s) = panic.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_owned()
+    };
+    format!("ecpay mock server handler panicked: {msg}")
+}
+
 /// Like [`spawn_http_server`], but the handler also receives the raw
 /// request head (request line + headers) — for asserting which HTTP client
 /// sent the request.
@@ -67,7 +84,16 @@ where
                     Err(_) => break,
                 }
             }
-            let (status, content_type, resp_body) = handler(&path, &head, &body);
+            let (status, content_type, resp_body) = match std::panic::catch_unwind(
+                std::panic::AssertUnwindSafe(|| handler(&path, &head, &body)),
+            ) {
+                Ok(response) => response,
+                Err(panic) => (
+                    500,
+                    "text/plain".to_owned(),
+                    panic_message(panic).into_bytes(),
+                ),
+            };
             let response = format!(
                 "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 resp_body.len()
@@ -189,7 +215,16 @@ where
                     Err(_) => break,
                 }
             }
-            let (status, headers, resp_body) = handler(&path, &body);
+            let (status, headers, resp_body) = match std::panic::catch_unwind(
+                std::panic::AssertUnwindSafe(|| handler(&path, &body)),
+            ) {
+                Ok(response) => response,
+                Err(panic) => (
+                    500,
+                    vec![("Content-Type".to_owned(), "text/plain".to_owned())],
+                    panic_message(panic).into_bytes(),
+                ),
+            };
             let mut response = format!("HTTP/1.1 {status}\r\n");
             for (k, v) in &headers {
                 response.push_str(&format!("{k}: {v}\r\n"));

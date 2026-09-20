@@ -430,6 +430,7 @@ impl Ecpay {
         let mut pairs: Vec<(String, String)> = m.into_iter().collect();
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
         let action = format!("{}AioCheckOut/V5", self.payment_base_url());
+        crate::client::ensure_https(&action)?;
         Ok(AioCheckOut {
             params: pairs,
             action,

@@ -56,11 +56,15 @@ impl LogisticsForm {
     /// like [`crate::payment::AioCheckOut`]): field order is wire-irrelevant
     /// (the MAC was computed over the map), but a form whose hidden inputs
     /// reshuffle on every render is untestable — the rendered HTML must be
-    /// deterministic across calls.
-    fn new(action: String, params: HashMap<String, String>) -> Self {
+    /// deterministic across calls. The action URL passes
+    /// [`ensure_https`](crate::client::ensure_https): the form carries a
+    /// signed payload, and the browser would POST it wherever the action
+    /// points.
+    fn new(action: String, params: HashMap<String, String>) -> Result<Self> {
+        crate::client::ensure_https(&action)?;
         let mut pairs: Vec<(String, String)> = params.into_iter().collect();
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
-        Self { action, pairs }
+        Ok(Self { action, pairs })
     }
 
     /// The endpoint the form POSTs to.
@@ -791,10 +795,10 @@ impl Ecpay {
     pub fn logistics_create_form(&self, input: &LogisticsCreateInput) -> Result<LogisticsForm> {
         let mut m = self.domestic_base_params(input)?;
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm::new(
+        LogisticsForm::new(
             format!("{}Express/Create", self.logistics_base_url()),
             m,
-        ))
+        )
     }
 
     /// 電子地圖選店 (`Express/map`)。消費者選完門市後,綠界 POST 回
@@ -815,10 +819,10 @@ impl Ecpay {
         m.insert("IsCollection".to_owned(), input.is_collection.clone());
         m.insert("ServerReplyURL".to_owned(), input.server_reply_url.clone());
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm::new(
+        LogisticsForm::new(
             format!("{}Express/map", self.logistics_base_url()),
             m,
-        ))
+        )
     }
 
     /// 產生 B2C 測試資料 (`Express/CreateTestData`,僅測試環境):
@@ -833,10 +837,10 @@ impl Ecpay {
         m.insert("LogisticsSubType".to_owned(), logistics_sub_type.to_owned());
         m.insert("ClientReplyURL".to_owned(), client_reply_url.to_owned());
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm::new(
+        LogisticsForm::new(
             format!("{}Express/CreateTestData", self.logistics_base_url()),
             m,
-        ))
+        )
     }
 
     /// 列印 B2C 紙本出貨單 (`helper/printTradeDocument`,路徑大小寫依官方範例)。
@@ -851,10 +855,10 @@ impl Ecpay {
             all_pay_logistics_id.to_owned(),
         );
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm::new(
+        LogisticsForm::new(
             format!("{}helper/printTradeDocument", self.logistics_base_url()),
             m,
-        ))
+        )
     }
 
     /// 列印 C2C 交貨便標籤(全家/萊爾富/統一/OK 四個端點由 [`PrintC2c`]
@@ -877,10 +881,10 @@ impl Ecpay {
             m.insert("CVSValidationNo".to_owned(), v.to_owned());
         }
         self.sign_logistics(&mut m)?;
-        Ok(LogisticsForm::new(
+        LogisticsForm::new(
             format!("{}{}", self.logistics_base_url(), target.path()),
             m,
-        ))
+        )
     }
 
     // --- Callbacks ---
@@ -1472,9 +1476,9 @@ impl Ecpay {
         );
         m.insert("Destination".to_owned(), input.destination.clone());
         m.insert("ServerReplyURL".to_owned(), input.server_reply_url.clone());
-        Ok(LogisticsForm::new(
+        LogisticsForm::new(
             format!("{}CrossBorder/Map", self.logistics_base_url()),
             m,
-        ))
+        )
     }
 }

@@ -641,7 +641,12 @@ async fn query_inputs_omit_unset_platform_id_and_require_merchant_id() {
     let datas: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
     let seen = datas.clone();
     let srv = spawn_http_server(move |_p, body| {
-        seen.lock().unwrap().push(assert_envelope_and_decrypt(body));
+        // into_inner, not unwrap: an earlier request's wire-assert panic
+        // poisons the mutex, and the poisoned lock must not mask the later
+        // requests' own assertions with a PoisonError.
+        seen.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(assert_envelope_and_decrypt(body));
         envelope_reply(json!({"RtnCode": 1, "RtnMsg": ""}))
     });
     let ec = client(format!("{srv}Merchant/"), format!("{srv}1.0.0/"));
@@ -688,7 +693,7 @@ async fn query_inputs_omit_unset_platform_id_and_require_merchant_id() {
     .unwrap();
 
     {
-        let d = datas.lock().unwrap();
+        let d = datas.lock().unwrap_or_else(|e| e.into_inner());
         // Only the request that PASSED the local guard reaches the wire:
         // 1b (MerchantID set, PlatformID unset), 2 (both set), 3 (DoAction).
         assert_eq!(d.len(), 3, "the refused call sent nothing: {d:?}");

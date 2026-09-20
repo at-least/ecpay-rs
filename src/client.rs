@@ -343,6 +343,38 @@ async fn body_string(resp: &mut reqwest::Response) -> Result<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Guards every URL this crate sends signed payload to: https everywhere,
+/// with `http` allowed only for loopback hosts (the hermetic test servers
+/// and local development bind there). Everything else — a mistyped
+/// `http://` production base, `ftp://`, a schemeless string, or a lookalike
+/// `127.0.0.1.evil.com` — is [`Error::Validation`]: every request carries a
+/// CheckMacValue or an AES envelope, and shipping one in cleartext is the
+/// attack this guard exists to make unreachable.
+pub(crate) fn ensure_https(url: &str) -> Result<()> {
+    let scheme = url.split("://").next().unwrap_or("").to_ascii_lowercase();
+    if scheme == "https" {
+        return Ok(());
+    }
+    if scheme == "http" {
+        let rest = &url[scheme.len() + 3..];
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        let host = if let Some(inner) = authority.strip_prefix('[') {
+            inner.split(']').next().unwrap_or("")
+        } else {
+            authority.rsplit_once(':').map_or(authority, |(h, _)| h)
+        };
+        if matches!(
+            host.to_ascii_lowercase().as_str(),
+            "localhost" | "127.0.0.1" | "::1"
+        ) {
+            return Ok(());
+        }
+    }
+    Err(Error::Validation(format!(
+        "refusing to send signed payload over a non-https URL: {url} (use https; http is allowed only for loopback hosts: 127.0.0.1, localhost, ::1)"
+    )))
+}
+
 impl Ecpay {
     /// POST the params as a urlencoded form (Python `requests.post(url,
     /// data=params)` / BasePayment.send_post): plain POST, no envelope,
@@ -377,6 +409,7 @@ impl Ecpay {
         endpoint: &str,
         params: &HashMap<String, String>,
     ) -> Result<(u16, Vec<u8>)> {
+        ensure_https(endpoint)?;
         let encoded = encode_query(crate::crypto::str_pairs(params));
         let mut resp = self
             .http()
@@ -410,6 +443,7 @@ impl Ecpay {
         m.insert("CheckMacValue".to_owned(), mac);
         let base = self.payment_base_url();
         let endpoint = format!("{base}{name}/V5");
+        ensure_https(&endpoint)?;
         let encoded = encode_query(crate::crypto::str_pairs(&m));
         let mut resp = self
             .http()
@@ -526,6 +560,7 @@ impl Ecpay {
         key: &[u8],
         iv: &[u8],
     ) -> Result<String> {
+        ensure_https(&to.url)?;
         let data = self.encrypt_checked(merchant_id, input, key, iv)?;
         let envelope = serde_json::json!({
             "MerchantID": merchant_id,
@@ -575,6 +610,7 @@ impl Ecpay {
         key: &[u8],
         iv: &[u8],
     ) -> Result<O> {
+        ensure_https(&to.url)?;
         let data = self.encrypt_checked(merchant_id, input, key, iv)?;
         let envelope = serde_json::json!({
             "MerchantID": merchant_id,
@@ -621,6 +657,7 @@ impl Ecpay {
     ) -> Result<O> {
         let base = self.invoice_base_url();
         let endpoint = format!("{base}{name}");
+        ensure_https(&endpoint)?;
         let (key, iv) = self.invoice_keys();
         let data = self.encrypt_checked(&self.merchant_id, input, key, iv)?;
         let req = Request {
@@ -779,6 +816,42 @@ fn shared_http_client() -> &'static reqwest::Client {
 #[cfg(test)]
 mod tests {
     use super::render_auto_submit_form;
+
+    /// The https guard: https always passes; http only for the loopback
+    /// hosts (any case, with or without port, bracketed IPv6); everything
+    /// else — non-loopback http, lookalike hosts, other schemes,
+    /// schemeless strings, empty — is `Error::Validation`.
+    #[test]
+    fn ensure_https_allows_https_and_loopback_http_only() {
+        use super::ensure_https;
+        use crate::error::Error;
+        for url in [
+            "https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5",
+            "HTTPS://payment.ecpay.com.tw/",
+            "http://127.0.0.1:9527/Cashier/AioCheckOut/V5",
+            "http://localhost/Action",
+            "http://LOCALHOST:80/x",
+            "http://[::1]:8080/Action",
+            "http://[::1]/Action",
+        ] {
+            assert!(ensure_https(url).is_ok(), "{url} must pass");
+        }
+        for url in [
+            "http://payment-stage.ecpay.com.tw/Cashier/",
+            "http://127.0.0.1.evil.com/",
+            "http://192.168.1.10/",
+            "http://user@127.0.0.1/",
+            "ftp://payment.ecpay.com.tw/",
+            "payment.ecpay.com.tw",
+            "",
+        ] {
+            let err = ensure_https(url).expect_err(url);
+            assert!(
+                matches!(err, Error::Validation(_)),
+                "{url}: expected Validation, got {err:?}"
+            );
+        }
+    }
 
     #[test]
     fn auto_submit_form_is_byte_identical_to_the_former_inline_copies() {

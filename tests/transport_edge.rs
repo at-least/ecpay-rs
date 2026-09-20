@@ -226,6 +226,99 @@ async fn exactly_one_mib_body_is_accepted() {
     assert_eq!(got.len(), 1 << 20);
 }
 
+/// A signed request — or a browser form action — aimed at a non-loopback
+/// `http://` URL would carry the CheckMacValue / AES payload in cleartext.
+/// The crate must refuse such URLs; `http` stays allowed for loopback hosts
+/// (every hermetic mock in this suite binds `http://127.0.0.1:0`).
+#[test]
+fn non_loopback_http_url_is_refused() {
+    let client = Ecpay {
+        payment_api_url: "http://payment-stage.ecpay.com.tw/Cashier/".into(),
+        ..sdk()
+    };
+    let err = client
+        .aio_check_out(&AioCheckOutParams {
+            merchant_trade_no: "NO20240101120000".into(),
+            merchant_trade_date: "2024/01/01 12:00:00".into(),
+            total_amount: 100,
+            trade_desc: "desc".into(),
+            item_name: "item".into(),
+            return_url: "https://example.com/return".into(),
+            choose_payment: ChoosePayment::Atm,
+            ..Default::default()
+        })
+        .expect_err("a cleartext http checkout action must be refused");
+    assert!(
+        matches!(&err, ecpay::Error::Validation(m) if m.contains("https")),
+        "expected the https guard, got {err:?}"
+    );
+}
+
+/// The guard must fire BEFORE any network I/O: an http POST target fails as
+/// `Error::Validation`, never as a connection/DNS result. The `.invalid`
+/// TLD is reserved to never resolve, so without the guard this test's error
+/// is `Error::Http` (DNS failure) and the test fails.
+#[tokio::test]
+async fn non_loopback_http_post_is_refused_before_send() {
+    let client = Ecpay {
+        payment_api_url: "http://nonexistent.host.invalid/Cashier/".into(),
+        ..sdk()
+    };
+    let err = client
+        .order_search(&OrderSearchParams {
+            merchant_trade_no: "x".into(),
+            time_stamp: 1,
+            platform_id: None,
+        })
+        .await
+        .expect_err("a cleartext http POST target must be refused");
+    assert!(
+        matches!(&err, ecpay::Error::Validation(m) if m.contains("https")),
+        "expected the pre-send https guard, got {err:?}"
+    );
+}
+
+/// The loopback exemption: `http://127.0.0.1`, `http://localhost` and
+/// `http://[::1]` (with or without ports) must all pass — they carry the
+/// hermetic test servers. A lookalike host (`127.0.0.1.evil.com`) must NOT.
+#[test]
+fn loopback_http_urls_are_allowed_but_lookalikes_are_not() {
+    let params = AioCheckOutParams {
+        merchant_trade_no: "NO20240101120000".into(),
+        merchant_trade_date: "2024/01/01 12:00:00".into(),
+        total_amount: 100,
+        trade_desc: "desc".into(),
+        item_name: "item".into(),
+        return_url: "https://example.com/return".into(),
+        choose_payment: ChoosePayment::Atm,
+        ..Default::default()
+    };
+    for base in [
+        "http://127.0.0.1:9527/Cashier/",
+        "http://localhost/Cashier/",
+        "http://[::1]:9527/Cashier/",
+    ] {
+        let client = Ecpay {
+            payment_api_url: base.into(),
+            ..sdk()
+        };
+        client
+            .aio_check_out(&params)
+            .unwrap_or_else(|e| panic!("{base} must be allowed, got {e}"));
+    }
+    let client = Ecpay {
+        payment_api_url: "http://127.0.0.1.evil.com/Cashier/".into(),
+        ..sdk()
+    };
+    let err = client
+        .aio_check_out(&params)
+        .expect_err("a lookalike loopback host is still cleartext to the wire");
+    assert!(
+        matches!(err, ecpay::Error::Validation(_)),
+        "expected the https guard, got {err:?}"
+    );
+}
+
 /// `aio_check_out` is a pure computation: the same params must yield a
 /// byte-identical signed payload across calls (retries, idempotent replay
 /// into logs/tests) — no hidden timestamps inside the signing path.
@@ -551,7 +644,53 @@ fn callback_decoders_route_through_their_own_key_pairs() {
     assert_eq!(v["RtnCode"], "1");
 }
 
-/// A well-formed envelope with `TransCode != 1` reaches the callback
+/// A panicking mock handler must not kill the server: multi-request tests
+/// share one server, and a dead listener turns every later wire-contract
+/// failure into an opaque connection error. The contract: the panicked
+/// request answers 500 with the panic message in the body, and the server
+/// keeps serving.
+#[tokio::test]
+async fn a_panicking_handler_surfaces_as_500_and_the_server_survives() {
+    let srv = spawn_http_server(move |path, _body| {
+        if path.contains("boom") {
+            panic!("wire contract broken: unsigned payload reached the server");
+        }
+        (200, "text/plain".to_owned(), b"ping=1".to_vec())
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        ..sdk()
+    };
+
+    // The panicking request: the failure must carry the assertion, not a
+    // connection error.
+    let err = client
+        .call_payment_api("boom", &Default::default())
+        .await
+        .expect_err("the panicked handler must answer 500");
+    match &err {
+        ecpay::Error::HttpStatus {
+            service: ecpay::Service::Payment,
+            status: 500,
+            body,
+        } => {
+            assert!(
+                body.contains("handler panicked")
+                    && body.contains("wire contract broken: unsigned payload"),
+                "the body must carry the panic message, got {body:?}"
+            );
+        }
+        other => panic!("expected HttpStatus(Payment, 500), got {other:?}"),
+    }
+
+    // The server must have survived: a follow-up request still works.
+    let ok = client
+        .call_payment_api("ping", &Default::default())
+        .await
+        .expect("the server must survive a handler panic");
+    assert_eq!(ok.get("ping").map(String::as_str), Some("1"));
+}
+
 /// decoders together with the sender's `TransMsg`. On a public ReturnURL
 /// those bytes are attacker-chosen, so per the `Error::TransCode` contract
 /// the callback decoders must report a bounded, Debug-escaped excerpt —
