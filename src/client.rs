@@ -346,8 +346,10 @@ async fn body_string(resp: &mut reqwest::Response) -> Result<String> {
 /// Guards every URL this crate sends signed payload to: https everywhere,
 /// with `http` allowed only for loopback hosts (the hermetic test servers
 /// and local development bind there). Everything else — a mistyped
-/// `http://` production base, `ftp://`, a schemeless string, or a lookalike
-/// `127.0.0.1.evil.com` — is [`Error::Validation`]: every request carries a
+/// `http://` production base, `ftp://`, a schemeless string, a lookalike
+/// `127.0.0.1.evil.com`, or any authority carrying userinfo
+/// (`127.0.0.1:80@evil.com` — the real host lives after the `@`) — is
+/// [`Error::Validation`]: every request carries a
 /// CheckMacValue or an AES envelope, and shipping one in cleartext is the
 /// attack this guard exists to make unreachable.
 pub(crate) fn ensure_https(url: &str) -> Result<()> {
@@ -358,16 +360,24 @@ pub(crate) fn ensure_https(url: &str) -> Result<()> {
     if scheme == "http" {
         let rest = &url[scheme.len() + 3..];
         let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-        let host = if let Some(inner) = authority.strip_prefix('[') {
-            inner.split(']').next().unwrap_or("")
-        } else {
-            authority.rsplit_once(':').map_or(authority, |(h, _)| h)
-        };
-        if matches!(
-            host.to_ascii_lowercase().as_str(),
-            "localhost" | "127.0.0.1" | "::1"
-        ) {
-            return Ok(());
+        // A userinfo-bearing authority is never eligible for the loopback
+        // exemption: the real URL parser (the `url` crate behind reqwest)
+        // takes the host from after the LAST '@', so
+        // `http://127.0.0.1:80@evil.com/` would extract the loopback below
+        // and then POST the signed payload to evil.com in cleartext. ECPay
+        // endpoints never carry userinfo.
+        if !authority.contains('@') {
+            let host = if let Some(inner) = authority.strip_prefix('[') {
+                inner.split(']').next().unwrap_or("")
+            } else {
+                authority.rsplit_once(':').map_or(authority, |(h, _)| h)
+            };
+            if matches!(
+                host.to_ascii_lowercase().as_str(),
+                "localhost" | "127.0.0.1" | "::1"
+            ) {
+                return Ok(());
+            }
         }
     }
     Err(Error::Validation(format!(
@@ -823,8 +833,9 @@ mod tests {
 
     /// The https guard: https always passes; http only for the loopback
     /// hosts (any case, with or without port, bracketed IPv6); everything
-    /// else — non-loopback http, lookalike hosts, other schemes,
-    /// schemeless strings, empty — is `Error::Validation`.
+    /// else — non-loopback http, lookalike hosts, userinfo-bearing
+    /// authorities, other schemes, schemeless strings, empty — is
+    /// `Error::Validation`.
     #[test]
     fn ensure_https_allows_https_and_loopback_http_only() {
         use super::ensure_https;
@@ -848,6 +859,23 @@ mod tests {
             "ftp://payment.ecpay.com.tw/",
             "payment.ecpay.com.tw",
             "",
+            // Userinfo bypasses: a loopback-looking userinfo before the real
+            // host. The guard must reject any authority containing '@' — the
+            // real URL parser (the `url` crate behind reqwest) takes the host
+            // from after the LAST '@', so these resolve to evil.com over
+            // cleartext http (probed on url 2.5.8).
+            "http://127.0.0.1:80@evil.com/x",
+            "http://localhost:443@evil.com/x",
+            "http://[::1]:80@evil.com/",
+            // Port after the '@' is rejected by the @-gate (and would have
+            // been rejected by host extraction even before it) — pinned so
+            // it stays that way.
+            "http://localhost@evil.com:80/",
+            // Encoding tricks that must stay fail-closed: %40 in the
+            // authority, and a backslash (which the url crate treats as a
+            // slash for special schemes).
+            "http://127.0.0.1%40evil.com/",
+            "http://127.0.0.1\\@evil.com/",
         ] {
             let err = ensure_https(url).expect_err(url);
             assert!(

@@ -4,6 +4,15 @@
 
 _非破壞性：_
 
+- **`ensure_https` 修補 userinfo 繞道**(程式碼審查 🔴):守衛以手寫字串
+  切割取 host(`rsplit_once(':')`),`http://127.0.0.1:80@evil.com/x` 這類
+  「userinfo 長得像 loopback」的 URL 會被誤判為 host `127.0.0.1` 而放行,
+  但 reqwest 背後的 url crate 取**最後一個 `@` 之後**的部分當 host——
+  實際會以明文 http 把簽章表單/AES 信封 POST 到 `evil.com`(以 url 2.5.8
+  實測釘死;六個呼叫點全受影響,含瀏覽器表單 action,瀏覽器同樣以
+  `@` 解析 userinfo)。現在凡是 authority 帶 `@` 一律拒絕(ECPay 端點
+  從不帶 userinfo);測試釘住三種繞道形狀,以及 `%40`、反斜線等編碼
+  花招的 fail-closed 行為。
 - **新增 `Ecpay::zeroize_signing_keys()`**:就地清零六組簽章金鑰緩衝區
   (bytes 歸零、字串截斷),供嵌入端在程序結束前主動清除記憶體中的金鑰
   材料。刻意做成**顯式**方法而非 `Drop`:對 `Ecpay` 實作 `Drop` 會禁止
