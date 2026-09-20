@@ -748,7 +748,8 @@ pub(crate) const BODY_EXCERPT_CHARS: usize = 512;
 /// attacker-controlled POST bodies (a public ServerReplyURL/ReturnURL) into
 /// this, so the echo must never be unbounded or verbatim. The non-envelope
 /// status errors (`Error::HttpStatus`) instead render
-/// their bodies through [`truncate_for_display`] — verbatim-but-bounded,
+/// their bodies through [`truncate_for_display`] — printable text
+/// verbatim-but-bounded (control characters escaped there too),
 /// keeping the Go-parity `body=%s` shape for normal server responses.
 pub(crate) fn body_excerpt(body: &str) -> String {
     let mut chars = body.chars();
@@ -778,7 +779,9 @@ pub(crate) fn truncate_for_display(body: &str) -> String {
     for (i, c) in chars.by_ref().enumerate() {
         if i >= BODY_EXCERPT_CHARS {
             // The char that tripped the cap was already consumed by the
-            // loop, so it will never reach `chars.next()` — flag it here.
+            // loop — with `enumerate` the loop exits only here (flag set)
+            // or by exhaustion (nothing left), so the flag is the whole
+            // truncation signal.
             truncated = true;
             break;
         }
@@ -788,7 +791,7 @@ pub(crate) fn truncate_for_display(body: &str) -> String {
             head.push(c);
         }
     }
-    if truncated || chars.next().is_some() {
+    if truncated {
         format!("{head}… (truncated; {} bytes total)", body.len())
     } else {
         head

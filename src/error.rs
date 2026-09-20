@@ -86,8 +86,10 @@ pub enum Error {
     CheckMacValueMismatch,
     /// An HTTP-level failure (non-2xx status) of one ECPay service's
     /// endpoint. `Display` renders Go's `fmt.Errorf` shape with the service
-    /// named — `ecpay {service} API error: status=%d body=%s` — the body
-    /// verbatim up to 512 chars, then a truncation notice with the total
+    /// named — `ecpay {service} API error: status=%d body=%s` — printable
+    /// body text verbatim up to 512 chars (control characters are escaped
+    /// in the rendering, so a hostile body cannot forge log lines), then a
+    /// truncation notice with the total
     /// size (the private `crate::client::truncate_for_display`); the field
     /// itself keeps the full body. A non-2xx body larger than the transport's
     /// 1 MiB cap surfaces as the body-cap [`Error::Message`] instead (the
