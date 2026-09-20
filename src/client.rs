@@ -542,24 +542,23 @@ impl Ecpay {
         crate::crypto::decrypt_payload_uniform(&res.data, key, iv)
     }
 
-    /// The two v2 browser-flow endpoints (`PrintTradeDocument`,
-    /// `RedirectToLogisticsSelection`) answer with a raw **text/html**
-    /// auto-submitting form instead of an AES envelope (live-captured
-    /// 2026-09: the form POSTs the print record / the AES selection request
-    /// to the browser page). Sends the same envelope, returns the raw HTML.
-    /// The typed sibling is [`Self::post_aes_json`] — the
-    /// envelope-build/POST/status-gate block is duplicated between the two
-    /// on purpose (they differ in response handling), so change both
-    /// together.
-    pub(crate) async fn post_aes_json_raw<I: Serialize>(
+    /// The shared half of [`Self::post_aes_json_raw`] and
+    /// [`Self::post_aes_json`]: https-guard, encrypt `input` into `Data`
+    /// (with [`Self::encrypt_checked`]'s Data-level MerchantID guard), build
+    /// the `{MerchantID, RqHeader, Data}` envelope — deliberately without
+    /// PlatformID, the shape the official PHP examples wire for these
+    /// services — POST it, and return `(status, body)`. Response handling,
+    /// including which non-2xx shapes get a second chance, stays with each
+    /// caller.
+    async fn post_envelope<I: Serialize>(
         &self,
-        to: AesEndpoint,
+        to: &AesEndpoint,
         rq_header: serde_json::Value,
         merchant_id: &str,
         input: &I,
         key: &[u8],
         iv: &[u8],
-    ) -> Result<String> {
+    ) -> Result<(u16, String)> {
         ensure_https(&to.url)?;
         let data = self.encrypt_checked(merchant_id, input, key, iv)?;
         let envelope = serde_json::json!({
@@ -576,6 +575,30 @@ impl Ecpay {
             .await?;
         let status = resp.status().as_u16();
         let body = body_string(&mut resp).await?;
+        Ok((status, body))
+    }
+
+    /// The two v2 browser-flow endpoints (`PrintTradeDocument`,
+    /// `RedirectToLogisticsSelection`) answer with a raw **text/html**
+    /// auto-submitting form instead of an AES envelope (live-captured
+    /// 2026-09: the form POSTs the print record / the AES selection request
+    /// to the browser page). Sends the same envelope, returns the raw HTML.
+    /// The typed sibling is [`Self::post_aes_json`] — unlike the typed path
+    /// it has no HTTP-500-with-valid-envelope fallback (these endpoints
+    /// answer HTML, not envelopes), and that asymmetry is deliberate; the
+    /// shared transport half lives in [`Self::post_envelope`].
+    pub(crate) async fn post_aes_json_raw<I: Serialize>(
+        &self,
+        to: AesEndpoint,
+        rq_header: serde_json::Value,
+        merchant_id: &str,
+        input: &I,
+        key: &[u8],
+        iv: &[u8],
+    ) -> Result<String> {
+        let (status, body) = self
+            .post_envelope(&to, rq_header, merchant_id, input, key, iv)
+            .await?;
         if !(200..300).contains(&status) {
             return Err(Error::HttpStatus {
                 service: to.service,
@@ -587,20 +610,14 @@ impl Ecpay {
     }
 
     /// The AES-JSON envelope core for every NON-B2C service (ECPG 站內付,
-    /// logistics v2, CrossBorder, B2B invoice): builds
-    /// `{MerchantID, RqHeader, Data}` — deliberately without PlatformID, the
-    /// shape the official PHP examples wire for these services — encrypts
-    /// `input` into `Data` (with [`Self::encrypt_checked`]'s Data-level
-    /// MerchantID guard), POSTs, gates on TransCode, decrypts into `O`.
+    /// logistics v2, CrossBorder, B2B invoice): POSTs the shared envelope
+    /// (see [`Self::post_envelope`]), gates on TransCode, decrypts into `O`.
     /// `to` carries the endpoint and the [`Service`] labelling the non-2xx
     /// [`Error::HttpStatus`] — the helper is shared by four service
     /// families, so the caller names its own.
     /// The B2C invoice envelope (`call_invoice_api`) keeps its own Go-port
     /// path because it always sends PlatformID and pins `Revision: "3.0.0"`.
-    /// Its raw-body sibling is [`Self::post_aes_json_raw`] — the
-    /// envelope-build/POST/status-gate block below is duplicated between the
-    /// two on purpose (they differ in response handling), so change both
-    /// together.
+    /// Its raw-body sibling is [`Self::post_aes_json_raw`].
     pub(crate) async fn post_aes_json<I: Serialize, O: DeserializeOwned>(
         &self,
         to: AesEndpoint,
@@ -610,22 +627,9 @@ impl Ecpay {
         key: &[u8],
         iv: &[u8],
     ) -> Result<O> {
-        ensure_https(&to.url)?;
-        let data = self.encrypt_checked(merchant_id, input, key, iv)?;
-        let envelope = serde_json::json!({
-            "MerchantID": merchant_id,
-            "RqHeader": rq_header,
-            "Data": data,
-        });
-        let mut resp = self
-            .http()
-            .post(&to.url)
-            .header("Content-Type", "application/json; charset=utf-8")
-            .body(envelope.to_string())
-            .send()
+        let (status, body) = self
+            .post_envelope(&to, rq_header, merchant_id, input, key, iv)
             .await?;
-        let status = resp.status().as_u16();
-        let body = body_string(&mut resp).await?;
         if !(200..300).contains(&status) {
             // Server-truth (logistics v2, captured live 2026-09): some
             // business errors answer HTTP 500 with a VALID envelope whose

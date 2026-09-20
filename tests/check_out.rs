@@ -864,8 +864,8 @@ fn need_extra_paid_info_constants_reach_the_wire() {
 
 // --- filter/validation agreement on empty optional values ---
 
-/// The struct doc promises the filter semantics ("strings non-empty, ints
-/// >= 0"): a value the filter stage would drop must not trip the group
+/// The struct doc promises the filter semantics ("strings non-empty,
+/// ints >= 0"): a value the filter stage would drop must not trip the group
 /// rules nor claim a Credit plan slot — otherwise a quietly-empty field
 /// produces a loud wrong rejection.
 #[test]
