@@ -196,6 +196,19 @@ pub const VENDOR_API_URL_STAGE: &str = "https://vendor-stage.ecpay.com.tw/Paymen
 /// `ECPayPaymentSdk(MerchantID, HashKey, HashIV)` constructor). The zero
 /// value is valid: empty API URLs fall back to the production endpoints.
 ///
+/// # Base-URL scheme rule
+///
+/// Every URL this crate sends signed payload to — all `*_api_url` fields
+/// below, and the checkout/logistics browser-form actions — must be
+/// **https**; `http` is allowed only for loopback hosts (`127.0.0.1`,
+/// `localhost`, `::1`; the hermetic test servers and local development bind
+/// there). Everything else — a mistyped `http://` production base, another
+/// scheme, a schemeless string, a lookalike host (`127.0.0.1.evil.com`), or
+/// any URL carrying userinfo (`127.0.0.1:80@evil.com`) — is refused at
+/// request time with [`Error::Validation`]: every request carries a
+/// CheckMacValue or an AES envelope, and shipping one in cleartext is the
+/// attack this rule exists to make unreachable.
+///
 /// `Debug` is hand-written and redacts every signing secret (`hash_key`,
 /// `hash_iv`, `invoice_hash_key`, `invoice_hash_iv`, `logistics_hash_key`,
 /// `logistics_hash_iv`) so a stray `{:?}` on the client never logs them.

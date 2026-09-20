@@ -4,6 +4,14 @@
 
 _非破壞性：_
 
+- **文件補強**(程式碼審查 🟡/🟢):https/loopback base-URL 規則寫進
+  `Ecpay` 的 struct 文件與 README(中/英),不再是只有 `pub(crate)` 函式
+  文件看得到的行為;回呼處理清單新增第 0 條——**註冊給綠界的回呼網址
+  本身也應使用 https**(本函式庫不檢查回呼 scheme,`http://` 回呼會以
+  明文收付款結果);`Error::Validation` 的文件範圍更新(現已涵蓋各家族
+  請求防護與 URL scheme 規則,不再只講 AioCheckOutParams);
+  `InvoiceExtend::carruer_num` 的文件改為如實描述「僅檢查長度,必填性
+  由綠界裁定」;`payment::Donation` 文件錯字修正。
 - **新增 `payment::decode_big5_with_status()`**(程式碼審查 🟢):回傳
   `(String, bool)`,字串半邊與 `download_merchant_balance` /
   `download_disbursement_balance` 的 Big5 解碼規則完全一致

@@ -191,7 +191,7 @@ wire_enum! {
 wire_enum! {
     /// AIO 訂單附帶發票的捐贈註記 (`Donation`) — **AIO 舊版語彙:`'1'` 捐贈/
     /// `'2'` 不捐贈**,與 B2C 電子發票 API 的 [`crate::invoice::Donation`]
-    /// (`'0'`/`'1'`)語意相反,型別刻意分開 so 兩套無法互抄。
+    /// (`'0'`/`'1'`)語意相反,型別刻意分開,兩套無法互抄。
     Donation {
         /// 捐贈 (1;需要 LoveCode)
         Yes => "1",

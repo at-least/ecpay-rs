@@ -74,8 +74,11 @@ impl fmt::Display for Service {
 pub enum Error {
     /// A non-success RtnCode on a command call (Go `*APIError`).
     Api(ApiError),
-    /// Parameter validation failure in [`crate::payment::AioCheckOutParams`]
-    /// processing (the Python SDK raises `Exception(message)`).
+    /// Parameter validation failure raised before anything is sent — the
+    /// AIO checkout's field checks ([`crate::payment::AioCheckOutParams`]),
+    /// the per-family request guards (logistics, ECPG/B2B…), and the
+    /// https-only base-URL rule (`http` is allowed only for loopback
+    /// hosts). The Python SDK raises these as `Exception(message)`.
     Validation(String),
     /// A response CheckMacValue that does not match the recomputed one
     /// (`order_search` verifies it; the Python SDK raises

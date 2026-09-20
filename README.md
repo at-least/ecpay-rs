@@ -142,6 +142,11 @@ async fn return_url(params: HashMap<String, String>) -> &'static str {
 證明通知是新鮮的,也**不**證明金額與你的訂單一致。收到回呼後,視為
 「付款成功」之前必須全部通過:
 
+0. **你註冊給綠界的回呼網址本身也應該是 https**(`ReturnURL`/
+   `ServerReplyURL` 等):本函式庫的簽章與加密只保護外送請求,不會替你
+   檢查回呼網址的 scheme——填了 `http://`,綠界就會以明文 POST 付款結果
+   (含 `TradeAmt`、交易編號)到該網址。
+
 1. **驗 MAC**:`verify_check_mac_value`(金流)或
    `verify_logistics_check_mac_value`(國內物流,MD5);AES 信封服務用
    `decrypt_ecpg_callback` / `decrypt_logistics_callback` /
@@ -197,7 +202,16 @@ println!("RtnMsg = {}", result["RtnMsg"]);
 ### 自訂 HTTP client
 
 預設共用一把 hardened client(不跟隨重導、10s 連線/30s 總逾時、不池化
-閒置連線)。需要自己的連線池/逾時政策或測試 mock 時,注入 `reqwest::Client`:
+閒置連線)。需要自己的連線池/逾時政策或測試 mock 時,注入 `reqwest::Client`。
+
+另有一條所有 `*_api_url` 欄位(與瀏覽器表單 action)共用的規則,注入的
+client 也一樣適用:**一律 https**(`http` 僅允許 loopback host:
+`127.0.0.1`、`localhost`、`::1`,供本機測試伺服器使用)。其他任何形式——
+誤填的 `http://` 正式環境 base、`ftp://`、無 scheme 字串、長相相似的
+主機(如 `127.0.0.1.evil.com`)、帶 userinfo 的
+URL(如 `127.0.0.1:80@evil.com`)——都在請求時以 `Error::Validation`
+拒絕:每個請求都帶 CheckMacValue 或 AES 信封,以明文送出正是這條規則要
+封死的攻擊面。
 
 ```rust
 # use ecpay::Ecpay;
@@ -530,6 +544,14 @@ println!("{}", checkout.html_form()); // auto-submitting form
 ```
 
 Callback verification (`ReturnURL`): `client.verify_check_mac_value(&params)`.
+The callback URLs you register with ECPay (`ReturnURL`/`ServerReplyURL`…)
+should themselves be **https** — this crate's signing only protects
+outbound requests and does not check the callback scheme; an `http://`
+callback receives payment results (amounts, trade numbers) in cleartext.
+All `*_api_url` client fields (and the browser-form actions) are enforced
+https-only at request time (`http` allowed for loopback hosts only,
+e.g. local test servers); anything else is refused with
+`Error::Validation`.
 See the table above for the full API mapping, and
 [`examples/`](examples/) for ports of the official samples.
 
