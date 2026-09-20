@@ -905,3 +905,32 @@ fn dropped_optionals_do_not_count_as_set() {
         );
     assert!(param(&out, "ExpireDate").is_none());
 }
+
+// --- invoice_mark edge: Some("") ---
+
+/// Characterization (pins current behavior; meant to pass on first run):
+/// `invoice_mark: Some("")` behaves exactly like `None` — the mark is not
+/// sent, and with an invoice block the mark auto-fills to Y (the mark
+/// insertion keys on the string being non-empty, not on `is_some`). Pinning
+/// it so a refactor of that condition cannot silently change the wire.
+#[test]
+fn invoice_mark_some_empty_string_behaves_as_unset() {
+    // With an invoice block: auto-fill Y, same as None.
+    let out = sdk()
+        .aio_check_out(&AioCheckOutParams {
+            invoice_mark: Some(String::new()),
+            invoice: Some(invoice()),
+            ..base(ChoosePayment::Credit)
+        })
+        .expect("Some(\"\") with an invoice must behave as unset (auto-fill Y)");
+    assert_eq!(param(&out, "InvoiceMark"), Some("Y"));
+
+    // Without an invoice block: no InvoiceMark on the wire, no error.
+    let out = sdk()
+        .aio_check_out(&AioCheckOutParams {
+            invoice_mark: Some(String::new()),
+            ..base(ChoosePayment::Credit)
+        })
+        .expect("Some(\"\") without an invoice must behave as unset (nothing sent)");
+    assert!(param(&out, "InvoiceMark").is_none());
+}
