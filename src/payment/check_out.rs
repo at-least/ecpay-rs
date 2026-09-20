@@ -451,6 +451,21 @@ fn groups(p: &AioCheckOutParams) -> (bool, bool, bool) {
     )
 }
 
+/// The filter stage's notion of "set" (`insert_nonempty` / `push_nonempty`:
+/// optional strings are dropped when empty, optional ints when negative,
+/// codes when their wire value is empty) — `validate_groups` and
+/// `credit_plan_pairs` must count values by it, so a quietly-empty field
+/// neither trips a group rejection nor claims a Credit plan slot.
+fn opt_str_set(v: &Option<String>) -> bool {
+    v.as_deref().is_some_and(|v| !v.is_empty())
+}
+fn opt_int_set(v: &Option<i64>) -> bool {
+    v.is_some_and(|n| n >= 0)
+}
+fn opt_code_set<T: crate::wire::WireCode>(v: &Option<T>) -> bool {
+    v.as_ref().is_some_and(|c| !c.as_str().is_empty())
+}
+
 /// 組別歸屬檢查:the official SDK merges exactly one group set per
 /// ChoosePayment; a field set for an inactive group would be silently signed
 /// and sent, so the typed API rejects it loudly instead.
@@ -462,20 +477,20 @@ fn validate_groups(p: &AioCheckOutParams) -> Result<()> {
             "{name} is only valid with its ChoosePayment group (the official SDK would not send it)."
         ))
     };
-    if p.expire_date.is_some() && !atm_group {
+    if opt_int_set(&p.expire_date) && !atm_group {
         return Err(group("ExpireDate"));
     }
-    let cvs_fields_set = p.store_expire_date.is_some()
-        || p.desc_1.is_some()
-        || p.desc_2.is_some()
-        || p.desc_3.is_some()
-        || p.desc_4.is_some();
+    let cvs_fields_set = opt_int_set(&p.store_expire_date)
+        || opt_str_set(&p.desc_1)
+        || opt_str_set(&p.desc_2)
+        || opt_str_set(&p.desc_3)
+        || opt_str_set(&p.desc_4);
     if cvs_fields_set && !cvs_barcode_group {
         return Err(group(
             "a CVS/BARCODE extend field (StoreExpireDate/Desc_1..4)",
         ));
     }
-    if (p.payment_info_url.is_some() || p.client_redirect_url.is_some())
+    if (opt_str_set(&p.payment_info_url) || opt_str_set(&p.client_redirect_url))
         && !atm_group
         && !cvs_barcode_group
     {
@@ -485,14 +500,14 @@ fn validate_groups(p: &AioCheckOutParams) -> Result<()> {
     }
 
     // --- 信用卡延伸參數 (三擇一) ---
-    let one_off = p.redeem.is_some() || p.union_pay.is_some(); // 一次付清
-    let installment = p.credit_installment.is_some(); // 分期付款
-    let periodic = p.period_amount.is_some()
-        || p.period_type.is_some()
-        || p.frequency.is_some()
-        || p.exec_times.is_some()
-        || p.period_return_url.is_some(); // 定期定額
-    if (p.binding_card.is_some() || p.merchant_member_id.is_some()) && !credit_group {
+    let one_off = opt_str_set(&p.redeem) || opt_int_set(&p.union_pay); // 一次付清
+    let installment = opt_str_set(&p.credit_installment); // 分期付款
+    let periodic = opt_int_set(&p.period_amount)
+        || opt_code_set(&p.period_type)
+        || opt_int_set(&p.frequency)
+        || opt_int_set(&p.exec_times)
+        || opt_str_set(&p.period_return_url); // 定期定額
+    if (opt_int_set(&p.binding_card) || opt_str_set(&p.merchant_member_id)) && !credit_group {
         return Err(group(
             "a Credit bind-card field (BindingCard/MerchantMemberID)",
         ));
@@ -663,22 +678,22 @@ fn merge_extras(m: &mut HashMap<String, String>, extra: &BTreeMap<String, String
 /// The active Credit plan group's wire pairs (Python's if/elif chain over
 /// `__CREDIT_EXTEND_PARAMETERS_3/4/5`).
 fn credit_plan_pairs(p: &AioCheckOutParams) -> Option<Vec<(String, String)>> {
-    if p.redeem.is_some() || p.union_pay.is_some() {
+    if opt_str_set(&p.redeem) || opt_int_set(&p.union_pay) {
         let mut v = Vec::new();
         insert_optional_str_seq(&mut v, "Redeem", &p.redeem);
         insert_optional_int_seq(&mut v, "UnionPay", &p.union_pay);
         return Some(v);
     }
-    if p.credit_installment.is_some() {
+    if opt_str_set(&p.credit_installment) {
         let mut v = Vec::new();
         insert_optional_str_seq(&mut v, "CreditInstallment", &p.credit_installment);
         return Some(v);
     }
-    if p.period_amount.is_some()
-        || p.period_type.is_some()
-        || p.frequency.is_some()
-        || p.exec_times.is_some()
-        || p.period_return_url.is_some()
+    if opt_int_set(&p.period_amount)
+        || opt_code_set(&p.period_type)
+        || opt_int_set(&p.frequency)
+        || opt_int_set(&p.exec_times)
+        || opt_str_set(&p.period_return_url)
     {
         let mut v = Vec::new();
         insert_optional_int_seq(&mut v, "PeriodAmount", &p.period_amount);

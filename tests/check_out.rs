@@ -861,3 +861,47 @@ fn need_extra_paid_info_constants_reach_the_wire() {
         );
     }
 }
+
+// --- filter/validation agreement on empty optional values ---
+
+/// The struct doc promises the filter semantics ("strings non-empty, ints
+/// >= 0"): a value the filter stage would drop must not trip the group
+/// rules nor claim a Credit plan slot — otherwise a quietly-empty field
+/// produces a loud wrong rejection.
+#[test]
+fn dropped_optionals_do_not_count_as_set() {
+    // Redeem set-but-empty with ATM: the filter sends nothing, so the ATM
+    // group check must not fire.
+    let out = sdk()
+        .aio_check_out(&AioCheckOutParams {
+            redeem: Some(String::new()),
+            ..base(ChoosePayment::Atm)
+        })
+        .expect("an empty Redeem is dropped by the filter and must not trip the ATM group check");
+    assert!(param(&out, "Redeem").is_none());
+
+    // Empty Redeem beside a real Credit installment: only the installment
+    // counts, so the one-plan-per-order rule must not fire and the
+    // installment must ride the wire.
+    let out = sdk()
+        .aio_check_out(&AioCheckOutParams {
+            redeem: Some(String::new()),
+            credit_installment: Some("3".into()),
+            ..base(ChoosePayment::Credit)
+        })
+        .expect("only one plan (the installment) is actually set");
+    assert_eq!(param(&out, "CreditInstallment"), Some("3"));
+    assert!(param(&out, "Redeem").is_none());
+
+    // A negative optional int is dropped by the filter (n < 0): ExpireDate
+    // Some(-1) with CVS must not trip the ATM-only group check.
+    let out = sdk()
+        .aio_check_out(&AioCheckOutParams {
+            expire_date: Some(-1),
+            ..base(ChoosePayment::Cvs)
+        })
+        .expect(
+            "a negative ExpireDate is dropped by the filter and must not trip the group check",
+        );
+    assert!(param(&out, "ExpireDate").is_none());
+}
