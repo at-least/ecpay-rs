@@ -760,19 +760,37 @@ pub(crate) fn body_excerpt(body: &str) -> String {
     }
 }
 
-/// A bounded rendering of a response body for error `Display`: verbatim up
-/// to [`BODY_EXCERPT_CHARS`] chars, then a truncation notice with the total
-/// size. Unlike [`body_excerpt`] it does NOT escape control characters —
-/// keeping the Go-parity `body=%s` shape for normal server responses (these
-/// bodies arrive over the merchant's own TLS connection, not a public
-/// callback endpoint). The `HttpStatus` fields keep the
-/// full body for programmatic access; only the rendered message is bounded,
-/// so a hostile or misbehaving endpoint cannot flood a log line with
-/// megabytes of HTML.
+/// A bounded rendering of a response body for error `Display`: up to
+/// [`BODY_EXCERPT_CHARS`] chars verbatim (printable text keeps the
+/// Go-parity `body=%s` shape), then a truncation notice with the total
+/// size. Unlike [`body_excerpt`] only CONTROL characters are escaped —
+/// a raw newline (or any other C0 byte) in a hostile body would forge log
+/// lines through this rendering; escaping them is defense-in-depth beyond
+/// the own-TLS assumption (an injected client or a defeated transport must
+/// not turn `Display` into log injection). The `HttpStatus` fields keep
+/// the full body for programmatic access; only the rendered message is
+/// bounded, so a hostile or misbehaving endpoint cannot flood a log line
+/// with megabytes of HTML.
 pub(crate) fn truncate_for_display(body: &str) -> String {
     let mut chars = body.chars();
-    let head: String = chars.by_ref().take(BODY_EXCERPT_CHARS).collect();
-    if chars.next().is_some() {
+    let mut head = String::with_capacity(BODY_EXCERPT_CHARS);
+    let mut taken = 0usize;
+    let mut truncated = false;
+    for c in chars.by_ref() {
+        if taken >= BODY_EXCERPT_CHARS {
+            // The char that tripped the cap was already consumed by the
+            // loop, so it will never reach `chars.next()` — flag it here.
+            truncated = true;
+            break;
+        }
+        taken += 1;
+        if c.is_control() {
+            head.extend(c.escape_debug());
+        } else {
+            head.push(c);
+        }
+    }
+    if truncated || chars.next().is_some() {
         format!("{head}… (truncated; {} bytes total)", body.len())
     } else {
         head

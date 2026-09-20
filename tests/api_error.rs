@@ -68,3 +68,34 @@ fn http_status_display_names_the_service() {
         other => panic!("expected HttpStatus, got {other:?}"),
     }
 }
+
+/// `Error::HttpStatus`'s Display echoes a response body into the merchant's
+/// logs. Printable text renders verbatim (Go-parity `body=%s`), but control
+/// characters are escaped in the RENDERING — raw newlines forge log lines
+/// when a hostile body reaches this rendering (defense-in-depth beyond the
+/// own-TLS assumption: an injected client or a defeated transport must not
+/// turn Display into log injection) — while the `body` field keeps the
+/// full verbatim bytes for programmatic access.
+#[test]
+fn http_status_display_escapes_control_characters() {
+    let err: Error = Error::HttpStatus {
+        service: ecpay::Service::Payment,
+        status: 500,
+        body: "line1\nline2\tTAIL\u{7}".to_owned(),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains(r"line1\nline2\tTAIL\u{7}"),
+        "control characters must be escaped in Display, got {rendered:?}"
+    );
+    assert!(
+        !rendered.contains('\n'),
+        "raw newline must not reach Display, got {rendered:?}"
+    );
+    match &err {
+        Error::HttpStatus { body, .. } => {
+            assert_eq!(body, "line1\nline2\tTAIL\u{7}");
+        }
+        other => panic!("expected HttpStatus, got {other:?}"),
+    }
+}

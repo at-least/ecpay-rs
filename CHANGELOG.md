@@ -4,6 +4,12 @@
 
 _非破壞性：_
 
+- **`Error::HttpStatus` 的 Display 跳脫控制字元**(程式碼審查 🟢):節錄
+  渲染(`truncate_for_display`)過去對控制字元原樣輸出,依據是「body 來自
+  商戶自己的 TLS 連線」——該假設可被注入的 HTTP client 或被擊穿的傳輸
+  打破,raw 換行即可偽造 log 行。現在可印字元維持 Go 對照的 `body=%s`
+  原樣形狀,控制字元在**渲染**中以 `escape_debug` 跳脫(`\n`、`\u{7}`…),
+  `body` 欄位仍保留完整原文供程式化取用;512 字元上限不變。
 - **`finite_f64` 拒絕指數記法量級**(程式碼審查 🟡):AES-JSON 金額欄位
   (`ItemCount`/`ItemPrice`/`ItemAmount`/`GoodsWeight`)的 wire 形式過去
   完全交給 serde_json 的預設浮點渲染——其十進位/指數切換窗口是實作細節
