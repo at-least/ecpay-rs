@@ -659,12 +659,28 @@ impl Ecpay {
 /// The official SDK sets `response.encoding='big5'` for the download
 /// endpoints. Undecodable bytes become U+FFFD rather than an error.
 fn decode_big5(body: &[u8]) -> String {
+    decode_big5_with_status(body).0
+}
+
+/// [`Ecpay::download_merchant_balance`] /
+/// [`Ecpay::download_disbursement_balance`]
+/// decode their body with this function's Big5 rules and return the plain
+/// `String`. Exposed so callers CAN detect corruption: the boolean is
+/// encoding_rs' `had_errors` — `true` means at least one byte was invalid
+/// Big5 and was replaced with U+FFFD. The string half follows the official
+/// SDK exactly (`response.encoding='big5'`, Python `big5` codec parity):
+/// undecodable bytes become U+FFFD rather than an error, and no BOM
+/// sniffing (`decode_without_bom_handling` — a leading BOM pair is invalid
+/// Big5, not a stream switch). A one-byte flip in a settlement report
+/// therefore never errors; without the flag a corrupted payee name would
+/// flow into reconciliation unnoticed.
+pub fn decode_big5_with_status(body: &[u8]) -> (String, bool) {
     // `decode_without_bom_handling`, not `decode`: the official SDK decodes
     // with Python's `big5` codec, which has no BOM sniffing. `decode` would
     // switch the whole stream to UTF-8/UTF-16 on a leading BOM pair and
     // silently turn a corrupt body into mojibake instead of U+FFFDs.
-    let (text, _) = encoding_rs::BIG5.decode_without_bom_handling(body);
-    text.into_owned()
+    let (text, had_errors) = encoding_rs::BIG5.decode_without_bom_handling(body);
+    (text.into_owned(), had_errors)
 }
 
 // --- Go-port compatibility surface (QueryTradeInfo with a typed output) ---
@@ -749,6 +765,33 @@ mod tests {
         // U+FFFD.
         assert_eq!(decode_big5(&[0x81]), "\u{FFFD}");
         assert_eq!(decode_big5(&[0xFF]), "\u{FFFD}");
+    }
+
+    /// `decode_big5_with_status` surfaces encoding_rs' `had_errors` flag: a
+    /// corrupted settlement file decodes string-wise exactly like
+    /// `decode_big5` (Python parity — U+FFFDs, never an error), but the
+    /// flag lets a caller DETECT the corruption instead of silently
+    /// reconciling against mojibake payee names.
+    #[test]
+    fn big5_with_status_reports_undecodable_bytes() {
+        use super::decode_big5_with_status;
+        // Valid Big5 全中文 and plain ASCII decode with no corruption.
+        let big5_quan_zhong_wen = [0xA5, 0xFE, 0xA4, 0xA4, 0xA4, 0xE5];
+        let (text, had_errors) = decode_big5_with_status(&big5_quan_zhong_wen);
+        assert_eq!(text, "\u{5168}\u{4E2D}\u{6587}");
+        assert!(!had_errors);
+        let (text, had_errors) = decode_big5_with_status(b"hello");
+        assert_eq!(text, "hello");
+        assert!(!had_errors);
+
+        // Invalid bytes decode to U+FFFDs — and the flag turns true. (The
+        // exact replacement count is decoder-defined — the WHATWG decoder
+        // may consume an invalid lead byte together with the byte that
+        // follows, so [0x81, 0xFF] is ONE U+FFFD; the single-byte case is
+        // pinned exactly by `big5_invalid_bytes_become_replacement_chars`.)
+        let (text, had_errors) = decode_big5_with_status(&[0x81, 0xFF]);
+        assert!(text.contains('\u{FFFD}'), "{text:?}");
+        assert!(had_errors);
     }
 
     #[test]

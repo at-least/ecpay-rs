@@ -4,6 +4,13 @@
 
 _非破壞性：_
 
+- **新增 `payment::decode_big5_with_status()`**(程式碼審查 🟢):回傳
+  `(String, bool)`,字串半邊與 `download_merchant_balance` /
+  `download_disbursement_balance` 的 Big5 解碼規則完全一致
+  (U+FFFD 替換、不 BOM-sniff),布林半邊透出 encoding_rs 的
+  `had_errors`——至少一個位元組是壞的 Big5。過去對帳檔裡的一個壞位元組
+  會靜默變成 U+FFFD(如收款人名稱)流入對帳而無從察覺;兩個下載方法
+  維持回傳 `String`(原始碼相容),在乎資料損壞的呼叫端改用本函式。
 - **國內物流的協定錯誤判別不再依賴 `=` 啟發式**(程式碼審查 🟢):
   status 前綴(`0|`/`1|`)回應過去以「body 內沒有 `=`」判定為協定自身的
   錯誤訊息;帶 `=` 的錯誤訊息(如
