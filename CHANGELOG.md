@@ -46,7 +46,16 @@ _非破壞性：_
   拒絕——規格合法但離譜的量級(七位小數的 `0.000001` 元單價)從「悄悄
   送出未驗證的 wire 形狀」變成「本機大聲失敗」。原 `1e21`/`1e-7` 等指數
   釘子改為錯誤斷言;`1e15`/`1e-5` 的 plain 釘子保留(僅記錄現行窗口,
-  不作保證)。
+  不作保證)。**範圍補充**:帶此 helper 的欄位也出現在 `Serialize` 的
+  **回應**型別上(`AllowanceItem`/`AllowanceInfoItem`)——把查回的回應
+  原樣再序列化(存檔/轉發/log)時,若值落在指數窗口同樣會在此失敗;此前
+  會原樣寫出。
+- **`ensure_https` 不再對畸形 URL panic;裸 scheme 一律拒絕**(程式碼
+  審查最終回歸審查 🟢):scheme 判別改為比對字面前綴——過去
+  `split("://")` 取頭,base URL 只填 `"http"`(無 `://`)會在守衛內切過
+  字串結尾直接 **panic**(所有請求路徑可觸發);`"https"` 則被誤當成
+  https 而放行。兩者現在都是 schemeless 字串,回
+  `Error::Validation`(與文件契約一致)。
 - **`ensure_https` 修補 userinfo 繞道**(程式碼審查 🔴):守衛以手寫字串
   切割取 host(`rsplit_once(':')`),`http://127.0.0.1:80@evil.com/x` 這類
   「userinfo 長得像 loopback」的 URL 會被誤判為 host `127.0.0.1` 而放行,

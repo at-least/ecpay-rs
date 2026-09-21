@@ -353,12 +353,17 @@ async fn body_string(resp: &mut reqwest::Response) -> Result<String> {
 /// CheckMacValue or an AES envelope, and shipping one in cleartext is the
 /// attack this guard exists to make unreachable.
 pub(crate) fn ensure_https(url: &str) -> Result<()> {
-    let scheme = url.split("://").next().unwrap_or("").to_ascii_lowercase();
-    if scheme == "https" {
+    // Scheme detection on the literal `://`-terminated prefix, never on a
+    // `split("://")` head: a bare "http" (no `://`) would otherwise slice
+    // past the end of the string below, and a bare "https" would sneak
+    // through as "https" — both schemeless strings, both refused by the
+    // doc contract.
+    let bytes = url.as_bytes();
+    if bytes.len() >= 8 && bytes[..8].eq_ignore_ascii_case(b"https://") {
         return Ok(());
     }
-    if scheme == "http" {
-        let rest = &url[scheme.len() + 3..];
+    if bytes.len() >= 7 && bytes[..7].eq_ignore_ascii_case(b"http://") {
+        let rest = &url[7..];
         let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
         // A userinfo-bearing authority is never eligible for the loopback
         // exemption: the real URL parser (the `url` crate behind reqwest)
@@ -878,6 +883,14 @@ mod tests {
             "ftp://payment.ecpay.com.tw/",
             "payment.ecpay.com.tw",
             "",
+            // Bare scheme tokens are schemeless strings, not URLs: a bare
+            // "http" used to slice past the end of the string inside the
+            // guard (panic), and a bare "https" used to pass the guard as
+            // if it were a URL. Both must be `Error::Validation`.
+            "http",
+            "HTTP",
+            "https",
+            "HTTPS",
             // Userinfo bypasses: a loopback-looking userinfo before the real
             // host. The guard must reject any authority containing '@' — the
             // real URL parser (the `url` crate behind reqwest) takes the host
