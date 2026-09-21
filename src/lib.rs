@@ -84,16 +84,17 @@ pub mod logistics;
 pub mod payment;
 mod wire;
 
+pub use client::parse_form;
 pub use crypto::{
     check_mac_value, decrypt, decrypt_data, encrypt, encrypt_data, hash_mac, unmarshal, url_encode,
     EncryptType,
 };
 pub use ecpg::{
     AtmInfo, BarcodeInfo, CardInfo, ConsumerInfo, CreateBindCardInput, CreatePaymentInput,
-    CreatePaymentWithCardIdInput, CvsInfo, DeleteMemberBindCardInput, EcpgDoActionInput,
-    EcpgPeriodActionInput, EcpgTradeRefInput, GetMemberBindCardInput, GetTokenbyBindingCardInput,
-    GetTokenbyTradeInput, GetTokenbyTradeOutput, GetTokenbyUserInput, OrderInfo,
-    QueryTradeMediaInput, UnionPayInfo,
+    CreatePaymentWithCardIdInput, CvsInfo, DeleteMemberBindCardInput, EcpgCreditAction,
+    EcpgDoActionInput, EcpgPeriodActionInput, EcpgTradeRefInput, GetMemberBindCardInput,
+    GetTokenbyBindingCardInput, GetTokenbyTradeInput, GetTokenbyTradeOutput, GetTokenbyUserInput,
+    OrderInfo, QueryTradeMediaInput, UnionPayInfo,
 };
 pub use error::{ApiError, Error, Result, Service};
 pub use invoice::{
@@ -208,6 +209,15 @@ pub const VENDOR_API_URL_STAGE: &str = "https://vendor-stage.ecpay.com.tw/Paymen
 /// request time with [`Error::Validation`]: every request carries a
 /// CheckMacValue or an AES envelope, and shipping one in cleartext is the
 /// attack this rule exists to make unreachable.
+///
+/// # Base-URL trailing slash
+///
+/// Base URLs are path prefixes: every endpoint joins as `{base}{action}`,
+/// and a missing trailing `/` is normalized at the join —
+/// `payment_api_url: "https://payment.ecpay.com.tw/Cashier"` reaches the
+/// same endpoints as the documented `.../Cashier/` form instead of signing
+/// a request to a nonexistent `.../CashierAioCheckOut/V5`. An empty field
+/// still selects the production default.
 ///
 /// `Debug` is hand-written and redacts every signing secret (`hash_key`,
 /// `hash_iv`, `invoice_hash_key`, `invoice_hash_iv`, `logistics_hash_key`,

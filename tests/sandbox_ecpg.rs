@@ -12,7 +12,7 @@
 
 use ecpay::ecpg::{
     AtmInfo, BarcodeInfo, CardInfo, ConsumerInfo, CreatePaymentWithCardIdInput, CvsInfo,
-    EcpgDoActionInput, EcpgTradeRefInput, GetTokenbyTradeInput, OrderInfo,
+    EcpgCreditAction, EcpgDoActionInput, EcpgTradeRefInput, GetTokenbyTradeInput, OrderInfo,
 };
 use ecpay::Ecpay;
 mod common;
@@ -209,7 +209,7 @@ async fn do_action_not_found_is_in_band_on_the_ecpayment_domain() {
             merchant_id: MERCHANT_ID.into(), // required (5000220 without)
             merchant_trade_no: unique_no("SBX"),
             trade_no: unique_no("T"),
-            action: "R".into(),
+            action: EcpgCreditAction::Refund,
             total_amount: 100,
         })
         .await

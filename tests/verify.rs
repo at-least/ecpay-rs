@@ -144,3 +144,76 @@ fn empty_key_client_rejects_empty_key_forged_mac() {
         "an empty-key client must reject a MAC computed with the same empty keys"
     );
 }
+
+/// `ecpay::parse_form` decodes a raw `application/x-www-form-urlencoded`
+/// callback body — what a webhook handler receives BEFORE any framework
+/// decoding — into the map shape `verify_check_mac_value` takes:
+/// percent-decoding with `+` as space, blank values kept, duplicate keys
+/// last-value-wins (Python `parse_qsl(keep_blank_values=True)` semantics).
+/// Feeding still-encoded values never verifies (the MAC is computed over
+/// decoded values), which is the exact trap `examples/callback_verify.rs`
+/// used to fall into.
+#[test]
+fn parse_form_decodes_a_raw_callback_body_for_verification() {
+    let ec = test_payment_ecpay("");
+    let params = map(&[
+        ("MerchantID", "3002607"),
+        ("MerchantTradeNo", "Test1234567890"),
+        ("RtnCode", "1"),
+        ("TradeAmt", "100"),
+        ("PaymentDate", "2025/01/01 12:05:00"),
+        ("ItemName", "商品壹#商品貳"),
+    ]);
+    let mac = hash_mac(&params, &ec.hash_key, &ec.hash_iv);
+
+    // Serialize the way a real form POST body looks: url-encoded values,
+    // then the CheckMacValue ECPay appends.
+    let mut body = String::new();
+    for (k, v) in &params {
+        body.push_str(&format!("{}={}&", k, ecpay::url_encode(v)));
+    }
+    body.push_str(&format!("CheckMacValue={mac}"));
+
+    let parsed = ecpay::parse_form(&body);
+    // Blank values kept; duplicate keys resolve last-value-wins (the
+    // parse_qsl(keep_blank_values=True) semantics the doc promises).
+    let edge = ecpay::parse_form("k&blank=&dup=1&dup=2");
+    assert_eq!(edge.get("k").map(String::as_str), Some(""), "valueless key");
+    assert_eq!(
+        edge.get("blank").map(String::as_str),
+        Some(""),
+        "blank value"
+    );
+    assert_eq!(
+        edge.get("dup").map(String::as_str),
+        Some("2"),
+        "dup last wins"
+    );
+    assert_eq!(
+        parsed.get("PaymentDate").map(String::as_str),
+        Some("2025/01/01 12:05:00"),
+        "percent-decoding with + as space must round-trip: {:?}",
+        parsed.get("PaymentDate")
+    );
+    assert_eq!(
+        parsed.get("ItemName").map(String::as_str),
+        Some("商品壹#商品貳"),
+        "multi-byte UTF-8 across %-triplets must decode: {:?}",
+        parsed.get("ItemName")
+    );
+    assert!(
+        ec.verify_check_mac_value(&parsed),
+        "a genuine urlencoded callback body, parsed by parse_form, must verify"
+    );
+
+    // The trap the old example fell into: still-encoded values never verify.
+    let mut encoded_map = HashMap::<String, String>::new();
+    for (k, v) in &params {
+        encoded_map.insert(k.clone(), ecpay::url_encode(v));
+    }
+    encoded_map.insert("CheckMacValue".to_owned(), mac.clone());
+    assert!(
+        !ec.verify_check_mac_value(&encoded_map),
+        "still-encoded values double-encode in the MAC preimage and must not verify"
+    );
+}

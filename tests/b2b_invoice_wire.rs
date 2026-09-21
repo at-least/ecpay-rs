@@ -197,6 +197,94 @@ async fn issue_b2b_sends_the_php_example_payload_and_decodes_the_typed_output() 
     assert_eq!(out.random_number, "3990");
 }
 
+/// The Issue `Data` carries EXACTLY the documented B2B field set: the
+/// customer-contact optionals use the B2B wire names (`CustomerAddress` /
+/// `CustomerTelephoneNumber` — NOT B2C's `CustomerAddr`/`CustomerPhone`),
+/// and the B2C-style block B2B never reads (`Print`/`Donation`/`LoveCode`/
+/// `CarrierType`/`CarrierNum`/`CustomerName`/`CustomerID`/`TaxCenterFlag`/
+/// `ClearInvoice`) is not modeled at all — the B2B spec has no carrier or
+/// donation fields ("B2B 發票無載具/捐贈欄位,必填買方統編"; spec pages
+/// 24230/14850, 2026-04 snapshot) and the official `Issue.php` example
+/// sends none of them. Every documented optional is populated here — the
+/// wire-shape pin, not a semantically valid invoice (e.g. ZeroTaxRateReason
+/// alongside SpecialTaxType would never both ride a real request).
+#[tokio::test]
+async fn issue_b2b_data_is_exactly_the_documented_field_set() {
+    let srv = spawn_http_server(move |path, body| {
+        let data = assert_envelope_and_decrypt(path, body, "Issue");
+        assert_eq!(data["CustomerAddress"], "台北市大安區復興南路一段390號");
+        assert_eq!(data["CustomerTelephoneNumber"], "0223456789");
+        assert_eq!(data["InvoiceTime"], "2026-09-22 10:00:00");
+        assert_eq!(data["ClearanceMark"], 2, "Number per the spec table");
+        assert_eq!(data["ZeroTaxRateReason"], "71");
+        assert_eq!(data["SpecialTaxType"], 8);
+        assert_eq!(data["InvoiceRemark"], "remark");
+        let mut keys: Vec<&str> = data
+            .as_object()
+            .expect("Data is a JSON object")
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "ClearanceMark",
+                "CustomerAddress",
+                "CustomerEmail",
+                "CustomerIdentifier",
+                "CustomerTelephoneNumber",
+                "InvType",
+                "InvoiceRemark",
+                "InvoiceTime",
+                "Items",
+                "MerchantID",
+                "RelateNumber",
+                "SalesAmount",
+                "SpecialTaxType",
+                "TaxAmount",
+                "TaxType",
+                "TotalAmount",
+                "ZeroTaxRateReason",
+            ],
+            "no B2C-style field may appear: {keys:?}"
+        );
+        aes_reply(&issue_success_data())
+    });
+    let client = b2b_client(srv);
+    let out = client
+        .issue_b2b(&IssueB2bInput {
+            merchant_id: MERCHANT_ID.into(),
+            relate_number: "B2BTEST002".into(),
+            customer_identifier: "23165448".into(),
+            customer_email: "test-buyer@ecpay.com.tw".into(),
+            customer_address: Some("台北市大安區復興南路一段390號".into()),
+            customer_telephone_number: Some("0223456789".into()),
+            invoice_time: Some("2026-09-22 10:00:00".into()),
+            clearance_mark: Some(2),
+            zero_tax_rate_reason: Some("71".into()),
+            special_tax_type: Some(8),
+            invoice_remark: Some("remark".into()),
+            inv_type: "07".into(),
+            tax_type: "1".into(),
+            items: vec![B2bItem {
+                item_seq: 1,
+                item_name: "測試商品01".into(),
+                item_count: 3.0,
+                item_price: 10.0,
+                item_tax_type: "1".into(),
+                item_amount: 30.0,
+                ..Default::default()
+            }],
+            sales_amount: 30,
+            tax_amount: 2,
+            total_amount: 32,
+        })
+        .await
+        .expect("issue_b2b succeeds against the stage-shaped reply");
+    assert_eq!(out.rtn_code, 1);
+}
+
 /// Allowance: the Details array and the original-invoice references ride
 /// verbatim; the untyped Value output passes the decrypted payload through.
 #[tokio::test]

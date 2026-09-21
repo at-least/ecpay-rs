@@ -48,7 +48,26 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, Service};
+use crate::wire::wire_enum;
 use crate::Ecpay;
+
+wire_enum! {
+    /// `Credit/DoAction` 的動作 (`Action`,C/R/E/N)。與付款家族的
+    /// [`crate::payment::CreditAction`](「信用卡關帳/退刷/取消/放棄」)
+    /// 是同一組 wire 代碼,但依本 crate 各家族自有型別的慣例刻意分開
+    /// (同 `InvType` 在 invoice/invoice_b2b 各自建模)——兩個 API 家族
+    /// 的值域可能各自演進。
+    EcpgCreditAction {
+        /// 請款/關帳 (C)
+        Close => "C",
+        /// 退款 (R)
+        Refund => "R",
+        /// 取消 (E)
+        Cancel => "E",
+        /// 放棄 (N)
+        Abandon => "N",
+    }
+}
 
 // --- 共用子物件（巢狀 JSON 物件） ---
 
@@ -464,9 +483,9 @@ pub struct EcpgDoActionInput {
     /// 綠界交易編號（ECPay 端的 `TradeNo`，不是特店自訂編號）。
     #[serde(rename = "TradeNo")]
     pub trade_no: String,
-    /// 動作：C=請款(關帳)、R=退款、E=取消、N=放棄。
+    /// 動作:[`EcpgCreditAction`](C=請款/關帳、R=退款、E=取消、N=放棄)。
     #[serde(rename = "Action")]
-    pub action: String,
+    pub action: EcpgCreditAction,
     /// 交易金額。
     #[serde(rename = "TotalAmount")]
     pub total_amount: i64,
@@ -532,8 +551,11 @@ impl Ecpay {
         input: &GetTokenbyTradeInput,
     ) -> Result<GetTokenbyTradeOutput> {
         self.require_data_merchant_id(&input.merchant_id)?;
-        self.ecpg_post(format!("{}GetTokenbyTrade", self.ecpg_base_url()), input)
-            .await
+        self.ecpg_post(
+            crate::client::join_url(self.ecpg_base_url(), "GetTokenbyTrade"),
+            input,
+        )
+        .await
     }
 
     /// `CreatePayment`（送出付款；`PayToken` 來自前端 JS SDK）。
@@ -545,8 +567,11 @@ impl Ecpay {
     /// 幾乎必出現，略過會交易逾時）。
     pub async fn create_payment(&self, input: &CreatePaymentInput) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
-        self.ecpg_post(format!("{}CreatePayment", self.ecpg_base_url()), input)
-            .await
+        self.ecpg_post(
+            crate::client::join_url(self.ecpg_base_url(), "CreatePayment"),
+            input,
+        )
+        .await
     }
 
     /// `CreatePaymentWithCardID`（以已綁定的卡直接付款，幕後授權）。
@@ -563,7 +588,7 @@ impl Ecpay {
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
-            format!("{}CreatePaymentWithCardID", self.ecpg_base_url()),
+            crate::client::join_url(self.ecpg_base_url(), "CreatePaymentWithCardID"),
             input,
         )
         .await
@@ -574,8 +599,11 @@ impl Ecpay {
     /// ⚠️ 端點在 **ecpg 網域**：`{ecpg_base_url}Merchant/CreateBindCard`。
     pub async fn create_bind_card(&self, input: &CreateBindCardInput) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
-        self.ecpg_post(format!("{}CreateBindCard", self.ecpg_base_url()), input)
-            .await
+        self.ecpg_post(
+            crate::client::join_url(self.ecpg_base_url(), "CreateBindCard"),
+            input,
+        )
+        .await
     }
 
     /// `GetTokenbyBindingCard`（綁卡取號）。
@@ -588,7 +616,7 @@ impl Ecpay {
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
-            format!("{}GetTokenbyBindingCard", self.ecpg_base_url()),
+            crate::client::join_url(self.ecpg_base_url(), "GetTokenbyBindingCard"),
             input,
         )
         .await
@@ -602,8 +630,11 @@ impl Ecpay {
         input: &GetTokenbyUserInput,
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
-        self.ecpg_post(format!("{}GetTokenbyUser", self.ecpg_base_url()), input)
-            .await
+        self.ecpg_post(
+            crate::client::join_url(self.ecpg_base_url(), "GetTokenbyUser"),
+            input,
+        )
+        .await
     }
 
     /// `GetMemberBindCard`（查詢會員綁卡）。
@@ -615,8 +646,11 @@ impl Ecpay {
         input: &GetMemberBindCardInput,
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
-        self.ecpg_post(format!("{}GetMemberBindCard", self.ecpg_base_url()), input)
-            .await
+        self.ecpg_post(
+            crate::client::join_url(self.ecpg_base_url(), "GetMemberBindCard"),
+            input,
+        )
+        .await
     }
 
     /// `DeleteMemberBindCard`（刪除會員綁卡）。
@@ -629,7 +663,7 @@ impl Ecpay {
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
-            format!("{}DeleteMemberBindCard", self.ecpg_base_url()),
+            crate::client::join_url(self.ecpg_base_url(), "DeleteMemberBindCard"),
             input,
         )
         .await
@@ -649,7 +683,7 @@ impl Ecpay {
     pub async fn ecpg_query_trade(&self, input: &EcpgTradeRefInput) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
-            format!("{}Cashier/QueryTrade", self.ecpayment_base_url()),
+            crate::client::join_url(self.ecpayment_base_url(), "Cashier/QueryTrade"),
             input,
         )
         .await
@@ -672,7 +706,7 @@ impl Ecpay {
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
-            format!("{}Cashier/QueryPaymentInfo", self.ecpayment_base_url()),
+            crate::client::join_url(self.ecpayment_base_url(), "Cashier/QueryPaymentInfo"),
             input,
         )
         .await
@@ -688,7 +722,7 @@ impl Ecpay {
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
-            format!("{}Cashier/QueryTradeMedia", self.ecpayment_base_url()),
+            crate::client::join_url(self.ecpayment_base_url(), "Cashier/QueryTradeMedia"),
             input,
         )
         .await
@@ -710,10 +744,7 @@ impl Ecpay {
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
-            format!(
-                "{}Cashier/CreditCardPeriodAction",
-                self.ecpayment_base_url()
-            ),
+            crate::client::join_url(self.ecpayment_base_url(), "Cashier/CreditCardPeriodAction"),
             input,
         )
         .await
@@ -731,7 +762,7 @@ impl Ecpay {
     pub async fn ecpg_do_action(&self, input: &EcpgDoActionInput) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
-            format!("{}Credit/DoAction", self.ecpayment_base_url()),
+            crate::client::join_url(self.ecpayment_base_url(), "Credit/DoAction"),
             input,
         )
         .await
@@ -754,7 +785,7 @@ impl Ecpay {
     ) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         self.ecpg_post(
-            format!("{}CreditDetail/QueryTrade", self.ecpayment_base_url()),
+            crate::client::join_url(self.ecpayment_base_url(), "CreditDetail/QueryTrade"),
             input,
         )
         .await

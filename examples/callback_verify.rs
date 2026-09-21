@@ -1,6 +1,9 @@
 //! Verify an inbound payment-result callback's CheckMacValue (ReturnURL) —
 //! the required check for every ECPay notification. Feed it the raw POSTed
-//! form as key=value lines on stdin, e.g. from a webhook handler's params.
+//! form body (`a=1&b=%E5%95%86...`) on stdin; `ecpay::parse_form`
+//! percent-decodes it into the map `verify_check_mac_value` takes (the MAC
+//! is computed over DECODED values — feeding still-encoded values never
+//! verifies).
 //!
 //! ⚠ MAC verification alone is NOT "paid": before fulfilling an order you
 //! must also deduplicate the notification, bind `TradeAmt`/`MerchantID` to
@@ -8,7 +11,7 @@
 //! see the 回呼處理清單 / callback checklist in README.md, items 2–4.
 
 use std::collections::HashMap;
-use std::io::BufRead;
+use std::io::Read;
 
 use ecpay::Ecpay;
 
@@ -20,16 +23,11 @@ fn main() {
         ..Default::default()
     };
 
-    let stdin = std::io::stdin();
-    let params: HashMap<String, String> = stdin
-        .lock()
-        .lines()
-        .map_while(Result::ok)
-        .filter_map(|line| {
-            line.split_once('=')
-                .map(|(k, v)| (k.to_owned(), v.to_owned()))
-        })
-        .collect();
+    let mut body = String::new();
+    std::io::stdin()
+        .read_to_string(&mut body)
+        .expect("read stdin");
+    let params: HashMap<String, String> = ecpay::parse_form(body.trim());
 
     if client.verify_check_mac_value(&params) {
         println!("1|OK — CheckMacValue verified");

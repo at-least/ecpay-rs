@@ -28,6 +28,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ecpay::ecpg::EcpgCreditAction;
 use ecpay::Ecpay;
 use serde_json::{json, Value};
 mod common;
@@ -479,7 +480,7 @@ async fn ecpg_query_family_error_shapes() {
             merchant_id: "3002607".into(),
             merchant_trade_no: unknown,
             trade_no: "NOSUCHTREADNO0001".into(),
-            action: "R".into(),
+            action: EcpgCreditAction::Refund,
             total_amount: 100,
         })
         .await

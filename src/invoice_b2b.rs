@@ -115,7 +115,7 @@ impl Ecpay {
                     .into(),
             ));
         }
-        let endpoint = format!("{}{}", self.b2b_base_url(), action);
+        let endpoint = crate::client::join_url(self.b2b_base_url(), action);
         let rq_header = serde_json::json!({
             "Timestamp": crate::client::unix_now(),
             "RqID": self.b2b_rq_id.clone(),
@@ -139,18 +139,23 @@ impl Ecpay {
 
 // --- Issue (開立發票) — example/Invoice/B2B/Issue.php ---
 
-/// 開立 B2B 發票的輸入參數（欄位集逐字對應官方 PHP 範例
-/// `example/Invoice/B2B/Issue.php`，該請求已於 2026-09 在 stage 實測開立
-/// 成功）。
+/// 開立 B2B 發票的輸入參數（欄位集 = 官方規格頁 B2BInvoice/Issue 的
+/// Data 欄位表——存證模式 24230 / 交換模式 14850,2026-04 快照;必填欄位
+/// 並逐字對應官方 PHP 範例 `example/Invoice/B2B/Issue.php`,該請求已於
+/// 2026-09 在 stage 實測開立成功）。
 ///
-/// 注意：官方規格頁（存證模式 24230 / 交換模式 14850）的欄位名與 PHP 範例
-/// 有兩處出入，本結構依可實證的 PHP 範例／stage 實測為準：
+/// 注意:官方規格頁的欄位名與 PHP 範例有一處出入,本結構依可實證的
+/// PHP 範例/ stage 實測為準:
 /// 1. 商品課稅別欄位：規格頁寫 `ItemTax`（Number 稅額），但 PHP 範例與
 ///    stage 實測（RtnCode=1）都用 `ItemTaxType`（String 課稅別），見
 ///    [`B2bItem::item_tax_type`]。
-/// 2. 下方 `customer_name` 等 B2C 風格的選填欄位不在現行規格頁欄位表中，
-///    依整合慣例保留為 `Option`；未設值時整個欄位不會出現在 `Data`
-///    （`skip_serializing_if`），不影響已驗證的必填欄位集。
+///
+/// B2C 風格的 `Print`/`Donation`/`LoveCode`/`CarrierType`/`CarrierNum`/
+/// `CustomerName`/`CustomerID`/`TaxCenterFlag`/`ClearInvoice` 一律**不**
+/// 建模:規格頁欄位表沒有它們、官方 PHP 範例不送,且 B2B 明確無載具/
+/// 捐贈(「B2B 發票無載具/捐贈欄位,必填買方統編」)——帶了綠界也不會
+/// 讀。買方地址/電話用 B2B 自己的欄位名(`CustomerAddress`/
+/// `CustomerTelephoneNumber`,不是 B2C 的 `CustomerAddr`/`CustomerPhone`)。
 // When adding a pub type here, add it to the root re-export in lib.rs —
 // or, if it collides with a B2C name, to the collision list there.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -179,29 +184,35 @@ pub struct IssueB2bInput {
     pub tax_amount: i64, // 稅額合計 官方範例帶 round(SalesAmount × 0.05)
     #[serde(rename = "TotalAmount")]
     pub total_amount: i64, // 發票總金額 ＝ SalesAmount + TaxAmount
-    // --- 以下為 B2C 風格的選填欄位（見結構文件註解第 2 點）---
-    #[serde(rename = "CustomerName", skip_serializing_if = "Option::is_none")]
-    pub customer_name: Option<String>, // 客戶名稱
-    #[serde(rename = "CustomerAddr", skip_serializing_if = "Option::is_none")]
-    pub customer_addr: Option<String>, // 客戶地址
-    #[serde(rename = "CustomerPhone", skip_serializing_if = "Option::is_none")]
-    pub customer_phone: Option<String>, // 客戶手機號碼 格式為數字
-    #[serde(rename = "Print", skip_serializing_if = "Option::is_none")]
-    pub print: Option<String>, // 列印註記 '0' 不列印 '1' 列印
-    #[serde(rename = "Donation", skip_serializing_if = "Option::is_none")]
-    pub donation: Option<String>, // 捐贈註記
-    #[serde(rename = "LoveCode", skip_serializing_if = "Option::is_none")]
-    pub love_code: Option<String>, // 捐贈碼 (Donation=1 時必填)
-    #[serde(rename = "CarrierType", skip_serializing_if = "Option::is_none")]
-    pub carrier_type: Option<String>, // 載具類別
-    #[serde(rename = "CarrierNum", skip_serializing_if = "Option::is_none")]
-    pub carrier_num: Option<String>, // 載具編號
-    #[serde(rename = "TaxCenterFlag", skip_serializing_if = "Option::is_none")]
-    pub tax_center_flag: Option<String>, // 稅籍機關別註記
-    #[serde(rename = "ClearInvoice", skip_serializing_if = "Option::is_none")]
-    pub clear_invoice: Option<String>, // 沖帳/銷帳註記
-    #[serde(rename = "CustomerID", skip_serializing_if = "Option::is_none")]
-    pub customer_id: Option<String>, // 客戶編號 格式為『英文、數字、下底線』
+    // --- 選填欄位(官方規格頁 Issue 欄位表;見結構文件註解第 2 點)---
+    /// 買方公司地址(B2B 欄位名 `CustomerAddress`——**不是** B2C 的
+    /// `CustomerAddr`;名字錯了綠界不會讀)。
+    #[serde(rename = "CustomerAddress", skip_serializing_if = "Option::is_none")]
+    pub customer_address: Option<String>,
+    /// 買方電話號碼(B2B 欄位名 `CustomerTelephoneNumber`——**不是** B2C 的
+    /// `CustomerPhone`)。
+    #[serde(
+        rename = "CustomerTelephoneNumber",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub customer_telephone_number: Option<String>,
+    /// 開立時間 `yyyy-mm-dd hh:mm:ss`,僅接受過去 6 天內日期;建議不帶值
+    /// (系統自動帶當下日期)。
+    #[serde(rename = "InvoiceTime", skip_serializing_if = "Option::is_none")]
+    pub invoice_time: Option<String>,
+    /// 通關方式 `1`=非經海關出口、`2`=經海關出口;`TaxType=2` 時必填
+    /// (規格頁標 Number,wire 上是 JSON 數字)。
+    #[serde(rename = "ClearanceMark", skip_serializing_if = "Option::is_none")]
+    pub clearance_mark: Option<i64>,
+    /// 零稅率原因 `71`~`79`;`TaxType='2'` 時必填。
+    #[serde(rename = "ZeroTaxRateReason", skip_serializing_if = "Option::is_none")]
+    pub zero_tax_rate_reason: Option<String>,
+    /// 特種稅率科目:`TaxType=3` 填 `8`、`TaxType=4` 填 `1`~`8`。
+    #[serde(rename = "SpecialTaxType", skip_serializing_if = "Option::is_none")]
+    pub special_tax_type: Option<i64>,
+    /// 發票備註(String 200)。
+    #[serde(rename = "InvoiceRemark", skip_serializing_if = "Option::is_none")]
+    pub invoice_remark: Option<String>,
 }
 
 /// B2B 商品明細。欄位集與 B2C 的 [`crate::invoice::Item`] 不同（無

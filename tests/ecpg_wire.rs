@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 
 use ecpay::ecpg::{
     AtmInfo, CardInfo, ConsumerInfo, CreateBindCardInput, CreatePaymentInput,
-    CreatePaymentWithCardIdInput, DeleteMemberBindCardInput, EcpgDoActionInput,
+    CreatePaymentWithCardIdInput, DeleteMemberBindCardInput, EcpgCreditAction, EcpgDoActionInput,
     EcpgPeriodActionInput, EcpgTradeRefInput, GetMemberBindCardInput, GetTokenbyBindingCardInput,
     GetTokenbyTradeInput, GetTokenbyUserInput, OrderInfo, QueryTradeMediaInput,
 };
@@ -190,7 +190,10 @@ async fn get_token_by_trade_round_trips_the_proven_envelope() {
     assert_eq!(out.rtn_msg, "");
     assert_eq!(out.token, "37c33c79195f40339279dae54a96e39c");
     assert_eq!(out.token_expire_date, "2026/09/11 06:57:06");
-    assert_eq!(*seen_path.lock().unwrap_or_else(|e| e.into_inner()), "/Merchant/GetTokenbyTrade");
+    assert_eq!(
+        *seen_path.lock().unwrap_or_else(|e| e.into_inner()),
+        "/Merchant/GetTokenbyTrade"
+    );
 }
 
 /// The encrypted `Data` plaintext must keep the STRUCT's field-declaration
@@ -262,7 +265,9 @@ async fn unset_optional_pieces_are_omitted_from_the_wire() {
     let datas: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
     let seen = datas.clone();
     let srv = spawn_http_server(move |_p, body| {
-        seen.lock().unwrap_or_else(|e| e.into_inner()).push(assert_envelope_and_decrypt(body));
+        seen.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(assert_envelope_and_decrypt(body));
         envelope_reply(json!({
             "MerchantID": "3002607", "RtnCode": 1, "RtnMsg": "",
             "Token": "t", "TokenExpireDate": "x",
@@ -429,7 +434,10 @@ async fn every_method_hits_its_exact_dual_domain_path() {
     let recorded = seen.clone();
     let srv = spawn_http_server(move |p, body| {
         let data = assert_envelope_and_decrypt(body);
-        recorded.lock().unwrap_or_else(|e| e.into_inner()).push((p.to_owned(), data));
+        recorded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((p.to_owned(), data));
         envelope_reply(json!({
             "MerchantID": "3002607", "RtnCode": 1, "RtnMsg": "",
             "Token": "t", "TokenExpireDate": "x",
@@ -521,7 +529,7 @@ async fn every_method_hits_its_exact_dual_domain_path() {
             merchant_id: MERCHANT.to_owned(), // Data MerchantID required (stage 5000220 otherwise)
             merchant_trade_no: "order1234567890".to_owned(),
             trade_no: "ecpay-trade-no".to_owned(),
-            action: "R".to_owned(),
+            action: EcpgCreditAction::Refund,
             total_amount: 100,
             ..Default::default()
         })
@@ -685,7 +693,7 @@ async fn query_inputs_omit_unset_platform_id_and_require_merchant_id() {
         merchant_id: MERCHANT.to_owned(),
         merchant_trade_no: "no-3".to_owned(),
         trade_no: "ecpay-trade-no".to_owned(),
-        action: "R".to_owned(),
+        action: EcpgCreditAction::Refund,
         total_amount: 100,
         ..Default::default()
     })
