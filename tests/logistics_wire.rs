@@ -17,6 +17,7 @@ use ecpay::logistics::{
 use ecpay::Ecpay;
 
 mod common;
+use common::sandbox::urlencode;
 use common::spawn_http_server;
 
 const MERCHANT_ID: &str = "2000132";
@@ -217,7 +218,9 @@ async fn status_prefixed_error_message_containing_equals_is_not_a_mac_mismatch()
         (
             200,
             "text/html; charset=utf-8".into(),
-            "0|The parameter [ReceiverStoreID]=required".as_bytes().to_vec(),
+            "0|The parameter [ReceiverStoreID]=required"
+                .as_bytes()
+                .to_vec(),
         )
     });
     let err = logistics_sdk(server)
@@ -840,20 +843,6 @@ async fn logistics_callback_helpers_roundtrip() {
         .decrypt_temp_trade_established(&urlencode(&established.to_string()))
         .expect("established decrypts");
     assert_eq!(decoded["TempLogisticsID"], "2264");
-}
-
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for &c in s.as_bytes() {
-        match c {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => {
-                out.push(c as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{c:02X}")),
-        }
-    }
-    out
 }
 
 #[test]

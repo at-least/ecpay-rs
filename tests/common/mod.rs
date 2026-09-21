@@ -88,16 +88,17 @@ where
                     Err(_) => break,
                 }
             }
-            let (status, content_type, resp_body) = match std::panic::catch_unwind(
-                std::panic::AssertUnwindSafe(|| handler(&path, &head, &body)),
-            ) {
-                Ok(response) => response,
-                Err(panic) => (
-                    500,
-                    "text/plain".to_owned(),
-                    panic_message(panic).into_bytes(),
-                ),
-            };
+            let (status, content_type, resp_body) =
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handler(&path, &head, &body)
+                })) {
+                    Ok(response) => response,
+                    Err(panic) => (
+                        500,
+                        "text/plain".to_owned(),
+                        panic_message(panic).into_bytes(),
+                    ),
+                };
             let response = format!(
                 "HTTP/1.1 {status} OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 resp_body.len()
@@ -219,16 +220,17 @@ where
                     Err(_) => break,
                 }
             }
-            let (status, headers, resp_body) = match std::panic::catch_unwind(
-                std::panic::AssertUnwindSafe(|| handler(&path, &body)),
-            ) {
-                Ok(response) => response,
-                Err(panic) => (
-                    500,
-                    vec![("Content-Type".to_owned(), "text/plain".to_owned())],
-                    panic_message(panic).into_bytes(),
-                ),
-            };
+            let (status, headers, resp_body) =
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    handler(&path, &body)
+                })) {
+                    Ok(response) => response,
+                    Err(panic) => (
+                        500,
+                        vec![("Content-Type".to_owned(), "text/plain".to_owned())],
+                        panic_message(panic).into_bytes(),
+                    ),
+                };
             let mut response = format!("HTTP/1.1 {status}\r\n");
             for (k, v) in &headers {
                 response.push_str(&format!("{k}: {v}\r\n"));
@@ -251,16 +253,10 @@ where
 // these helpers, so the rest must not warn under `-D warnings`.
 #[allow(dead_code)]
 pub mod sandbox {
-    /// Current Taipei time as ECPay's `yyyy/MM/dd HH:mm:ss`, std-only
-    /// (Howard Hinnant's civil_from_days).
-    pub fn taipei_now() -> String {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
-            + 8 * 3600; // UTC+8
-        let days = secs.div_euclid(86_400);
-        let tod = secs.rem_euclid(86_400);
+    /// `(y, m, d)` in Taipei (UTC+8) for a Unix timestamp — Howard Hinnant's
+    /// civil_from_days, the shared core of `taipei_now`/`taipei_today`.
+    fn taipei_ymd(unix_secs: i64) -> (i64, i64, i64) {
+        let days = unix_secs.div_euclid(86_400);
         let z = days + 719_468;
         let era = z.div_euclid(146_097);
         let doe = z.rem_euclid(146_097);
@@ -271,6 +267,19 @@ pub mod sandbox {
         let d = doy - (153 * mp + 2) / 5 + 1;
         let m = if mp < 10 { mp + 3 } else { mp - 9 };
         let y = if m <= 2 { y + 1 } else { y };
+        (y, m, d)
+    }
+
+    /// Current Taipei time as ECPay's `yyyy/MM/dd HH:mm:ss`, std-only
+    /// (Howard Hinnant's civil_from_days).
+    pub fn taipei_now() -> String {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+            + 8 * 3600; // UTC+8
+        let tod = secs.rem_euclid(86_400);
+        let (y, m, d) = taipei_ymd(secs);
         format!(
             "{y:04}/{m:02}/{d:02} {:02}:{:02}:{:02}",
             tod / 3600,
@@ -286,17 +295,7 @@ pub mod sandbox {
             .unwrap()
             .as_secs() as i64
             + 8 * 3600; // UTC+8
-        let days = secs.div_euclid(86_400);
-        let z = days + 719_468;
-        let era = z.div_euclid(146_097);
-        let doe = z.rem_euclid(146_097);
-        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-        let y = yoe + era * 400;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let d = doy - (153 * mp + 2) / 5 + 1;
-        let m = if mp < 10 { mp + 3 } else { mp - 9 };
-        let y = if m <= 2 { y + 1 } else { y };
+        let (y, m, d) = taipei_ymd(secs);
         format!("{y:04}-{m:02}-{d:02}")
     }
 

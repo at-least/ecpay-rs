@@ -44,6 +44,7 @@ use ecpay::crypto::check_mac_value;
 use ecpay::Ecpay;
 
 mod common;
+use common::sandbox::urlencode;
 use common::spawn_http_server;
 
 const MERCHANT_ID: &str = "2000132";
@@ -55,20 +56,6 @@ const B2B_KEY: &str = "ejCk326UnaZWKisg";
 const B2B_IV: &str = "q9jcZX8Ib9LM8wYk";
 
 // --- tiny shared helpers ---
-
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for &c in s.as_bytes() {
-        match c {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' | b'-' | b'~' => {
-                out.push(c as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{c:02X}")),
-        }
-    }
-    out
-}
 
 fn md5(fields: &HashMap<String, String>) -> String {
     check_mac_value(fields, LOG_KEY, LOG_IV, ecpay::EncryptType::Md5)
@@ -324,7 +311,12 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
         let sim = sim.clone();
         async move {
             // ECPay-side state change happens BEFORE the callback fires.
-            sim.lock().unwrap_or_else(|e| e.into_inner()).orders.get_mut(&logistics_id).unwrap().1 = status.to_string();
+            sim.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .orders
+                .get_mut(&logistics_id)
+                .unwrap()
+                .1 = status.to_string();
             let fields: HashMap<String, String> = [
                 ("MerchantID", MERCHANT_ID.to_string()),
                 ("MerchantTradeNo", trade_no),
@@ -603,7 +595,11 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
         LOG_IV.as_bytes(),
     )
     .unwrap();
-    assert_eq!(ack_data["RtnCode"], serde_json::json!(1), "encrypted ack accepted");
+    assert_eq!(
+        ack_data["RtnCode"],
+        serde_json::json!(1),
+        "encrypted ack accepted"
+    );
 
     // 4. Query shows the delivered status.
     let info = client

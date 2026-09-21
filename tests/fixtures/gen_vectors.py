@@ -182,7 +182,6 @@ import hashlib  # noqa: E402
 
 tilde = check_cases[1][1]
 ordered = sorted(tilde.items(), key=lambda kv: kv[0].lower())
-s = f"HashKey={MERCHANT['HashKey']}?"  # placeholder replaced below
 s = "HashKey=%s&" % MERCHANT["HashKey"] + "".join(f"{k}={v}&" for k, v in ordered) + "HashIV=%s" % MERCHANT["HashIV"]
 scenarios.setdefault("check_value", {})["tilde_divergence"]["dot_net_escaped"] = hashlib.sha256(
     dot_net_url_encode(s).lower().encode("utf-8")
@@ -242,16 +241,9 @@ for i in range(150):
         "params": {k: str(v) for k, v in sorted(params.items())},
         "expected": sdk2.generate_check_value(params),
     }
-# Tilde-bearing divergence cases (Rust side must produce dot_net_escaped, not expected).
-def dot_net_escape(s):
-    safe = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.!*()")
-    out = []
-    for b in s.encode("utf-8"):
-        c = chr(b)
-        out.append(c if c in safe else ("+" if c == " " else "%%%02x" % b))
-    return "".join(out)
-
-
+# Tilde-bearing divergence cases (Rust side must produce dot_net_escaped, not expected);
+# the .NET-contract encoder is dot_net_url_encode above (byte-identical to the
+# local copy this used to duplicate).
 for i in range(6):
     params = {"MerchantID": "3002607", "MerchantTradeNo": f"tilde{i}", "TradeDesc": f"a~b~{i}", "ItemName": "x~y", "TotalAmount": str(100 + i), "EncryptType": "1"}
     ordered = sorted(params.items(), key=lambda kv: kv[0].lower())
@@ -259,7 +251,7 @@ for i in range(6):
     diff_cases[f"tilde_{i:03d}"] = {
         "params": {k: str(v) for k, v in sorted(params.items())},
         "expected": SDK(**MERCHANT).generate_check_value(params),
-        "dot_net_escaped": hashlib.sha256(dot_net_escape(pre).lower().encode("utf-8")).hexdigest().upper(),
+        "dot_net_escaped": hashlib.sha256(dot_net_url_encode(pre).lower().encode("utf-8")).hexdigest().upper(),
     }
 
 scenarios["differential"] = diff_cases

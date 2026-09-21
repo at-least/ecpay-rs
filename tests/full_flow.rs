@@ -24,6 +24,9 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 
+mod common;
+
+use common::sandbox::urlencode;
 use ecpay::payment::{AioCheckOutParams, ChoosePayment};
 use ecpay::Ecpay;
 
@@ -85,20 +88,6 @@ fn unquote(s: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
-}
-
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for &c in s.as_bytes() {
-        match c {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(c as char)
-            }
-            b' ' => out.push('+'),
-            _ => out.push_str(&format!("%{c:02X}")),
-        }
-    }
-    out
 }
 
 fn sign(params: &HashMap<String, String>) -> String {
@@ -204,18 +193,26 @@ fn spawn_simulator(state: Arc<Mutex<SimulatorState>>) -> String {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0);
                 let return_url = params.get("ReturnURL").cloned().unwrap_or_default();
-                state.lock().unwrap_or_else(|e| e.into_inner()).orders.insert(
-                    key,
-                    Order {
-                        total_amount: amount,
-                        paid: false,
-                    },
-                );
-                state.lock().unwrap_or_else(|e| e.into_inner()).callback_log.push((
-                    format!("__return_url:{trade_no}"),
-                    return_url,
-                    String::new(),
-                ));
+                state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .orders
+                    .insert(
+                        key,
+                        Order {
+                            total_amount: amount,
+                            paid: false,
+                        },
+                    );
+                state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .callback_log
+                    .push((
+                        format!("__return_url:{trade_no}"),
+                        return_url,
+                        String::new(),
+                    ));
                 respond(&mut stream, "text/html", "<html>綠界付款頁(模擬)</html>");
                 continue;
             }
@@ -271,11 +268,11 @@ fn spawn_simulator(state: Arc<Mutex<SimulatorState>>) -> String {
                     .unwrap_or("")
                     .trim()
                     .to_owned();
-                state.lock().unwrap_or_else(|e| e.into_inner()).callback_log.push((
-                    format!("__callback:{trade_no}"),
-                    callback_body,
-                    reply_body,
-                ));
+                state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .callback_log
+                    .push((format!("__callback:{trade_no}"), callback_body, reply_body));
                 respond(&mut stream, "text/plain", "delivered");
                 continue;
             }
@@ -380,7 +377,10 @@ fn spawn_return_url(verified: Arc<Mutex<Vec<HashMap<String, String>>>>) -> Strin
             let ok = client.verify_check_mac_value(&params)
                 && params.get("RtnCode").map(String::as_str) == Some("1")
                 && params.get("SimulatePaid").map(String::as_str) == Some("1");
-            verified.lock().unwrap_or_else(|e| e.into_inner()).push(params);
+            verified
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(params);
             respond(&mut stream, "text/html", if ok { "1|OK" } else { "0|ERR" });
         }
     });
