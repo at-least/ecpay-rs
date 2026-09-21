@@ -611,7 +611,10 @@ fn callback_allowlist_keeps_config_and_shape_errors_detailed() {
     let envelope = |d: &str| format!(r#"{{"TransCode":1,"TransMsg":"","Data":"{d}"}}"#);
     let uniform = "ecpay: callback payload failed to decrypt or parse";
 
-    let good = (b"0123456789abcdef".as_slice(), b"0123456789abcdef".as_slice());
+    let good = (
+        b"0123456789abcdef".as_slice(),
+        b"0123456789abcdef".as_slice(),
+    );
     let data = ecpay::encrypt(b"payload", good.0, good.1).unwrap();
 
     // Misconfigured key size → detailed AesKeySize, not the uniform message.
@@ -648,8 +651,7 @@ fn callback_allowlist_keeps_config_and_shape_errors_detailed() {
         .decrypt_ecpg_callback::<serde_json::Value>(&envelope("MTIzNDU="))
         .expect_err("non-block-multiple must fail");
     assert!(
-        e.to_string().contains("invalid ciphertext length")
-            && !e.to_string().contains(uniform),
+        e.to_string().contains("invalid ciphertext length") && !e.to_string().contains(uniform),
         "InvalidCiphertextLength must stay detailed, got {e}"
     );
     let e = client

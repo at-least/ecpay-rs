@@ -724,7 +724,11 @@ async fn test_query_trade_info_request_params() {
     assert_eq!(out.trade_status, "1");
     assert_eq!(out.merchant_trade_no, "order_abc");
 
-    let got = captured.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("params captured");
+    let got = captured
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .expect("params captured");
     for k in ["MerchantID", "MerchantTradeNo", "TimeStamp"] {
         assert!(
             got.contains_key(k),

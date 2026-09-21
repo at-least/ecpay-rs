@@ -64,8 +64,8 @@ fn exponent_notation_is_rejected_so_the_wire_form_is_version_stable() {
     // parser — so any rendering containing an exponent is a loud local
     // serialization error instead.
     for v in [1e-6, 1e-7, 5e-324, 1e16, 1e21, 1.5e21, 1e300] {
-        let err = serde_json::to_string(&F { v })
-            .expect_err("exponent rendering must not serialize");
+        let err =
+            serde_json::to_string(&F { v }).expect_err("exponent rendering must not serialize");
         let msg = err.to_string();
         assert!(msg.contains("exponent notation"), "{v}: {msg}");
     }

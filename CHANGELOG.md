@@ -2,8 +2,81 @@
 
 ## Unreleased
 
+_breaking changes（程式碼審查後的型別/一致性修正）：_
+
+- `EcpgDoActionInput::action` 由 `String` 改為 typed enum
+  [`EcpgCreditAction`](C=請款/關帳、R=退款、E=取消、N=放棄;未建模值以
+  `Other(String)` 原樣穿隧)。付款家族對同一 C/R/E/N 值域早有
+  `payment::CreditAction`,raw string 讓 `"Close".into()`/`"c".into()` 這類
+  拼錯直接編譯通過、送進加密請求;依本 crate 各家族自有型別的慣例
+  (同 `InvType` 在 invoice/invoice_b2b 各自建模)獨立建模並交互參照。
+- `IssueB2bInput` 移除九個無官方依據的 B2C 風格欄位(`customer_name`/
+  `print`/`donation`/`love_code`/`carrier_type`/`carrier_num`/
+  `tax_center_flag`/`clear_invoice`/`customer_id`),改正兩個欄位名
+  (`customer_addr`→`customer_address`,wire `CustomerAddress`;
+  `customer_phone`→`customer_telephone_number`,wire
+  `CustomerTelephoneNumber`),補回規格頁記載的選填欄位(`invoice_time`/
+  `clearance_mark`/`zero_tax_rate_reason`/`special_tax_type`/
+  `invoice_remark`)(程式碼審查 🟡)。依據:B2B Issue 欄位表(存證模式
+  https://developers.ecpay.com.tw/24230.md /交換模式
+  https://developers.ecpay.com.tw/14850.md,2026-04 快照——即時抓取當日
+  timeout/限流,未及重驗)沒有 Print/Donation/LoveCode/CarrierType/
+  CarrierNum/CustomerName/TaxCenterFlag/ClearInvoice/CustomerID,官方
+  PHP 範例 `Issue.php` 全部不送,且 B2B 明確無載具/捐贈;舊欄位名
+  `CustomerAddr`/`CustomerPhone` 是 B2C 名,設了值綠界不會讀。wire
+  key-set 由 `issue_b2b_data_is_exactly_the_documented_field_set` 逐鍵釘住。
+
 _非破壞性：_
 
+- **`InvoiceMark` 帶發票欄位時不再靜默改成 `Y`**(程式碼審查 🟡):明確
+  填了非 `Y` 的註記(小寫 `"n"` 拼錯也算)又帶 `InvoiceExtend`,過去會
+  被靜默覆寫成 `InvoiceMark=Y` 送出——等於替呼叫端開出一張沒要求的
+  電子發票(台灣的會計憑證,事後需要折讓/作廢流程)。現在直接回
+  `Error::Validation`(與「差異 3」組別衝突同款大聲報錯;官方 SDK 原樣
+  送出、由綠界拒收,列為 README 第五點刻意差異)。`None`/空字串自動補
+  `Y`、明確 `"Y"`、無發票欄位時 `"N"` 原樣送出等既有行為不變(既有
+  測試釘住)。
+- **`Error::TransCode` 的 Display 跳脫並截斷伺服器訊息**(程式碼審查 🟡):
+  API 路徑的 `TransMsg` 原樣進入錯誤欄位,Display 過去也原樣、無界輸出
+  ——與 `HttpStatus` 已有的防護(`truncate_for_display`:控制字元跳脫 +
+  512 字元上限)不一致;被注入的 HTTP client 或被擊穿的傳輸可用 raw 換行
+  偽造 log 行。現在渲染與 `HttpStatus` 同款(可印字元維持原樣);`msg`
+  欄位仍保留完整原文供程式化取用。回呼路徑本就先經 `body_excerpt`
+  (Debug 跳脫、有界)預先處理,渲染不受影響。
+- **新增 `ecpay::parse_form()`;`examples/callback_verify` 修正**(程式碼
+  審查 🟡):範例過去把 stdin 的 key=value 行**原樣(未 percent-decode)**
+  餵給 `verify_check_mac_value`——真實回呼 body 是 urlencoded(`TradeDate`
+  的 `/` 與空白必編碼),未解碼的值在 MAC preimage 二次編碼,每一條真實
+  回呼都會驗證失敗(fail-closed,但會誤導商戶以為金鑰設定錯誤)。新增
+  公開 `ecpay::parse_form(body) -> HashMap<String, String>`(Python
+  `parse_qsl(keep_blank_values=True)` 語意:`+`→空格、%XX 解碼、跨
+  triplet 的多位元組 UTF-8 round-trip、空值保留、重複鍵後值勝),範例改
+  吃整個 raw POST body 並經它解碼;已用官方 Python SDK 簽名的真實
+  urlencoded body(含中文 `ItemName`)實測 `1|OK`、竄改 body `0|ERR`。
+- **CI 補上 doctest 與 MSRV**(程式碼審查 🟡):`cargo test --all-targets`
+  完全不執行 Doc-tests 階段——四個 compile_fail 釘子(deprecated 欄位 ×3、
+  `EmptyCiphertext`)與所有 rustdoc 範例在 CI 從未跑過(本地裸
+  `cargo test` 會跑)。新增 `cargo test --doc` 步驟;另新增 `msrv` job 以
+  `dtolnay/rust-toolchain@1.89` + `cargo check --all-targets` 實測
+  `rust-version = "1.89"`(CHANGELOG 0.4.0 記載過 1.82「從未能編譯」的同
+  類事故;本地 `cargo +1.89 check --all-targets` 已先驗證通過)。
+- **base URL 少了結尾 `/` 不再簽出不存在路徑**(程式碼審查 🟢):所有
+  端點以 `{base}{action}` 拼接,base 少 `/` 過去直接產生
+  `.../CashierAioCheckOut/V5` 這類簽好名的錯誤路徑(遠端 404,本地看不到
+  配置錯誤)。新增 `join_url` 統一在 44 個拼接點自動補 `/`(空 base 照舊
+  由各 family 換成正式環境預設),`Ecpay` struct 文件新增「Base-URL
+  trailing slash」一節說明。
+- **測試基礎設施與文件清理**(程式碼審查 🟢,行為不變):`urlencode`
+  在 `e2e_flows`/`full_flow`/`logistics_wire` 的三份本地副本(已有漂流)
+  合併回 `tests/common/mod.rs` 的 `sandbox::urlencode`,`full_flow` 併入
+  `mod common`;`taipei_now`/`taipei_today` 重複的 civil-from-days 轉換
+  抽成共用 `taipei_ymd`;`gen_vectors.py` 移除死占位行、兩份位元組等價的
+  .NET 編碼器合併為一份(六組快照逐位元組驗證等價);`parse_encrypt_type`
+  的 rustdoc 與測試註解不再把「garbage 也預設 SHA-256」說成官方 SDK 行為
+  (官方 `int()` 對不可解析值是 raise——缺值才預設);
+  `verify_logistics_check_mac_value` 文件加註金鑰 fallback 的安全邊界;
+  範例 `chrono_now` 更名為 `unix_seconds`(名實相符,並註明
+  `merchant_trade_date` 是占位)。
 - **文件補強**(程式碼審查 🟡/🟢):https/loopback base-URL 規則寫進
   `Ecpay` 的 struct 文件與 README(中/英),不再是只有 `pub(crate)` 函式
   文件看得到的行為;回呼處理清單新增第 0 條——**註冊給綠界的回呼網址

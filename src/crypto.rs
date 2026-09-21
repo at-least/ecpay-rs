@@ -246,11 +246,18 @@ pub(crate) fn verify_mac<'a>(
     constant_time_eq(got.to_uppercase().as_bytes(), want.as_bytes())
 }
 
-/// Parses a params map's `EncryptType` value the way the official SDK does:
-/// missing or unparsable defaults to SHA-256; a parsable but nonexistent
-/// code is the caller bug `TryFrom<i64>` reports. Shared by
+/// Parses a params map's `EncryptType` value: missing or unparsable
+/// defaults to SHA-256; a parsable but nonexistent code is the caller bug
+/// `TryFrom<i64>` reports. Shared by
 /// [`crate::Ecpay::generate_check_value`] (signing an outbound request) and
 /// the payment-response verification path (checking an inbound one).
+///
+/// Parity note: the official SDK runs `int(_params.get('EncryptType', 1))`
+/// — a MISSING value defaults to 1 there, matching this function, but an
+/// UNPARSABLE one raises `ValueError`; defaulting instead (so a garbage
+/// value cannot turn signing into an error path) is this crate's own
+/// lenient choice, reachable only through the low-level map APIs (the
+/// typed `AioCheckOutParams` path always emits `EncryptType=1`).
 pub(crate) fn parse_encrypt_type(value: Option<&str>) -> Result<EncryptType> {
     let n = value.and_then(|v| v.parse::<i64>().ok()).unwrap_or(1);
     EncryptType::try_from(n)
@@ -698,7 +705,9 @@ mod tests {
             EncryptType::try_from(-1),
             Err(Error::UnsupportedEncryptType(-1))
         ));
-        // parse: missing/blank/garbage defaults to SHA-256 (SDK parity).
+        // parse: missing/blank defaults to SHA-256 (official SDK parity);
+        // garbage also defaults here, but that part is our own lenient
+        // choice — the official int() raises on unparsable values.
         assert_eq!(parse_encrypt_type(None).unwrap(), EncryptType::Sha256);
         assert_eq!(parse_encrypt_type(Some("")).unwrap(), EncryptType::Sha256);
         assert_eq!(

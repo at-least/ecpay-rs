@@ -17,7 +17,7 @@ fn main() {
 
     let checkout = client
         .aio_check_out(&AioCheckOutParams {
-            merchant_trade_no: format!("NO{}", chrono_now()),
+            merchant_trade_no: format!("NO{}", unix_seconds()),
             merchant_trade_date: "2024/01/01 12:00:00".into(),
             total_amount: 2000,
             trade_desc: "訂單測試".into(),
@@ -36,9 +36,13 @@ fn main() {
     println!("{}", checkout.html_form());
 }
 
-fn chrono_now() -> String {
-    // A timestamp keeps the sample deterministic enough for a demo; in real
-    // code use chrono::Utc::now() and ECPay's yyyy/MM/dd HH:mm:ss format.
+fn unix_seconds() -> String {
+    // A timestamp suffix keeps the trade number unique for the demo; in
+    // real code prefer a proper id, and note `merchant_trade_date` here is
+    // a hardcoded placeholder — production needs the current time in
+    // ECPay's yyyy/MM/dd HH:mm:ss format (e.g. via chrono::Utc::now with
+    // UTC+8, see the MERCHANT_TRADE_DATE_FORMAT contract in the crate
+    // docs).
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

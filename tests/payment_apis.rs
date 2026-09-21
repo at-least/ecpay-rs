@@ -219,7 +219,11 @@ async fn order_search_request_is_signed_and_routed() {
         })
         .await
         .expect("order_search");
-    let got = captured.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("captured");
+    let got = captured
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .expect("captured");
     assert!(
         got.starts_with("/QueryTradeInfo/V5|"),
         "endpoint path: {got}"
@@ -356,7 +360,11 @@ async fn query_payment_info_request_is_signed_and_routed() {
         })
         .await
         .expect("query_payment_info");
-    let got = captured.lock().unwrap_or_else(|e| e.into_inner()).clone().expect("captured");
+    let got = captured
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .expect("captured");
     assert!(
         got.starts_with("/QueryPaymentInfo|"),
         "endpoint path: {got}"
@@ -422,7 +430,10 @@ async fn json_apis_parse_their_replies() {
     assert_eq!(got["RtnCode"], 1);
     assert_eq!(got["CreditAmount"], 100);
     assert_eq!(
-        captured.lock().unwrap_or_else(|e| e.into_inner()).as_deref(),
+        captured
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref(),
         Some("/QueryTrade/V2"),
         "CreditDetail routes under credit_api_url"
     );
@@ -515,7 +526,13 @@ async fn action_apis_route_and_parse() {
         .await
         .expect("credit_do_action");
     assert_eq!(got.get("RtnCode").map(String::as_str), Some("1"));
-    assert_eq!(captured.lock().unwrap_or_else(|e| e.into_inner()).as_deref(), Some("/DoAction"));
+    assert_eq!(
+        captured
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref(),
+        Some("/DoAction")
+    );
 
     let got = client
         .credit_card_period_action(&ecpay::payment::CreditCardPeriodActionParams {
@@ -528,7 +545,10 @@ async fn action_apis_route_and_parse() {
         .expect("credit_card_period_action");
     assert_eq!(got.get("RtnMsg").map(String::as_str), Some("OK"));
     assert_eq!(
-        captured.lock().unwrap_or_else(|e| e.into_inner()).as_deref(),
+        captured
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_deref(),
         Some("/CreditCardPeriodAction")
     );
 }
@@ -544,7 +564,8 @@ async fn call_payment_api_signature_covers_the_sent_fields() {
     let captured: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
     let seen = captured.clone();
     let srv = spawn_http_server(move |_path, body| {
-        *seen.lock().unwrap_or_else(|e| e.into_inner()) = String::from_utf8_lossy(body).into_owned();
+        *seen.lock().unwrap_or_else(|e| e.into_inner()) =
+            String::from_utf8_lossy(body).into_owned();
         (
             200,
             "application/x-www-form-urlencoded".to_owned(),
