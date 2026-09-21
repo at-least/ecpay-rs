@@ -88,7 +88,10 @@ fn html_form_escapes_attribute_values() {
         "{html}"
     );
     assert!(!html.contains("onmouseover=\"alert"), "{html}");
-    // The action URL is escaped the same way.
+    // The action URL is escaped the same way. (This pathological base ends
+    // in `"` — the join normalizes the missing `/` first, then the whole
+    // URL is attribute-escaped; the join policy itself is pinned by
+    // `base_url_missing_trailing_slash_is_normalized`.)
     let out = Ecpay {
         payment_api_url: "https://x.example/?a=1&b=2\"".into(),
         ..sdk()
@@ -97,7 +100,7 @@ fn html_form_escapes_attribute_values() {
     .unwrap();
     assert!(
         out.html_form()
-            .starts_with(r#"<form id="data_set" action="https://x.example/?a=1&amp;b=2&quot;AioCheckOut/V5" method="post">"#),
+            .starts_with(r#"<form id="data_set" action="https://x.example/?a=1&amp;b=2&quot;/AioCheckOut/V5" method="post">"#),
         "{}",
         out.html_form()
     );
@@ -562,6 +565,52 @@ fn invoice_mark_rules() {
     assert_eq!(explicit.params(), out.params());
 }
 
+/// A base URL missing its trailing `/` is normalized at the join: every
+/// endpoint is built as `{base}{action}`, so a slash-less base used to
+/// produce `.../CashierAioCheckOut/V5` — a correctly signed request to a
+/// nonexistent path (surfacing as a remote 404) instead of a config error
+/// you can see locally.
+#[test]
+fn base_url_missing_trailing_slash_is_normalized() {
+    let mut client = sdk();
+    client.payment_api_url = "https://payment-stage.ecpay.com.tw/Cashier".into(); // no '/'
+    let out = client
+        .aio_check_out(&base(ChoosePayment::Credit))
+        .expect("a slash-less base is a config slip, not a request error");
+    assert_eq!(
+        out.action(),
+        "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5",
+        "the join must insert the missing '/'"
+    );
+}
+
+/// An explicit mark other than Y (a lowercase "n" typo included) together
+/// with an invoice block must be rejected loudly. The official SDK sends the
+/// mark verbatim for the server to reject; this crate rejects it locally —
+/// silently coercing it to Y would issue an e-invoice the caller asked not
+/// to have.
+#[test]
+fn invoice_mark_non_y_with_invoice_block_is_rejected() {
+    let client = sdk();
+    for mark in ["n", "y", "0"] {
+        let got = validation(
+            client
+                .aio_check_out(&AioCheckOutParams {
+                    invoice_mark: Some(mark.into()),
+                    invoice: Some(invoice()),
+                    ..base(ChoosePayment::Credit)
+                })
+                .expect_err("explicit non-Y mark + invoice block must not pass"),
+        );
+        assert_eq!(
+            got,
+            "InvoiceMark must be \"Y\" (or unset) when the invoice fields are present; \
+             drop one of them.",
+            "{mark}"
+        );
+    }
+}
+
 #[test]
 fn invoice_validation_branches_not_covered_by_the_sdk_fixture() {
     let client = sdk();
@@ -900,9 +949,7 @@ fn dropped_optionals_do_not_count_as_set() {
             expire_date: Some(-1),
             ..base(ChoosePayment::Cvs)
         })
-        .expect(
-            "a negative ExpireDate is dropped by the filter and must not trip the group check",
-        );
+        .expect("a negative ExpireDate is dropped by the filter and must not trip the group check");
     assert!(param(&out, "ExpireDate").is_none());
 }
 

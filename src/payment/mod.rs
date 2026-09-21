@@ -482,7 +482,7 @@ impl Ecpay {
     /// `parse_qsl(keep_blank_values=True)`).
     pub async fn order_search(&self, p: &OrderSearchParams) -> Result<BTreeMap<String, String>> {
         let m = self.order_search_request(p)?;
-        let endpoint = format!("{}QueryTradeInfo/V5", self.payment_base_url());
+        let endpoint = crate::client::join_url(self.payment_base_url(), "QueryTradeInfo/V5");
         self.post_cmv_verified(&endpoint, m).await
     }
 
@@ -497,7 +497,7 @@ impl Ecpay {
         p: &OrderSearchParams,
     ) -> Result<BTreeMap<String, String>> {
         let m = self.order_search_request(p)?;
-        let endpoint = format!("{}QueryPaymentInfo", self.payment_base_url());
+        let endpoint = crate::client::join_url(self.payment_base_url(), "QueryPaymentInfo");
         self.post_cmv_verified(&endpoint, m).await
     }
 
@@ -514,7 +514,8 @@ impl Ecpay {
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("MerchantTradeNo".to_owned(), p.merchant_trade_no.clone());
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
-        let endpoint = format!("{}QueryCreditCardPeriodInfo", self.payment_base_url());
+        let endpoint =
+            crate::client::join_url(self.payment_base_url(), "QueryCreditCardPeriodInfo");
         let body = self.post_signed_form(endpoint, &mut m).await?;
         Ok(serde_json::from_slice(&body)?)
     }
@@ -543,7 +544,7 @@ impl Ecpay {
         m.insert("Action".to_owned(), p.action.as_str().to_owned());
         m.insert("TotalAmount".to_owned(), p.total_amount.to_string());
         insert_optional_str(&mut m, "PlatformID", &p.platform_id);
-        let endpoint = format!("{}DoAction", self.credit_base_url());
+        let endpoint = crate::client::join_url(self.credit_base_url(), "DoAction");
         let body = self.post_signed_form(endpoint, &mut m).await?;
         Ok(parse_qsl(&String::from_utf8_lossy(&body)))
     }
@@ -575,7 +576,7 @@ impl Ecpay {
         insert_optional_str(&mut m, "PaymentStatus", &p.payment_status);
         insert_optional_str(&mut m, "AllocateStatus", &p.allocate_status);
         m.insert("MediaFormated".to_owned(), p.media_formated.clone());
-        let endpoint = format!("{}TradeNoAio", self.vendor_base_url());
+        let endpoint = crate::client::join_url(self.vendor_base_url(), "TradeNoAio");
         let body = self.post_signed_form(endpoint, &mut m).await?;
         Ok(decode_big5(&body))
     }
@@ -594,7 +595,7 @@ impl Ecpay {
             "CreditCheckCode".to_owned(),
             p.credit_check_code.to_string(),
         );
-        let endpoint = format!("{}QueryTrade/V2", self.credit_base_url());
+        let endpoint = crate::client::join_url(self.credit_base_url(), "QueryTrade/V2");
         let body = self.post_signed_form(endpoint, &mut m).await?;
         Ok(serde_json::from_slice(&body)?)
     }
@@ -615,7 +616,7 @@ impl Ecpay {
         m.insert("PayDateType".to_owned(), p.pay_date_type.clone());
         m.insert("StartDate".to_owned(), p.start_date.clone());
         m.insert("EndDate".to_owned(), p.end_date.clone());
-        let endpoint = format!("{}FundingReconDetail", self.credit_base_url());
+        let endpoint = crate::client::join_url(self.credit_base_url(), "FundingReconDetail");
         let body = self.post_signed_form(endpoint, &mut m).await?;
         Ok(decode_big5(&body))
     }
@@ -651,7 +652,7 @@ impl Ecpay {
         m.insert("Action".to_owned(), p.action.as_str().to_owned());
         m.insert("TimeStamp".to_owned(), p.time_stamp.to_string());
         insert_optional_str(&mut m, "PlatformID", &p.platform_id);
-        let endpoint = format!("{}CreditCardPeriodAction", self.payment_base_url());
+        let endpoint = crate::client::join_url(self.payment_base_url(), "CreditCardPeriodAction");
         self.post_cmv_verified(&endpoint, m).await
     }
 }
@@ -721,7 +722,7 @@ impl Ecpay {
             time_stamp: crate::client::unix_now(),
             platform_id: None,
         })?;
-        let endpoint = format!("{}QueryTradeInfo/V5", self.payment_base_url());
+        let endpoint = crate::client::join_url(self.payment_base_url(), "QueryTradeInfo/V5");
         let ss = self.post_cmv_verified(&endpoint, m).await?;
         let get = |k: &str| ss.get(k).cloned().unwrap_or_default();
         Ok(QueryTradeInfoOutput {

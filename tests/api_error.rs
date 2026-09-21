@@ -99,3 +99,48 @@ fn http_status_display_escapes_control_characters() {
         other => panic!("expected HttpStatus, got {other:?}"),
     }
 }
+
+/// `Error::TransCode`'s Display renders server-supplied `TransMsg` that
+/// arrived raw off the AES-JSON API paths — the same log-injection surface
+/// `HttpStatus`'s Display already guards (see
+/// `http_status_display_escapes_control_characters`): control characters are
+/// escaped and long messages bounded in the RENDERING, while the `msg` field
+/// keeps the full verbatim string for programmatic access.
+#[test]
+fn trans_code_display_escapes_and_bounds_the_server_message() {
+    let err: Error = Error::TransCode {
+        code: 910,
+        msg: "line1\nline2\tTAIL\u{7}".to_owned(),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains(r"msg=line1\nline2\tTAIL\u{7}"),
+        "control characters must be escaped in Display, got {rendered:?}"
+    );
+    assert!(
+        !rendered.contains('\n'),
+        "raw newline must not reach Display, got {rendered:?}"
+    );
+    match &err {
+        Error::TransCode { msg, .. } => assert_eq!(msg, "line1\nline2\tTAIL\u{7}"),
+        other => panic!("expected TransCode, got {other:?}"),
+    }
+
+    // A long message renders bounded (the same 512-char contract); the
+    // field keeps the full message.
+    let big = "x".repeat(1000);
+    let err: Error = Error::TransCode {
+        code: 910,
+        msg: big.clone(),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.starts_with("ecpay TransCode error: code=910 msg=")
+            && rendered.ends_with("… (truncated; 1000 bytes total)"),
+        "{rendered}"
+    );
+    match &err {
+        Error::TransCode { msg, .. } => assert_eq!(msg.len(), 1000),
+        other => panic!("expected TransCode, got {other:?}"),
+    }
+}

@@ -109,7 +109,11 @@ pub enum Error {
     /// [`crate::Ecpay::decrypt_logistics_callback`],
     /// [`crate::Ecpay::decrypt_temp_trade_established`]) — on a public
     /// ReturnURL the msg is attacker bytes and must never reach a log line
-    /// unbounded or raw (see `crate::crypto`). Note `msg.is_empty()` is
+    /// unbounded or raw (see `crate::crypto`). Independently of the path,
+    /// `Display` renders `msg` through the shared `truncate_for_display`
+    /// (control characters escaped, 512-char bound) — the same
+    /// defense-in-depth `HttpStatus` applies to response bodies. Note
+    /// `msg.is_empty()` is
     /// never a meaningful test on the callback path (an empty TransMsg
     /// arrives as `""`, Debug-quoted).
     TransCode {
@@ -193,7 +197,11 @@ impl fmt::Display for Error {
                 crate::client::truncate_for_display(body)
             ),
             Error::TransCode { code, msg } => {
-                write!(f, "ecpay TransCode error: code={code} msg={msg}")
+                write!(
+                    f,
+                    "ecpay TransCode error: code={code} msg={}",
+                    crate::client::truncate_for_display(msg)
+                )
             }
             Error::Http(e) => write!(f, "{e}"),
             Error::Base64(e) => write!(f, "{e}"),

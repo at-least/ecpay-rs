@@ -403,13 +403,23 @@ impl Ecpay {
 
         // --- 電子發票延伸參數 ---
         // InvoiceMark: `Y` 開立發票 / `N` 不開立 (official samples send `N`
-        // explicitly); an invoice struct with no mark auto-fills `Y`.
+        // explicitly); an invoice struct with no mark auto-fills `Y`. An
+        // explicit mark other than `Y` next to the invoice struct is
+        // rejected here — the official SDK sends it verbatim for the server
+        // to reject; coercing it to `Y` would silently issue an invoice.
         let mark = p.invoice_mark.as_deref().unwrap_or("");
         optional_str("InvoiceMark", &p.invoice_mark, 1)?;
         match (&p.invoice, mark) {
             (Some(_), "N") => {
                 return Err(Error::Validation(
                     "InvoiceMark=N conflicts with the invoice fields; drop one of them.".into(),
+                ))
+            }
+            (Some(_), m) if !m.is_empty() && m != crate::payment::INVOICE_MARK => {
+                return Err(Error::Validation(
+                    "InvoiceMark must be \"Y\" (or unset) when the invoice fields are present; \
+                     drop one of them."
+                        .into(),
                 ))
             }
             (None, crate::payment::INVOICE_MARK) => {
@@ -430,7 +440,7 @@ impl Ecpay {
 
         let mut pairs: Vec<(String, String)> = m.into_iter().collect();
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
-        let action = format!("{}AioCheckOut/V5", self.payment_base_url());
+        let action = crate::client::join_url(self.payment_base_url(), "AioCheckOut/V5");
         crate::client::ensure_https(&action)?;
         Ok(AioCheckOut {
             params: pairs,

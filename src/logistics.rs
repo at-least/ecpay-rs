@@ -164,10 +164,9 @@ impl Ecpay {
         // through to the query parse + MAC check below.
         if let Some(status) = &status {
             let fields = crate::client::parse_qsl(query);
-            let looks_like_a_signed_query = fields
-                .get("CheckMacValue")
-                .is_some_and(|v| !v.is_empty())
-                || fields.contains_key("RtnCode");
+            let looks_like_a_signed_query =
+                fields.get("CheckMacValue").is_some_and(|v| !v.is_empty())
+                    || fields.contains_key("RtnCode");
             if !looks_like_a_signed_query {
                 return Err(Error::Message(format!(
                     "ecpay logistics: status {status}: {}",
@@ -237,7 +236,7 @@ impl Ecpay {
         if let Some(mid) = data_merchant_id {
             self.require_data_merchant_id_with(mid, "")?;
         }
-        let endpoint = format!("{}{}", self.logistics_base_url(), path);
+        let endpoint = crate::client::join_url(self.logistics_base_url(), path);
         let rq_header = serde_json::json!({
             "Timestamp": unix_now(),
             "Revision": LOGISTICS_AES_REVISION,
@@ -269,7 +268,7 @@ impl Ecpay {
         if let Some(mid) = data_merchant_id {
             self.require_data_merchant_id_with(mid, "")?;
         }
-        let endpoint = format!("{}{}", self.logistics_base_url(), path);
+        let endpoint = crate::client::join_url(self.logistics_base_url(), path);
         let rq_header = serde_json::json!({
             "Timestamp": unix_now(),
             "Revision": LOGISTICS_AES_REVISION,
@@ -531,7 +530,7 @@ impl Ecpay {
         &self,
         input: &LogisticsCreateInput,
     ) -> Result<BTreeMap<String, String>> {
-        let endpoint = format!("{}Express/Create", self.logistics_base_url());
+        let endpoint = crate::client::join_url(self.logistics_base_url(), "Express/Create");
         self.post_logistics_form(endpoint, self.domestic_base_params(input)?)
             .await
     }
@@ -553,9 +552,9 @@ impl Ecpay {
             "TimeStamp".to_owned(),
             input.time_stamp.unwrap_or_else(unix_now).to_string(),
         );
-        let endpoint = format!(
-            "{}Helper/QueryLogisticsTradeInfo/V2",
-            self.logistics_base_url()
+        let endpoint = crate::client::join_url(
+            self.logistics_base_url(),
+            "Helper/QueryLogisticsTradeInfo/V2",
         );
         self.post_logistics_form(endpoint, m).await
     }
@@ -567,7 +566,7 @@ impl Ecpay {
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("CvsType".to_owned(), input.cvs_type.clone());
         self.sign_logistics(&mut m)?;
-        let endpoint = format!("{}Helper/GetStoreList", self.logistics_base_url());
+        let endpoint = crate::client::join_url(self.logistics_base_url(), "Helper/GetStoreList");
         let body = self.post_form(Service::Logistics, &endpoint, &m).await?;
         Ok(serde_json::from_slice(&body)?)
     }
@@ -589,7 +588,8 @@ impl Ecpay {
         if let Some(store) = &input.receiver_store_id {
             m.insert("ReceiverStoreID".to_owned(), store.clone());
         }
-        let endpoint = format!("{}Helper/UpdateShipmentInfo", self.logistics_base_url());
+        let endpoint =
+            crate::client::join_url(self.logistics_base_url(), "Helper/UpdateShipmentInfo");
         self.post_logistics_form(endpoint, m).await
     }
 
@@ -620,7 +620,8 @@ impl Ecpay {
             "ReceiverStoreID".to_owned(),
             input.receiver_store_id.clone(),
         );
-        let endpoint = format!("{}Express/UpdateStoreInfo", self.logistics_base_url());
+        let endpoint =
+            crate::client::join_url(self.logistics_base_url(), "Express/UpdateStoreInfo");
         self.post_logistics_form(endpoint, m).await
     }
 
@@ -643,7 +644,7 @@ impl Ecpay {
             "CVSValidationNo".to_owned(),
             input.cvs_validation_no.clone(),
         );
-        let endpoint = format!("{}Express/CancelC2COrder", self.logistics_base_url());
+        let endpoint = crate::client::join_url(self.logistics_base_url(), "Express/CancelC2COrder");
         self.post_logistics_form(endpoint, m).await
     }
 
@@ -652,7 +653,7 @@ impl Ecpay {
         &self,
         input: &ReturnCvsInput,
     ) -> Result<BTreeMap<String, String>> {
-        let endpoint = format!("{}express/ReturnCVS", self.logistics_base_url());
+        let endpoint = crate::client::join_url(self.logistics_base_url(), "express/ReturnCVS");
         let params = self.return_cvs_params(input)?;
         self.post_logistics_form(endpoint, params).await
     }
@@ -662,7 +663,8 @@ impl Ecpay {
         &self,
         input: &ReturnCvsInput,
     ) -> Result<BTreeMap<String, String>> {
-        let endpoint = format!("{}express/ReturnUniMartCVS", self.logistics_base_url());
+        let endpoint =
+            crate::client::join_url(self.logistics_base_url(), "express/ReturnUniMartCVS");
         let params = self.return_cvs_params(input)?;
         self.post_logistics_form(endpoint, params).await
     }
@@ -692,7 +694,7 @@ impl Ecpay {
             m.insert("Specification".to_owned(), spec.clone());
         }
         m.insert("ServerReplyURL".to_owned(), input.server_reply_url.clone());
-        let endpoint = format!("{}Express/ReturnHome", self.logistics_base_url());
+        let endpoint = crate::client::join_url(self.logistics_base_url(), "Express/ReturnHome");
         self.post_logistics_form(endpoint, m).await
     }
 
@@ -802,7 +804,7 @@ impl Ecpay {
         let mut m = self.domestic_base_params(input)?;
         self.sign_logistics(&mut m)?;
         LogisticsForm::new(
-            format!("{}Express/Create", self.logistics_base_url()),
+            crate::client::join_url(self.logistics_base_url(), "Express/Create"),
             m,
         )
     }
@@ -826,7 +828,7 @@ impl Ecpay {
         m.insert("ServerReplyURL".to_owned(), input.server_reply_url.clone());
         self.sign_logistics(&mut m)?;
         LogisticsForm::new(
-            format!("{}Express/map", self.logistics_base_url()),
+            crate::client::join_url(self.logistics_base_url(), "Express/map"),
             m,
         )
     }
@@ -844,7 +846,7 @@ impl Ecpay {
         m.insert("ClientReplyURL".to_owned(), client_reply_url.to_owned());
         self.sign_logistics(&mut m)?;
         LogisticsForm::new(
-            format!("{}Express/CreateTestData", self.logistics_base_url()),
+            crate::client::join_url(self.logistics_base_url(), "Express/CreateTestData"),
             m,
         )
     }
@@ -862,7 +864,7 @@ impl Ecpay {
         );
         self.sign_logistics(&mut m)?;
         LogisticsForm::new(
-            format!("{}helper/printTradeDocument", self.logistics_base_url()),
+            crate::client::join_url(self.logistics_base_url(), "helper/printTradeDocument"),
             m,
         )
     }
@@ -888,7 +890,7 @@ impl Ecpay {
         }
         self.sign_logistics(&mut m)?;
         LogisticsForm::new(
-            format!("{}{}", self.logistics_base_url(), target.path()),
+            crate::client::join_url(self.logistics_base_url(), target.path()),
             m,
         )
     }
@@ -897,6 +899,12 @@ impl Ecpay {
 
     /// 驗證國內物流回呼(ServerReplyURL 等)的 CheckMacValue:與金流回呼
     /// 不同,物流回呼一律 **MD5** 且用物流 HashKey/HashIV。
+    ///
+    /// ⚠ `logistics_hash_key`/`logistics_hash_iv` 留空時,這裡以**金流**
+    /// HashKey/HashIV 驗證(欄位文件記載的 fallback)。國內物流特店通常
+    /// 有自己的物流金鑰——若你的物流與金流金鑰不同,請務必設定物流組;
+    /// 否則真實的物流回呼會在此驗證失敗(fail-closed),而「驗證通過」
+    /// 的成立條件就落在較多子系統經手的金流金鑰上。
     pub fn verify_logistics_check_mac_value(&self, params: &HashMap<String, String>) -> bool {
         // Same empty-key guard as `verify_check_mac_value`: an unconfigured
         // client must never "verify" an attacker-crafted empty-key MAC.
@@ -1490,7 +1498,7 @@ impl Ecpay {
         m.insert("Destination".to_owned(), input.destination.clone());
         m.insert("ServerReplyURL".to_owned(), input.server_reply_url.clone());
         LogisticsForm::new(
-            format!("{}CrossBorder/Map", self.logistics_base_url()),
+            crate::client::join_url(self.logistics_base_url(), "CrossBorder/Map"),
             m,
         )
     }

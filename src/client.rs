@@ -239,6 +239,21 @@ pub(crate) fn parse_query(query: &str) -> Result<HashMap<String, String>> {
     Ok(out)
 }
 
+/// `{base}{action}` with the missing-`/` slip normalized away: every
+/// endpoint builder concatenates a configured base (the crate defaults all
+/// end with `/`) onto a relative action, so a base like
+/// `https://payment.ecpay.com.tw/Cashier` (no trailing slash) would
+/// otherwise produce a correctly signed request to a nonexistent path
+/// (`.../CashierAioCheckOut/V5`) that surfaces as a remote 404 instead of a
+/// locally visible config error. An empty base passes through unchanged.
+pub(crate) fn join_url(base: &str, action: &str) -> String {
+    if !base.is_empty() && !base.ends_with('/') {
+        format!("{base}/{action}")
+    } else {
+        format!("{base}{action}")
+    }
+}
+
 /// Python `urllib.parse.parse_qsl(text, keep_blank_values=True)` fed through
 /// `dict(...)` — the response decoder the official SDK uses: blank values
 /// kept (a control name without `=` yields `("k", "")`, verified against
@@ -255,6 +270,25 @@ pub(crate) fn parse_qsl(text: &str) -> std::collections::BTreeMap<String, String
         out.insert(unquote_plus(k), unquote_plus(v));
     }
     out
+}
+
+/// Parse a raw `application/x-www-form-urlencoded` body — an ECPay callback
+/// as POSTed, BEFORE any web-framework decoding — into the decoded
+/// [`HashMap`] that [`crate::Ecpay::verify_check_mac_value`] (and the other
+/// verify methods) take.
+///
+/// Semantics are Python `parse_qsl(keep_blank_values=True)`, the same
+/// decoder the crate uses for payment responses: values percent-decoded
+/// with `+` as space (multi-byte UTF-8 across `%XX` triplets round-trips),
+/// blank values kept, `a=b=c` splitting on the first `=`, duplicate keys
+/// last-value-wins.
+///
+/// ⚠ Verify over **decoded** values only: the CheckMacValue is computed on
+/// the decoded map, so feeding the still-encoded values (e.g. reading the
+/// raw POST body straight into a map) double-encodes in the MAC preimage
+/// and never verifies.
+pub fn parse_form(body: &str) -> HashMap<String, String> {
+    parse_qsl(body).into_iter().collect()
 }
 
 /// Python `urllib.parse.unquote_plus`: `+` becomes space and %XX decodes to
@@ -457,7 +491,7 @@ impl Ecpay {
         let mac = self.generate_check_value(&m)?;
         m.insert("CheckMacValue".to_owned(), mac);
         let base = self.payment_base_url();
-        let endpoint = format!("{base}{name}/V5");
+        let endpoint = join_url(base, &format!("{name}/V5"));
         ensure_https(&endpoint)?;
         let encoded = encode_query(crate::crypto::str_pairs(&m));
         let mut resp = self
@@ -675,7 +709,7 @@ impl Ecpay {
         input: &I,
     ) -> Result<O> {
         let base = self.invoice_base_url();
-        let endpoint = format!("{base}{name}");
+        let endpoint = join_url(base, name);
         ensure_https(&endpoint)?;
         let (key, iv) = self.invoice_keys();
         let data = self.encrypt_checked(&self.merchant_id, input, key, iv)?;

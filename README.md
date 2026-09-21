@@ -276,9 +276,9 @@ let client = Ecpay {
 `TaxType`、`Donation`、`PrintMark`、`CarrierType`、`ClearanceMark`、`InvType`;
 B2B(`ecpay::invoice_b2b`)的 `TaxType`、`InvType`。
 
-## 與官方 Python SDK 的四點刻意差異
+## 與官方 Python SDK 的五點刻意差異
 
-四點都記錄在測試裡(見 `tests/python_conformance.rs` 與
+五點都記錄在測試裡(見 `tests/python_conformance.rs` 與
 `tests/check_out.rs`),其餘行為(含驗證錯誤訊息原文)與官方 SDK 一致:
 
 1. **CheckMacValue 的 `~` 編碼**:官方 Python 用 `quote_plus` 把 `~` 保留為
@@ -299,6 +299,11 @@ B2B(`ecpay::invoice_b2b`)的 `TaxType`、`InvType`。
    `Language`、`MerchantMemberID`、`Desc_1..4`、`PaymentInfoURL` 等)在
    客戶端就以 `Error::Validation("{name} max langth is {max}.")` 拒絕,
    過長值不再流到綠界換一個伺服器端錯誤。
+5. **發票註記與發票欄位衝突直接報錯**:`InvoiceMark` 明確填了 `Y` 以外
+   的值(小寫 `"n"` 拼錯也算)又帶了 `InvoiceExtend` 時,官方 SDK 原樣
+   簽署送出(綠界拒收);本函式庫直接回 `Error::Validation`。過去非 `Y`
+   的值會被**靜默覆寫成 `Y`** 送出——等於替呼叫端開出一張沒要求的電子
+   發票。
 
 另外 `gen_html_post_form` 的屬性值加了 HTML escape(官方版遇 `"` 會壞掉
 form,也是注入點);回呼解密器的錯誤刻意統一(padding oracle 防護,見回呼
