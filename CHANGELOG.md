@@ -67,7 +67,9 @@ _非破壞性：_
   成功的回應裡塞近 1 MiB 的 `RtnMsg`,一條 log 就被撐成百萬字元。現在
   經共用的 `truncate_for_display`(512 字元上限)渲染,引號保留 Go-parity
   的 `%q` 外觀、控制字元與兩個兄弟 variant 同款**單層**跳脫
-  (終審回歸修正:先前的 `{:?}` 疊層會把 `\n` 再跳一次變 `\\n`);
+  (終審回歸修正:先前的 `{:?}` 疊層會把 `\n` 再跳一次變 `\\n`)——
+  不含引號與控制字元的訊息形狀與 Go parity 完全一致,含引號的訊息中
+  `"` 不再跳脫(僅外觀差異,非偽造向量:控制字元仍全部跳脫);
   `msg` 欄位仍保留完整原文供程式化取用
   (`tests/api_error.rs::api_error_display_bounds_the_server_message`)。
 - **`get_issue` 強制互斥查詢模式**(程式碼審查 🟢):`GetIssueInput` 文件的

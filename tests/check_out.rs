@@ -981,3 +981,36 @@ fn invoice_mark_some_empty_string_behaves_as_unset() {
         .expect("Some(\"\") without an invoice must behave as unset (nothing sent)");
     assert!(param(&out, "InvoiceMark").is_none());
 }
+
+/// The deliberate empty-key boundary, pinned so it reads as a stance and
+/// not an oversight: the guards added in this cycle refuse an unconfigured
+/// client only on paths that MAKE A MAC CLAIM (response-MAC verification
+/// like `order_search`, the MD5 logistics form family) — `aio_check_out`
+/// is a pure signing helper that never verifies anything, so with empty
+/// keys it still produces a (vacuously-signed) form and the real ECPay
+/// endpoint rejects it. If this pin ever fails, the boundary moved:
+/// update it and the CHANGELOG note together.
+#[test]
+fn aio_check_out_with_empty_keys_still_signs_the_documented_boundary() {
+    let client = ecpay::Ecpay {
+        merchant_id: "3002607".into(),
+        // hash_key/hash_iv deliberately empty.
+        ..Default::default()
+    };
+    let out = client.aio_check_out(&base(ChoosePayment::Credit)).expect(
+        "aio_check_out makes no MAC-verification claim; empty keys are the server's to reject",
+    );
+    // The MAC it computed is the empty-key one — computable by anyone, which
+    // is exactly why the VERIFY paths refuse these keys instead.
+    let mut m: std::collections::HashMap<String, String> = out
+        .params()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let mac = m.remove("CheckMacValue").expect("signed");
+    assert_eq!(
+        mac,
+        ecpay::check_mac_value(&m, "", "", ecpay::EncryptType::Sha256),
+        "with empty keys the form carries the empty-key MAC"
+    );
+}
