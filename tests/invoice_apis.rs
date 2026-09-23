@@ -6,8 +6,8 @@
 use std::sync::{Arc, Mutex};
 
 use ecpay::{
-    encrypt, encrypt_data, ApiError, DelayIssueInput, Ecpay, Error, GetIssueInput, IssueInput,
-    IssueModel, VoidModel, VoidWithReIssueInput,
+    encrypt, encrypt_data, ApiError, BaseUrl, DelayIssueInput, Ecpay, Env, Error, GetIssueInput,
+    IssueInput, IssueModel, Keys, Urls, VoidModel, VoidWithReIssueInput,
 };
 
 mod common;
@@ -17,13 +17,15 @@ const INVOICE_HASH_KEY: &str = "ejCk326UnaZWKisg";
 const INVOICE_HASH_IV: &str = "q9jcZX8Ib9LM8wYk";
 
 fn client(base_url: String) -> Ecpay {
-    Ecpay {
-        merchant_id: "2000132".to_owned(),
-        invoice_hash_key: INVOICE_HASH_KEY.to_owned(),
-        invoice_hash_iv: INVOICE_HASH_IV.to_owned(),
-        invoice_api_url: base_url,
-        ..Default::default()
-    }
+    Ecpay::new(
+        "2000132",
+        Env::Custom(Urls {
+            invoice: Some(BaseUrl::new(base_url).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_invoice_keys(Keys::new(INVOICE_HASH_KEY, INVOICE_HASH_IV).unwrap())
 }
 
 fn envelope(data: String) -> (u16, String, Vec<u8>) {
@@ -309,13 +311,11 @@ async fn envelope_carries_the_platform_id() {
         .get_issue(&Default::default())
         .await
         .unwrap();
-    Ecpay {
-        platform_id: "3002599".into(),
-        ..client(srv)
-    }
-    .get_issue(&Default::default())
-    .await
-    .unwrap();
+    client(srv)
+        .with_platform_id("3002599")
+        .get_issue(&Default::default())
+        .await
+        .unwrap();
     assert_eq!(
         *captured.lock().unwrap_or_else(|e| e.into_inner()),
         vec![String::new(), "3002599".to_owned()]

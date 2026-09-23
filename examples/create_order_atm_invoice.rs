@@ -5,16 +5,18 @@
 use ecpay::payment::{
     AioCheckOutParams, ChoosePayment, Donation, InvType, InvoiceExtend, PrintMark, TaxType,
 };
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 
 fn main() {
-    let client = Ecpay {
-        merchant_id: "3002607".into(),
-        hash_key: "pwFHCqoQZGmho4w6".into(),
-        hash_iv: "EkRm7iFT261dpevs".into(),
-        payment_api_url: "https://payment-stage.ecpay.com.tw/Cashier/".into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(
+        "3002607",
+        Env::Custom(Urls {
+            payment: Some(BaseUrl::new("https://payment-stage.ecpay.com.tw/Cashier/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap());
 
     let checkout = client
         .aio_check_out(&AioCheckOutParams {

@@ -14,7 +14,7 @@ use ecpay::logistics::{
     PrintC2c, ReturnCvsInput, ReturnHomeInput, UpdateShipmentInfoInput, UpdateStoreInfoInput,
     UpdateTempTradeInput,
 };
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 
 mod common;
 use common::sandbox::urlencode;
@@ -25,15 +25,15 @@ const LOGISTICS_KEY: &str = "5294y06JbISpM5x9";
 const LOGISTICS_IV: &str = "v77hoKGq4kWxNNIS";
 
 fn logistics_sdk(api_url: String) -> Ecpay {
-    Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: "pwFHCqoQZGmho4w6".into(),
-        hash_iv: "EkRm7iFT261dpevs".into(),
-        logistics_api_url: api_url,
-        logistics_hash_key: LOGISTICS_KEY.to_owned(),
-        logistics_hash_iv: LOGISTICS_IV.to_owned(),
-        ..Default::default()
-    }
+    Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new(api_url).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_logistics_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap())
 }
 
 fn sample_create() -> LogisticsCreateInput {
@@ -82,11 +82,14 @@ async fn domestic_form_api_refuses_an_empty_key_client_before_sending() {
             format!("1|AllPayLogisticsID=3657295&RtnCode=300&CheckMacValue={mac}").into_bytes(),
         )
     });
-    let sdk = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        logistics_api_url: server,
-        ..Default::default() // no logistics keys, no payment fallback keys
-    };
+    let sdk = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new(server).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap(); // no logistics keys, no payment fallback keys
     let err = sdk
         .logistics_create(&sample_create())
         .await
@@ -1833,7 +1836,7 @@ fn logistics_forms_render_deterministically() {
 }
 
 #[test]
-fn empty_logistics_keys_reject_forged_mac_but_fall_back_to_payment_pair() {
+fn missing_logistics_keys_reject_forged_mac_but_fall_back_to_the_whole_payment_pair() {
     let base_params: HashMap<String, String> = [
         ("MerchantID", MERCHANT_ID),
         ("AllPayLogisticsID", "1718552"),
@@ -1843,62 +1846,76 @@ fn empty_logistics_keys_reject_forged_mac_but_fall_back_to_payment_pair() {
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
     .collect();
 
-    // Shape 1 — everything empty: whoever knows the param set can compute the
-    // empty-key MD5 preimage, so an unconfigured client must not "verify" it.
-    let mut sdk = logistics_sdk("https://logistics-stage.ecpay.com.tw/".into());
-    sdk.logistics_hash_key = String::new();
-    sdk.logistics_hash_iv = String::new();
-    sdk.hash_key = String::new();
-    sdk.hash_iv = String::new();
+    // Shape 1 — neither pair configured: whoever knows the param set can
+    // compute the empty-key MD5 preimage, so an unconfigured client must
+    // not "verify" it.
+    let neither = Ecpay::new(MERCHANT_ID, Env::Production).unwrap();
     let mut params = base_params.clone();
     let forged = check_mac_value(&params, "", "", ecpay::EncryptType::Md5);
     params.insert("CheckMacValue".to_owned(), forged);
     assert!(
-        !sdk.verify_logistics_check_mac_value(&params),
-        "an empty-key client must reject a MAC computed with the same empty keys"
+        !neither.verify_logistics_check_mac_value(&params),
+        "an unconfigured client must reject a MAC computed with empty keys"
     );
 
-    // Shape 2 — the fallback itself: logistics keys empty, payment pair real.
-    // `logistics_keys` falls back per-field to the payment pair, so a MAC
-    // computed with the payment pair MUST verify through the logistics path,
-    // and a MAC computed with the (unused) logistics pair must NOT.
-    let mut sdk = logistics_sdk("https://logistics-stage.ecpay.com.tw/".into());
-    sdk.logistics_hash_key = String::new();
-    sdk.logistics_hash_iv = String::new();
+    // Shape 2 — the whole-pair fallback: no dedicated logistics pair, a real
+    // payment pair. A MAC computed with the ENTIRE payment pair must verify
+    // through the logistics path; a MAC computed with the (unused)
+    // dedicated logistics pair must NOT.
+    let payment_only = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap());
     let mut params = base_params.clone();
     let mac = check_mac_value(
         &params,
-        &sdk.hash_key,
-        &sdk.hash_iv,
+        "pwFHCqoQZGmho4w6",
+        "EkRm7iFT261dpevs",
         ecpay::EncryptType::Md5,
     );
     params.insert("CheckMacValue".to_owned(), mac);
     assert!(
-        sdk.verify_logistics_check_mac_value(&params),
-        "empty logistics keys must fall back to the payment pair, not fail closed"
+        payment_only.verify_logistics_check_mac_value(&params),
+        "a missing logistics pair falls back to the WHOLE payment pair, not fail closed"
     );
     let mut wrong = base_params.clone();
     let wrong_mac = check_mac_value(&wrong, LOGISTICS_KEY, LOGISTICS_IV, ecpay::EncryptType::Md5);
     wrong.insert("CheckMacValue".to_owned(), wrong_mac);
     assert!(
-        !sdk.verify_logistics_check_mac_value(&wrong),
-        "the logistics pair is unused while the logistics keys are empty"
+        !payment_only.verify_logistics_check_mac_value(&wrong),
+        "the unused dedicated logistics pair must not verify"
     );
 
-    // Shape 3 — the fallback is PER FIELD: only the logistics KEY empty
-    // (IV kept) must mix the payment key with the logistics IV.
-    let mut sdk = logistics_sdk("https://logistics-stage.ecpay.com.tw/".into());
-    sdk.logistics_hash_key = String::new();
+    // Shape 3 — the old PER-FIELD fallback (payment key + logistics IV, or
+    // the reverse) is UNREPRESENTABLE now: pairs are whole `Keys` values
+    // behind `with_logistics_keys`, so a dedicated pair is attached whole
+    // or not at all — the mixed MACs of the old shape cannot be produced
+    // by any configuration. A dedicated pair present means it is used:
+    let dedicated = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap())
+        .with_logistics_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap());
     let mut params = base_params.clone();
     let mac = check_mac_value(
         &params,
-        &sdk.hash_key,
-        &sdk.logistics_hash_iv,
+        LOGISTICS_KEY,
+        LOGISTICS_IV,
         ecpay::EncryptType::Md5,
     );
     params.insert("CheckMacValue".to_owned(), mac);
     assert!(
-        sdk.verify_logistics_check_mac_value(&params),
-        "an empty logistics key alone must fall back to the payment key, keeping the logistics IV"
+        dedicated.verify_logistics_check_mac_value(&params),
+        "a dedicated logistics pair is used when present"
+    );
+    let mut mixed = base_params.clone();
+    let mixed_mac = check_mac_value(
+        &mixed,
+        "pwFHCqoQZGmho4w6",
+        LOGISTICS_IV,
+        ecpay::EncryptType::Md5,
+    );
+    mixed.insert("CheckMacValue".to_owned(), mixed_mac);
+    assert!(
+        !dedicated.verify_logistics_check_mac_value(&mixed),
+        "no configuration mixes one pair's key with another's IV anymore"
     );
 }

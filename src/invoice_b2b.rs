@@ -5,7 +5,7 @@
 //! Wire format (verified live against the stage server on 2026-09, see
 //! `tests/stage_probes.rs`): each call POSTs `{MerchantID, RqHeader, Data}`
 //! to `{b2b_base_url}{Action}`. `RqHeader` carries exactly `Timestamp` (unix
-//! seconds), `RqID` (the GUID-format `Ecpay::b2b_rq_id` you configure) and
+//! seconds), `RqID` (the GUID-format `Ecpay::with_b2b_rq_id` you configure) and
 //! `Revision: "1.0.0"` — B2C invoice uses `"3.0.0"` and no RqID. ECPay wants
 //! `MerchantID` in BOTH the envelope AND as the first field inside `Data`
 //! (every official PHP example does this), so each input struct keeps its own
@@ -110,18 +110,18 @@ impl Ecpay {
         // 前拒絕並給出可執行的訊息。
         if self.b2b_rq_id.is_empty() {
             return Err(Error::Validation(
-                "ecpay: B2B invoice requires Ecpay::b2b_rq_id (GUID format, \
+                "ecpay: B2B invoice requires the client's with_b2b_rq_id value (GUID format, \
                  unique per request) — refusing to send an empty RqHeader.RqID"
                     .into(),
             ));
         }
-        let endpoint = crate::client::join_url(self.b2b_base_url(), action);
+        let endpoint = crate::client::join_url(self.b2b_base_url()?, action);
         let rq_header = serde_json::json!({
             "Timestamp": crate::client::unix_now(),
             "RqID": self.b2b_rq_id.clone(),
             "Revision": B2B_AES_REVISION,
         });
-        let (key, iv) = self.invoice_keys();
+        let (key, iv) = self.invoice_keys()?;
         self.post_aes_json(
             crate::client::AesEndpoint {
                 service: Service::B2bInvoice,
@@ -130,8 +130,8 @@ impl Ecpay {
             rq_header,
             &self.merchant_id,
             data,
-            key,
-            iv,
+            key.as_bytes(),
+            iv.as_bytes(),
         )
         .await
     }

@@ -25,30 +25,27 @@
 
 use ecpay::{
     AllowanceByCollegiateInput, AllowanceInput, AllowanceInvalidByCollegiateInput,
-    AllowanceInvalidInput, AllowanceItem, CancelDelayIssueInput, CheckBarcodeInput,
-    CheckLoveCodeInput, DelayIssueInput, Ecpay, Error, GetAllowanceInput, GetAllowanceInvalidInput,
-    GetCompanyNameByTaxIDInput, GetGovInvoiceWordSettingInput, GetInvalidInput,
-    GetInvoiceWordSettingInput, GetIssueInput, InvalidInput, IssueInput, IssueModel, Item,
-    TriggerIssueInput, VoidModel, VoidWithReIssueInput, INVOICE_API_URL_STAGE,
-    PAYMENT_API_URL_STAGE,
+    AllowanceInvalidInput, AllowanceItem, BaseUrl, CancelDelayIssueInput, CheckBarcodeInput,
+    CheckLoveCodeInput, DelayIssueInput, Ecpay, Env, Error, GetAllowanceInput,
+    GetAllowanceInvalidInput, GetCompanyNameByTaxIDInput, GetGovInvoiceWordSettingInput,
+    GetInvalidInput, GetInvoiceWordSettingInput, GetIssueInput, InvalidInput, IssueInput,
+    IssueModel, Item, Keys, TriggerIssueInput, Urls, VoidModel, VoidWithReIssueInput,
+    INVOICE_API_URL_STAGE,
 };
 
 fn stage_client() -> Ecpay {
-    Ecpay {
-        merchant_id: "2000132".into(),
-        // Inert placeholders: every test in this file calls invoice-family
-        // APIs (invoice_hash_key below), which ignore the payment pair. The
-        // values are the LOGISTICS pair, not an AIO credential for 2000132 —
-        // kept explicit so an AIO call added here fails loudly at a wrong-key
-        // MAC instead of looking configured.
-        hash_key: "5294y06JbISpM5x9".into(),
-        hash_iv: "v77hoKGq4kWxNNIS".into(),
-        payment_api_url: PAYMENT_API_URL_STAGE.into(),
-        invoice_api_url: INVOICE_API_URL_STAGE.into(),
-        invoice_hash_key: "ejCk326UnaZWKisg".into(),
-        invoice_hash_iv: "q9jcZX8Ib9LM8wYk".into(),
-        ..Default::default()
-    }
+    // Invoice-only suite: only the invoice pair is attached; the family
+    // accessors refuse an AIO call loudly instead of silently using a
+    // wrong pair.
+    Ecpay::new(
+        "2000132",
+        Env::Custom(Urls {
+            invoice: Some(BaseUrl::new(INVOICE_API_URL_STAGE).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_invoice_keys(Keys::new("ejCk326UnaZWKisg", "q9jcZX8Ib9LM8wYk").unwrap())
 }
 
 /// ECPay 要求特店自訂編號唯一不可重複：用時間戳尾數保證。
@@ -122,7 +119,7 @@ const TRICKY_TEXT: &str = "全部!混~合*(字).-_%+&=/:'\"測試ABC123 空格";
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn issue_then_get_then_invalid_roundtrip() {
     let client = stage_client();
-    let merchant_id = client.merchant_id.clone();
+    let merchant_id = client.merchant_id().to_owned();
 
     let relate = unique_relate_number();
     let mut input = sample_issue_input(relate.clone(), merchant_id.clone());
@@ -215,7 +212,7 @@ async fn issue_then_get_then_invalid_roundtrip() {
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn issue_lifecycle_error_contracts() {
     let client = stage_client();
-    let merchant_id = client.merchant_id.clone();
+    let merchant_id = client.merchant_id().to_owned();
     let relate = unique_relate_number();
     let issued = client
         .issue(&sample_issue_input(relate.clone(), merchant_id.clone()))
@@ -335,7 +332,7 @@ async fn issue_lifecycle_error_contracts() {
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn unknown_codes_are_adjudicated_by_the_server() {
     let client = stage_client();
-    let merchant_id = client.merchant_id.clone();
+    let merchant_id = client.merchant_id().to_owned();
     let mut carrier = sample_issue_input(unique_relate_number(), merchant_id.clone());
     carrier.carrier_type = ecpay::invoice::CarrierType::Other("9".into());
     match client.issue(&carrier).await {
@@ -365,7 +362,7 @@ async fn get_allowance_requires_allowance_no_and_invoice_no_on_every_search_type
     ] {
         let got = client
             .get_allowance(&GetAllowanceInput {
-                merchant_id: client.merchant_id.clone(),
+                merchant_id: client.merchant_id().to_owned(),
                 search_type: search_type.into(),
                 allowance_no: allowance_no.into(),
                 invoice_no: invoice_no.into(),
@@ -388,7 +385,7 @@ async fn check_love_code_roundtrip() {
     let client = stage_client();
     let got = client
         .check_love_code(&CheckLoveCodeInput {
-            merchant_id: client.merchant_id.clone(),
+            merchant_id: client.merchant_id().to_owned(),
             love_code: "168001".into(), // 官方 PHP 範例 CheckLoveCode.php 用的公開測試捐贈碼
         })
         .await
@@ -419,7 +416,7 @@ async fn check_love_code_roundtrip() {
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
     let client = stage_client();
-    let merchant_id = client.merchant_id.clone();
+    let merchant_id = client.merchant_id().to_owned();
     let tricky: Vec<(&str, String)> = vec![
         ("plain", "ABC123".into()),
         ("chinese", "測試中文字元".into()),
@@ -475,10 +472,15 @@ async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
 
     // Negative control: the same request under a wrong AES key must not
     // reach the business check.
-    let wrong_key = Ecpay {
-        invoice_hash_key: "0000000000000000".into(),
-        ..stage_client()
-    };
+    let wrong_key = Ecpay::new(
+        "2000132",
+        Env::Custom(Urls {
+            invoice: Some(BaseUrl::new(INVOICE_API_URL_STAGE).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_invoice_keys(Keys::new("0000000000000000", "q9jcZX8Ib9LM8wYk").unwrap());
     let err = wrong_key
         .check_barcode(&CheckBarcodeInput {
             merchant_id,
@@ -514,7 +516,7 @@ async fn aes_payload_encoding_survives_tricky_characters_on_stage() {
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn allowance_lifecycle_roundtrip() {
     let client = stage_client();
-    let merchant_id = client.merchant_id.clone();
+    let merchant_id = client.merchant_id().to_owned();
     let relate = unique_relate_number();
 
     let issued = client
@@ -603,7 +605,7 @@ async fn allowance_lifecycle_roundtrip() {
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn allowance_by_collegiate_roundtrip() {
     let client = stage_client();
-    let merchant_id = client.merchant_id.clone();
+    let merchant_id = client.merchant_id().to_owned();
     let relate = unique_relate_number();
 
     let issued = client
@@ -703,7 +705,7 @@ fn sample_delay_issue_input(
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn delay_issue_then_trigger_roundtrip() {
     let client = stage_client();
-    let merchant_id = client.merchant_id.clone();
+    let merchant_id = client.merchant_id().to_owned();
     let relate = unique_relate_number();
     let tsr = format!("tsr{}", unique_relate_number());
 
@@ -744,7 +746,7 @@ async fn delay_issue_then_trigger_roundtrip() {
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn delay_issue_then_cancel_roundtrip() {
     let client = stage_client();
-    let merchant_id = client.merchant_id.clone();
+    let merchant_id = client.merchant_id().to_owned();
     let relate = unique_relate_number();
     let tsr = format!("tsrc{}", unique_relate_number());
 
@@ -782,7 +784,7 @@ async fn delay_issue_then_cancel_roundtrip() {
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox -- --ignored --nocapture"]
 async fn issue_then_void_with_reissue_roundtrip() {
     let client = stage_client();
-    let merchant_id = client.merchant_id.clone();
+    let merchant_id = client.merchant_id().to_owned();
 
     let relate = unique_relate_number();
     let issued = client

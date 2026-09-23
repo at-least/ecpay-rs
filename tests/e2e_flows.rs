@@ -41,7 +41,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use ecpay::crypto::check_mac_value;
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 
 mod common;
 use common::sandbox::urlencode;
@@ -133,14 +133,10 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
     // --- the merchant's ServerReplyURL handler: verify MD5 CMV (a tampered
     // --- callback must be rejected with `0|ERR`), dedup, reply exact `1|OK`.
     let merchant = {
-        let client = Ecpay {
-            merchant_id: MERCHANT_ID.into(),
-            hash_key: PAY_KEY.into(),
-            hash_iv: PAY_IV.into(),
-            logistics_hash_key: LOG_KEY.to_owned(),
-            logistics_hash_iv: LOG_IV.to_owned(),
-            ..Default::default()
-        };
+        let client = Ecpay::new(MERCHANT_ID, Env::Production)
+            .unwrap()
+            .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap())
+            .with_logistics_keys(Keys::new(LOG_KEY, LOG_IV).unwrap());
         let log = merchant_log.clone();
         spawn_http_server(move |_path, body| {
             let fields = ecpay::parse_form(&String::from_utf8_lossy(body));
@@ -222,15 +218,16 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
     };
 
     let merchant_url = merchant.clone();
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: PAY_KEY.into(),
-        hash_iv: PAY_IV.into(),
-        logistics_api_url: ecpay_sim.clone(),
-        logistics_hash_key: LOG_KEY.to_owned(),
-        logistics_hash_iv: LOG_IV.to_owned(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new(ecpay_sim.clone()).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap())
+    .with_logistics_keys(Keys::new(LOG_KEY, LOG_IV).unwrap());
 
     // 1. Create the logistics order through the crate.
     let created = client
@@ -367,14 +364,10 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
     // form field); ServerReplyURL decodes the AES notify and answers with the
     // ENCRYPTED ack ECPay requires for v2.
     let merchant = {
-        let client = Ecpay {
-            merchant_id: MERCHANT_ID.into(),
-            hash_key: PAY_KEY.into(),
-            hash_iv: PAY_IV.into(),
-            logistics_hash_key: LOG_KEY.to_owned(),
-            logistics_hash_iv: LOG_IV.to_owned(),
-            ..Default::default()
-        };
+        let client = Ecpay::new(MERCHANT_ID, Env::Production)
+            .unwrap()
+            .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap())
+            .with_logistics_keys(Keys::new(LOG_KEY, LOG_IV).unwrap());
         spawn_http_server(move |path, body| {
             if path.ends_with("client-reply") {
                 let fields = ecpay::parse_form(&String::from_utf8_lossy(body));
@@ -474,15 +467,16 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
     };
 
     let merchant_url = merchant.clone();
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: PAY_KEY.into(),
-        hash_iv: PAY_IV.into(),
-        logistics_api_url: ecpay_sim.clone(),
-        logistics_hash_key: LOG_KEY.to_owned(),
-        logistics_hash_iv: LOG_IV.to_owned(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new(ecpay_sim.clone()).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap())
+    .with_logistics_keys(Keys::new(LOG_KEY, LOG_IV).unwrap());
 
     // 1. Consumer store selection → temp trade established on ClientReplyURL.
     let redirect = client
@@ -589,12 +583,9 @@ struct EcpgSim {
 async fn ecpg_full_flow_from_token_to_paid_query() {
     let sim = Arc::new(Mutex::new(EcpgSim::default()));
     let merchant = {
-        let client = Ecpay {
-            merchant_id: MERCHANT_ID.into(),
-            hash_key: PAY_KEY.into(),
-            hash_iv: PAY_IV.into(),
-            ..Default::default()
-        };
+        let client = Ecpay::new(MERCHANT_ID, Env::Production)
+            .unwrap()
+            .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap());
         spawn_http_server(move |_path, body| {
             // guides/21: parse JSON → TransCode gate → AES decrypt Data →
             // inner RtnCode → reply EXACT `1|OK`. Anything that fails the
@@ -694,14 +685,16 @@ async fn ecpg_full_flow_from_token_to_paid_query() {
     };
 
     let merchant_url = merchant.clone();
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: PAY_KEY.into(),
-        hash_iv: PAY_IV.into(),
-        ecpg_api_url: format!("{ecpay_sim}Merchant/"),
-        ecpayment_api_url: format!("{ecpay_sim}1.0.0/"),
-        ..Default::default()
-    };
+    let client = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            ecpg: Some(BaseUrl::new(format!("{ecpay_sim}Merchant/")).unwrap()),
+            ecpayment: Some(BaseUrl::new(format!("{ecpay_sim}1.0.0/")).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap());
 
     // 1. 取號: the typed output proven live on stage.
     let token_out = client
@@ -781,7 +774,7 @@ async fn ecpg_full_flow_from_token_to_paid_query() {
     let trade = client
         .ecpg_query_trade(&ecpay::ecpg::EcpgTradeRefInput {
             // Data MerchantID is required (stage: 5000220 without it).
-            merchant_id: client.merchant_id.clone(),
+            merchant_id: client.merchant_id().to_owned(),
             merchant_trade_no: "E2E0000001".into(),
             ..Default::default()
         })
@@ -876,16 +869,17 @@ async fn b2b_issue_get_invalid_getinvalid_chain() {
         })
     };
 
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: PAY_KEY.into(),
-        hash_iv: PAY_IV.into(),
-        invoice_hash_key: B2B_KEY.to_owned(),
-        invoice_hash_iv: B2B_IV.to_owned(),
-        b2b_invoice_api_url: ecpay_sim.clone(),
-        b2b_rq_id: "701b3264-a538-437e-ad45-2505eb7dde39".into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            b2b_invoice: Some(BaseUrl::new(ecpay_sim.clone()).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap())
+    .with_invoice_keys(Keys::new(B2B_KEY, B2B_IV).unwrap())
+    .with_b2b_rq_id("701b3264-a538-437e-ad45-2505eb7dde39");
 
     // 開立 → 查詢 → 作廢 → 查作廢。
     let issue = client
@@ -958,12 +952,9 @@ async fn b2b_issue_get_invalid_getinvalid_chain() {
 
 #[test]
 fn ecpg_callback_helper_decodes_a_self_encrypted_envelope() {
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: PAY_KEY.into(),
-        hash_iv: PAY_IV.into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap());
     let body = serde_json::json!({
         "MerchantID": MERCHANT_ID, "RqHeader": {"Timestamp": 1},
         "TransCode": 1, "TransMsg": "",
@@ -983,12 +974,9 @@ fn ecpg_callback_helper_decodes_a_self_encrypted_envelope() {
 /// on a public ReturnURL is an attacker-sized echo.
 #[test]
 fn ecpg_callback_helper_reports_a_mistyped_envelope_bounded() {
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: PAY_KEY.into(),
-        hash_iv: PAY_IV.into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap());
     let body = format!(
         r#"{{"TransCode":"{}","TransMsg":"","Data":""}}"#,
         "x".repeat(700 * 1024)
@@ -1010,12 +998,9 @@ fn ecpg_callback_helper_reports_a_mistyped_envelope_bounded() {
 /// a meaningless `TransCode{code:0}`.
 #[test]
 fn ecpg_callback_helper_rejects_a_non_envelope_body() {
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: PAY_KEY.into(),
-        hash_iv: PAY_IV.into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap());
     let err = client
         .decrypt_ecpg_callback::<serde_json::Value>(r#"{"RtnCode":1}"#)
         .expect_err("no TransCode key");
@@ -1031,12 +1016,9 @@ fn ecpg_callback_helper_rejects_a_non_envelope_body() {
 /// or forge the handler's log.
 #[test]
 fn ecpg_callback_helper_bounds_and_escapes_the_echoed_body() {
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: PAY_KEY.into(),
-        hash_iv: PAY_IV.into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap());
     let mut body = String::from("<html>\n[FAKE LOG LINE] admin login ok\n");
     body.push_str(&"x".repeat(1 << 20));
     for err in [
@@ -1064,12 +1046,9 @@ fn ecpg_callback_helper_bounds_and_escapes_the_echoed_body() {
 
 #[test]
 fn ecpg_callback_helper_gates_on_transcode() {
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: PAY_KEY.into(),
-        hash_iv: PAY_IV.into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap());
     let body = serde_json::json!({
         "MerchantID": MERCHANT_ID, "TransCode": 110, "TransMsg": "decrypt fail", "Data": "",
     });

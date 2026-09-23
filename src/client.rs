@@ -492,7 +492,7 @@ impl Ecpay {
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         let mac = self.generate_check_value(&m)?;
         m.insert("CheckMacValue".to_owned(), mac);
-        let base = self.payment_base_url();
+        let base = self.payment_base_url()?;
         let endpoint = join_url(base, &format!("{name}/V5"));
         ensure_https(&endpoint)?;
         let encoded = encode_query(crate::crypto::str_pairs(&m));
@@ -689,7 +689,9 @@ impl Ecpay {
             // (parse_envelope's TransCode-key gate), so a 403/502 gateway
             // body keeps its real status and content.
             match Self::parse_envelope(&body) {
-                Some(res) => return Self::decode_aes_response(res, key, iv),
+                Some(res) => {
+                    return Self::decode_aes_response(res, key, iv);
+                }
                 None => {
                     return Err(Error::HttpStatus {
                         service: to.service,
@@ -710,11 +712,11 @@ impl Ecpay {
         name: &str,
         input: &I,
     ) -> Result<O> {
-        let base = self.invoice_base_url();
+        let base = self.invoice_base_url()?;
         let endpoint = join_url(base, name);
         ensure_https(&endpoint)?;
-        let (key, iv) = self.invoice_keys();
-        let data = self.encrypt_checked(&self.merchant_id, input, key, iv)?;
+        let (key, iv) = self.invoice_keys()?;
+        let data = self.encrypt_checked(&self.merchant_id, input, key.as_bytes(), iv.as_bytes())?;
         let req = Request {
             platform_id: self.platform_id.clone(),
             merchant_id: self.merchant_id.clone(),
@@ -748,11 +750,11 @@ impl Ecpay {
             });
         }
         let body = body_string(&mut resp).await?;
-        Self::decode_envelope(&body, key, iv)
+        Self::decode_envelope(&body, key.as_bytes(), iv.as_bytes())
     }
 
     /// The HTTP client requests are sent with: an injected
-    /// [`Ecpay::http`] client as-is, or the shared hardened default below.
+    /// injected [`Ecpay::with_http`](crate::Ecpay::with_http) client as-is, or the shared hardened default below.
     pub(crate) fn http(&self) -> &reqwest::Client {
         match &self.http {
             Some(client) => client,
@@ -768,13 +770,14 @@ impl Ecpay {
     pub fn generate_check_value(&self, params: &HashMap<String, String>) -> Result<String> {
         let encrypt_type =
             crate::crypto::parse_encrypt_type(params.get("EncryptType").map(String::as_str))?;
+        let (key, iv) = self.payment_keys()?;
         let pairs = crate::crypto::str_pairs(params)
             .filter(|(k, _)| *k != "MerchantID")
             .chain(std::iter::once(("MerchantID", self.merchant_id.as_str())));
         Ok(crate::crypto::check_mac_value_pairs(
             pairs,
-            &self.hash_key,
-            &self.hash_iv,
+            key,
+            iv,
             encrypt_type,
         ))
     }
@@ -847,7 +850,7 @@ pub(crate) fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// The shared fallback HTTP client, used when [`Ecpay::http`] is not set.
+/// The shared fallback HTTP client, used when no client was injected via [`Ecpay::with_http`](crate::Ecpay::with_http).
 /// Hardened for payment traffic: no redirect following (a 30x on a signed
 /// API POST is either misconfiguration or an attempt to replay the payload
 /// elsewhere — ECPay's API endpoints answer directly, never redirect), a
@@ -868,7 +871,7 @@ pub(crate) fn unix_now() -> i64 {
 /// connection per call instead of reuse) for eliminating that whole class
 /// of failure — an acceptable trade for a payment/invoice SDK's low-QPS,
 /// call-then-wait usage pattern. Callers that need pooling inject their own
-/// client via [`Ecpay::http`].
+/// client via [`Ecpay::with_http`](crate::Ecpay::with_http).
 ///
 /// Panics (lazily, on the first request) only if the reqwest builder itself
 /// fails — with the pinned rustls-tls feature set this is in practice

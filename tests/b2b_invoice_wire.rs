@@ -11,7 +11,7 @@ use ecpay::invoice_b2b::{
     AllowanceInput, B2bAllowanceDetail, B2bItem, GetInvoiceWordSettingInput, InvalidInput,
     IssueB2bInput, MaintainMerchantCustomerDataInput,
 };
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 
 mod common;
 use common::spawn_http_server;
@@ -24,14 +24,16 @@ const B2B_IV: &str = "q9jcZX8Ib9LM8wYk";
 const B2B_RQ_ID: &str = "701b3264-a538-437e-ad45-2505eb7dde39";
 
 fn b2b_client(b2b_invoice_api_url: String) -> Ecpay {
-    Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        invoice_hash_key: B2B_KEY.to_owned(),
-        invoice_hash_iv: B2B_IV.to_owned(),
-        b2b_invoice_api_url,
-        b2b_rq_id: B2B_RQ_ID.into(),
-        ..Default::default()
-    }
+    Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            b2b_invoice: Some(BaseUrl::new(b2b_invoice_api_url).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_invoice_keys(Keys::new(B2B_KEY, B2B_IV).unwrap())
+    .with_b2b_rq_id(B2B_RQ_ID)
 }
 
 /// The stage-proven Issue success payload (2026-09 live probe, commit
@@ -850,10 +852,17 @@ async fn empty_b2b_rq_id_is_refused_before_any_bytes_go_out() {
         let _ = assert_envelope_and_decrypt(path, body, "Invalid");
         aes_reply(&serde_json::json!({"RtnCode": 1, "RtnMsg": "ok"}))
     });
-    let client = Ecpay {
-        b2b_rq_id: String::new(),
-        ..b2b_client(srv)
-    };
+    // The default already has an empty b2b_rq_id; build from scratch so
+    // the guard fires with no RqID attached.
+    let client = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            b2b_invoice: Some(BaseUrl::new(srv).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_invoice_keys(Keys::new(B2B_KEY, B2B_IV).unwrap());
     let err = client
         .invalid_b2b(&InvalidInput {
             merchant_id: MERCHANT_ID.into(),

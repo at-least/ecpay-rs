@@ -4,6 +4,45 @@
 
 _breaking changes（程式碼審查後的型別/一致性修正）：_
 
+- **建構期驗證重塑:無效狀態改為不可構造**(重新設計建議 #1,0.4.0
+  發佈前的自由重塑窗口)。`Ecpay` 不再是 `#[derive(Default)]` 的公開欄位
+  struct——空金鑰、靜默 fallback 到正式環境 URL、跨家族混搭金鑰,這三類
+  「可構造的無效狀態」正是本輪審查修掉的空金鑰漏洞類的根因。新 API:
+  - `Ecpay::new(merchant_id, env) -> Result<Ecpay>`:唯一建構路徑,空
+    MerchantID 拒絕。`Env::{Stage, Production, Custom(Urls)}`:前兩者
+    一次設定全部八個家族的端點;`Custom` 只用你給的——某家族 URL 沒給,
+    該家族的呼叫**大聲拒絕**,不再靜默 fallback 到正式環境(舊的
+    「空欄位 = 正式環境」陷阱移除)。`Urls` 各欄位 `Option<BaseUrl>`,
+    `BaseUrl::new` 建構時就驗 https/loopback 規則(請求時再驗一次作為
+    縱深)。
+  - 金鑰改為整組 `Keys`(`Keys::new(key, iv) -> Result`:驗非空、key
+    16/24/32 位元組、IV 恰 16 位元組——長度寫錯當場報,不再等到 AES
+    層),以 `with_payment_keys` / `with_invoice_keys` /
+    `with_logistics_keys` 附掛;`with_b2b_rq_id` / `with_platform_id` /
+    `with_http` 對應舊欄位。某家族金鑰沒附掛,該家族的呼叫大聲拒絕
+    (`Error::Validation`,出網前)——手動空金鑰守衛收斂進存取器。
+  - 物流金鑰 fallback 改為**整組**(未設物流組時用整組金鑰組);舊的
+    逐欄 fallback 可構造出「物流 key + 金流 IV」混搭,現在不可表示。
+  - `Keys` drop 時自動清零(zeroize-on-drop);`zeroize_signing_keys()`
+    改為清掉三組金鑰的**存在本身**——清零後的 client 對所有簽章/驗證
+    呼叫大聲拒絕,不再「清了 bytes 但 pair 還在」。自動清零與建構慣用法
+    的舊張力(文件明言不相容 `..Default::default()`)隨該慣用法一起消失。
+  - **移除**三個從未被讀取的 deprecated 欄位(`relate_number` /
+    `return_url` / `payment_info_url`)與其 compile_fail 釘;**移除**
+    `Ecpay::stage(m, k, iv)`(以 `Ecpay::new(m, Env::Stage)?` 取代)。
+  - 遷移對照:`Ecpay { merchant_id, hash_key, hash_iv,
+    payment_api_url: stage_url, ..Default::default() }` →
+    `Ecpay::new(m, Env::Custom(Urls { payment: Some(BaseUrl::new(stage_url)?),
+    ..Default::default() }))?.with_payment_keys(Keys::new(k, iv)?)`;
+    `Ecpay::stage(m, k, iv)` → `Ecpay::new(m, Env::Stage)?.with_payment_keys(Keys::new(k, iv)?)`。
+    新契約由 `tests/client_construction.rs` 釘住(空 MerchantID、金鑰
+    長度、非 https URL、缺家族大聲拒絕、zeroize 後拒絕、整組 fallback、
+    Stage 八家族)。
+  - 輸入結構(如 `AioCheckOutParams`)刻意**不加** `#[non_exhaustive]`:
+    本 crate 的正式建構慣用法是 FRU(`..Default::default()`),E0639 使
+    non_exhaustive 連 FRU 一起禁掉,而 FRU 本身已向前相容新欄位——
+    「用 FRU」就是向前相容契約,exhaustive 字面量不受支援(重新設計
+    建議 #2 的裁定,審查時以編譯探針驗證)。
 - `EcpgDoActionInput::action` 由 `String` 改為 typed enum
   [`EcpgCreditAction`](C=請款/關帳、R=退款、E=取消、N=放棄;未建模值以
   `Other(String)` 原樣穿隧)。付款家族對同一 C/R/E/N 值域早有

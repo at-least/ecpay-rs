@@ -20,7 +20,8 @@ use ecpay::payment::{
     AioCheckOutParams, ChoosePayment, CreditAction, CreditDoActionParams, OrderSearchParams,
     OrderSearchPeriodParams, SearchSingleTransactionParams,
 };
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
+
 mod common;
 use common::sandbox::{taipei_now, unique_no_millis as unique_trade_no, urlencode};
 
@@ -32,15 +33,17 @@ const STAGE_CREDIT_URL: &str = "https://payment-stage.ecpay.com.tw/CreditDetail/
 const STAGE_VENDOR_URL: &str = "https://vendor-stage.ecpay.com.tw/PaymentMedia/";
 
 fn stage() -> Ecpay {
-    Ecpay {
-        merchant_id: STAGE_MERCHANT_ID.into(),
-        hash_key: STAGE_HASH_KEY.into(),
-        hash_iv: STAGE_HASH_IV.into(),
-        payment_api_url: STAGE_PAYMENT_URL.into(),
-        credit_api_url: STAGE_CREDIT_URL.into(),
-        vendor_api_url: STAGE_VENDOR_URL.into(),
-        ..Default::default()
-    }
+    Ecpay::new(
+        STAGE_MERCHANT_ID,
+        Env::Custom(Urls {
+            payment: Some(BaseUrl::new(STAGE_PAYMENT_URL).unwrap()),
+            credit: Some(BaseUrl::new(STAGE_CREDIT_URL).unwrap()),
+            vendor: Some(BaseUrl::new(STAGE_VENDOR_URL).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new(STAGE_HASH_KEY, STAGE_HASH_IV).unwrap())
 }
 
 #[tokio::test]

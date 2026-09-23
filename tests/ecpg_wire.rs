@@ -18,7 +18,7 @@ use ecpay::ecpg::{
     EcpgPeriodActionInput, EcpgTradeRefInput, GetMemberBindCardInput, GetTokenbyBindingCardInput,
     GetTokenbyTradeInput, GetTokenbyUserInput, OrderInfo, QueryTradeMediaInput,
 };
-use ecpay::{decrypt_data, encrypt_data, Ecpay, Error};
+use ecpay::{decrypt_data, encrypt_data, BaseUrl, Ecpay, Env, Error, Keys, Urls};
 
 mod common;
 use common::spawn_http_server;
@@ -30,14 +30,16 @@ const KEY: &[u8] = b"pwFHCqoQZGmho4w6";
 const IV: &[u8] = b"EkRm7iFT261dpevs";
 
 fn client(ecpg_api_url: String, ecpayment_api_url: String) -> Ecpay {
-    Ecpay {
-        merchant_id: MERCHANT.to_owned(),
-        hash_key: "pwFHCqoQZGmho4w6".to_owned(),
-        hash_iv: "EkRm7iFT261dpevs".to_owned(),
-        ecpg_api_url,
-        ecpayment_api_url,
-        ..Default::default()
-    }
+    Ecpay::new(
+        MERCHANT,
+        Env::Custom(Urls {
+            ecpg: Some(BaseUrl::new(ecpg_api_url).unwrap()),
+            ecpayment: Some(BaseUrl::new(ecpayment_api_url).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap())
 }
 
 /// The GetTokenbyTrade body the round-trip tests send: OrderInfo + a
@@ -249,7 +251,7 @@ async fn data_plaintext_keeps_the_struct_field_order() {
         );
         envelope_reply(json!({"RtnCode": 1, "RtnMsg": "", "Token": "t", "TokenExpireDate": "e"}))
     });
-    let out = client(srv, "http://unused/".into())
+    let out = client(srv, "http://127.0.0.1:1/".into())
         .get_token_by_trade(&token_input())
         .await
         .expect("call succeeds");

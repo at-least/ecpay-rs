@@ -158,8 +158,9 @@ pub enum Error {
     /// breaking release; match [`Error::InvalidCiphertextLength`] instead.
     ///
     /// 這個 compile_fail 釘住 deprecation 本身：屬性若被移除而變體仍無
-    /// 生產者，此測試會編譯成功 = 失敗（與 [`crate::Ecpay::return_url`]
-    /// 等三個 deprecated 欄位的同一套釘法）。
+    /// 生產者，此測試會編譯成功 = 失敗。（歷史註記：本 crate 曾對三個
+    /// 從未被讀取的 client 欄位用過同一套 compile_fail 釘法；那些欄位
+    /// 已在 0.4 的建構期驗證重塑中直接移除。）
     ///
     /// ```compile_fail
     /// # use ecpay::Error;

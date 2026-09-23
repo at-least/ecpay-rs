@@ -12,12 +12,14 @@
 //! offline; run with:
 //! `cargo test --test sandbox_payment -- --ignored --nocapture`
 
-use ecpay::Ecpay;
+use ecpay::{Ecpay, Env, Keys};
 
 /// The downloads live on the vendor/credit paths and sign with the AIO
 /// (payment) key pair of the public stage account 3002607.
 fn stage() -> Ecpay {
-    Ecpay::stage("3002607", "pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs")
+    Ecpay::new("3002607", Env::Stage)
+        .unwrap()
+        .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap())
 }
 
 #[tokio::test]

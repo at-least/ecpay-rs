@@ -12,11 +12,11 @@ use std::sync::{Arc, Mutex};
 
 use ecpay::{
     check_mac_value, encrypt_data, hash_mac, AllowanceByCollegiateInput, AllowanceInput,
-    AllowanceInvalidInput, AllowanceItem, CancelDelayIssueInput, CheckBarcodeInput,
-    CheckLoveCodeInput, DelayIssueInput, Ecpay, GetAllowanceInput, GetAllowanceInvalidInput,
+    AllowanceInvalidInput, AllowanceItem, BaseUrl, CancelDelayIssueInput, CheckBarcodeInput,
+    CheckLoveCodeInput, DelayIssueInput, Ecpay, Env, GetAllowanceInput, GetAllowanceInvalidInput,
     GetCompanyNameByTaxIDInput, GetGovInvoiceWordSettingInput, GetInvalidInput,
     GetInvoiceWordSettingInput, GetIssueInput, GetIssueOutput, InvalidInput, InvoiceNotifyInput,
-    IssueInput, IssueModel, Item, TriggerIssueInput, VoidModel, VoidWithReIssueInput,
+    IssueInput, IssueModel, Item, Keys, TriggerIssueInput, Urls, VoidModel, VoidWithReIssueInput,
 };
 
 mod common;
@@ -31,23 +31,29 @@ const TEST_PAYMENT_HASH_IV: &str = "v77hoKGq4kWxNNIS";
 const TEST_MERCHANT_ID: &str = "2000132";
 
 fn test_invoice_ecpay(base_url: &str) -> Ecpay {
-    Ecpay {
-        merchant_id: TEST_MERCHANT_ID.to_owned(),
-        invoice_hash_key: TEST_INVOICE_HASH_KEY.to_owned(),
-        invoice_hash_iv: TEST_INVOICE_HASH_IV.to_owned(),
-        invoice_api_url: base_url.to_owned(),
+    Ecpay::new(TEST_MERCHANT_ID, env_with_invoice_url(base_url))
+        .unwrap()
+        .with_invoice_keys(Keys::new(TEST_INVOICE_HASH_KEY, TEST_INVOICE_HASH_IV).unwrap())
+}
+
+fn env_with_invoice_url(base_url: &str) -> Env {
+    Env::Custom(Urls {
+        invoice: Some(BaseUrl::new(base_url).unwrap()),
         ..Default::default()
-    }
+    })
+}
+
+fn env_with_payment_url(base_url: &str) -> Env {
+    Env::Custom(Urls {
+        payment: Some(BaseUrl::new(base_url).unwrap()),
+        ..Default::default()
+    })
 }
 
 fn test_payment_ecpay(base_url: &str) -> Ecpay {
-    Ecpay {
-        merchant_id: TEST_MERCHANT_ID.to_owned(),
-        hash_key: TEST_PAYMENT_HASH_KEY.to_owned(),
-        hash_iv: TEST_PAYMENT_HASH_IV.to_owned(),
-        payment_api_url: base_url.to_owned(),
-        ..Default::default()
-    }
+    Ecpay::new(TEST_MERCHANT_ID, env_with_payment_url(base_url))
+        .unwrap()
+        .with_payment_keys(Keys::new(TEST_PAYMENT_HASH_KEY, TEST_PAYMENT_HASH_IV).unwrap())
 }
 
 fn form_escape(s: &str) -> String {
@@ -614,7 +620,7 @@ async fn test_invoice_request_envelope() {
 
     let ec = test_invoice_ecpay(&srv);
     let input = GetIssueInput {
-        merchant_id: ec.merchant_id.clone(),
+        merchant_id: ec.merchant_id().to_owned(),
         relate_number: "o1".to_owned(),
         ..Default::default()
     };
@@ -717,7 +723,7 @@ async fn test_call_invoice_api_trans_code_gate() {
     });
     let ec = test_invoice_ecpay(&srv);
     let input = GetIssueInput {
-        merchant_id: ec.merchant_id.clone(),
+        merchant_id: ec.merchant_id().to_owned(),
         relate_number: "o1".to_owned(),
         ..Default::default()
     };
@@ -748,7 +754,7 @@ async fn test_api_non_2xx_errors() {
     });
     let ec = test_invoice_ecpay(&srv);
     let input = GetIssueInput {
-        merchant_id: ec.merchant_id.clone(),
+        merchant_id: ec.merchant_id().to_owned(),
         relate_number: "o1".to_owned(),
         ..Default::default()
     };

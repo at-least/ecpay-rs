@@ -24,7 +24,7 @@ PHP SDK 範例與 staging 實測補齊 B2C/B2B 電子發票、ECPG 站內付 2.0
   DeleteMemberBindCard / CreatePaymentWithCardID)、查詢與請款動作
   (QueryTrade / QueryPaymentInfo / QueryTradeMedia / CreditCardPeriodAction /
   DoAction / CreditDetail QueryTrade)。雙 domain(ecpg vs ecpayment)由
-  `ecpg_api_url` / `ecpayment_api_url` 分開承載,接錯必 404 的陷阱在文件中
+  `Urls::ecpg` / `Urls::ecpayment` 分開承載,接錯必 404 的陷阱在文件中
   逐方法標示。
 - **物流三家族全涵蓋**:國內物流(CMV-**MD5** form:建立訂單、查詢
   QueryLogisticsTradeInfo/V2、門市清單、更新出貨/門市、C2C 取消、逆物流
@@ -54,9 +54,9 @@ PHP SDK 範例與 staging 實測補齊 B2C/B2B 電子發票、ECPG 站內付 2.0
   非 `Option` 型別;空值/長度以官方 SDK 同款訊息在執行期驗證),另有
   `extra: BTreeMap<String, String>` 收容未模型化的新參數;
   低階的 `hash_mac` / `check_mac_value` / `call_payment_api` 也直接公開。
-- **金鑰記憶體清除**: `Ecpay::zeroize_signing_keys()` 就地清零六組簽章
-  金鑰緩衝(顯式呼叫——自動 zeroize-on-drop 與 `..Default::default()`
-  慣用法不相容,盡力而為的邊界見方法文件)。
+- **金鑰記憶體清除**: 金鑰以整組 `Keys` 攜帶,drop 時自動清零
+  (zeroize-on-drop);`Ecpay::zeroize_signing_keys()` 另可顯式提前清零並
+  讓 client 大聲拒絕後續簽章(盡力而為的邊界見方法文件)。
 
 ## 安裝
 
@@ -72,15 +72,10 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 ```rust
 use ecpay::payment::{Donation, InvType, PrintMark, TaxType, AioCheckOutParams, ChoosePayment, InvoiceExtend};
-use ecpay::Ecpay;
+use ecpay::{Ecpay, Env, Keys};
 
-let client = Ecpay {
-    merchant_id: "3002607".into(),
-    hash_key: "pwFHCqoQZGmho4w6".into(),
-    hash_iv: "EkRm7iFT261dpevs".into(),
-    payment_api_url: "https://payment-stage.ecpay.com.tw/Cashier/".into(), // 測試環境
-    ..Default::default()
-};
+let client = Ecpay::new("3002607", Env::Stage).unwrap() // 測試環境;正式環境用 Env::Production
+    .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap());
 
 let checkout = client.aio_check_out(&AioCheckOutParams {
     merchant_trade_no: "NO20240101120000".into(),          // 特店交易編號
@@ -119,15 +114,14 @@ println!("{}", checkout.html_form());
 
 ```rust
 use std::collections::HashMap;
-use ecpay::Ecpay;
+use ecpay::{Ecpay, Env, Keys};
 
 async fn return_url(params: HashMap<String, String>) -> &'static str {
-    let client = Ecpay {
-        merchant_id: "3002607".into(),
-        hash_key: std::env::var("ECPAY_HASH_KEY").unwrap(),
-        hash_iv: std::env::var("ECPAY_HASH_IV").unwrap(),
-        ..Default::default()
-    };
+    let client = Ecpay::new("3002607", Env::Production).unwrap()
+        .with_payment_keys(Keys::new(
+            std::env::var("ECPAY_HASH_KEY").unwrap(),
+            std::env::var("ECPAY_HASH_IV").unwrap(),
+        ).unwrap());
     if client.verify_check_mac_value(&params) {
         "1|OK"
     } else {
@@ -174,7 +168,7 @@ async fn return_url(params: HashMap<String, String>) -> &'static str {
 
 ```rust
 # use ecpay::payment::{OrderSearchParams, CreditDoActionParams};
-# use ecpay::Ecpay;
+# use ecpay::{Ecpay, Env, Keys};
 # async fn demo(client: &Ecpay) -> ecpay::Result<()> {
 // 查詢訂單(會驗證回應的 CheckMacValue)
 let info = client.order_search(&OrderSearchParams {
@@ -204,17 +198,17 @@ println!("RtnMsg = {}", result["RtnMsg"]);
 預設共用一把 hardened client(不跟隨重導、10s 連線/30s 總逾時、不池化
 閒置連線)。需要自己的連線池/逾時政策或測試 mock 時,注入 `reqwest::Client`。
 
-另有一條所有 `*_api_url` 欄位(與瀏覽器表單 action)共用的規則,注入的
-client 也一樣適用:**一律 https**(`http` 僅允許 loopback host:
-`127.0.0.1`、`localhost`、`::1`,供本機測試伺服器使用)。其他任何形式——
-誤填的 `http://` 正式環境 base、`ftp://`、無 scheme 字串、長相相似的
-主機(如 `127.0.0.1.evil.com`)、帶 userinfo 的
-URL(如 `127.0.0.1:80@evil.com`)——都在請求時以 `Error::Validation`
-拒絕:每個請求都帶 CheckMacValue 或 AES 信封,以明文送出正是這條規則要
+URL 也有同一條規則(瀏覽器表單 action 同理):**一律 https**(`http`
+僅允許 loopback host:`127.0.0.1`、`localhost`、`::1`,供本機測試伺服器
+使用)。其他任何形式——誤填的 `http://` 正式環境 base、`ftp://`、無
+scheme 字串、長相相似的主機(如 `127.0.0.1.evil.com`)、帶 userinfo 的
+URL(如 `127.0.0.1:80@evil.com`)——都在 `BaseUrl::new`(即
+`Env::Custom` 建構)當場以 `Error::Validation` 拒絕,請求時再驗一次作為
+縱深:每個請求都帶 CheckMacValue 或 AES 信封,以明文送出正是這條規則要
 封死的攻擊面。
 
 ```rust
-# use ecpay::Ecpay;
+# use ecpay::{Ecpay, Env, Keys};
 // 注入的 client 原樣使用,內建 hardening 不會自動套用。至少要保留「不跟隨
 // 轉導」——帶簽章的 POST 被轉導就是攻擊面;逾時與連線池政策本來就是你
 // 注入的目的,依需求自訂:
@@ -224,13 +218,9 @@ let http = reqwest::Client::builder()
     .timeout(std::time::Duration::from_secs(30))
     .build()
     .expect("reqwest client builder");
-let client = Ecpay {
-    merchant_id: "3002607".into(),
-    hash_key: "pwFHCqoQZGmho4w6".into(),
-    hash_iv: "EkRm7iFT261dpevs".into(),
-    http: Some(http),
-    ..Default::default()
-};
+let client = Ecpay::new("3002607", Env::Production).unwrap()
+    .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap())
+    .with_http(http);
 ```
 
 ## API 一覽
@@ -254,7 +244,7 @@ let client = Ecpay {
 | —(比對 `ECPay/SDK_PHP` 後新增) | **ECPG 站內付 2.0**(`ecpay::ecpg`):`get_token_by_trade`、`create_payment`、綁卡 6 支、查詢/請款動作 6 支,共 14 支 |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **物流**(`ecpay::logistics`):國內 9 支 MD5 form API + 5 種瀏覽器表單、全方位物流 v2 13 支、跨境 4 支 + 表單,含 MD5 回呼驗證與 AES 回呼解密 |
 | —(比對 `ECPay/SDK_PHP` 後新增) | **B2B 電子發票**(`ecpay::invoice_b2b`):開立/折讓/作廢/拒收/通知/客戶資料/字軌與全部查詢,共 23 支 |
-| —(金流安全強化) | `Ecpay::zeroize_signing_keys`:就地清零六組簽章金鑰緩衝(顯式呼叫;自動 zeroize-on-drop 與 `..Default::default()` 慣用法不相容,盡力而為的邊界見方法文件) |
+| —(金流安全強化) | `Ecpay::zeroize_signing_keys`:顯式清零三組金鑰並讓 client 拒絕後續簽章(`Keys` 本身 drop 時自動清零;盡力而為的邊界見方法文件) |
 
 **平台商(`PlatformID`)模式的支援範圍**:AIO 金流
 (`AioCheckOutParams::platform_id`)與 B2C 電子發票(`Ecpay::platform_id`
@@ -516,24 +506,19 @@ logistics families (domestic, AllInOne v2, cross-border). MIT licensed.
 - **Typed API with an escape hatch**: required fields are non-`Option`
   (validated at runtime with the official SDK's messages),
   unknown/new ECPay params ride in `extra: BTreeMap<String, String>`.
-- **Key-material scrubbing**: `Ecpay::zeroize_signing_keys()` zeroes the
-  six signing-key buffers in place (an explicit call — automatic
-  zeroize-on-drop is incompatible with the `..Default::default()`
-  construction idiom; best-effort caveats in the method docs).
+- **Key-material scrubbing**: keys ride as whole `Keys` values that
+  zeroize on drop; `Ecpay::zeroize_signing_keys()` additionally scrubs
+  early and makes the client refuse further signing (best-effort caveats
+  in the method docs).
 
 ## Quick start
 
 ```rust
 use ecpay::payment::{AioCheckOutParams, ChoosePayment};
-use ecpay::Ecpay;
+use ecpay::{Ecpay, Env, Keys};
 
-let client = Ecpay {
-    merchant_id: "3002607".into(),
-    hash_key: "pwFHCqoQZGmho4w6".into(),
-    hash_iv: "EkRm7iFT261dpevs".into(),
-    payment_api_url: "https://payment-stage.ecpay.com.tw/Cashier/".into(), // stage
-    ..Default::default()
-};
+let client = Ecpay::new("3002607", Env::Stage).unwrap() // stage; Env::Production for live
+    .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap());
 
 let checkout = client.aio_check_out(&AioCheckOutParams {
     merchant_trade_no: "NO20240101120000".into(),
@@ -553,10 +538,10 @@ The callback URLs you register with ECPay (`ReturnURL`/`ServerReplyURL`…)
 should themselves be **https** — this crate's signing only protects
 outbound requests and does not check the callback scheme; an `http://`
 callback receives payment results (amounts, trade numbers) in cleartext.
-All `*_api_url` client fields (and the browser-form actions) are enforced
-https-only at request time (`http` allowed for loopback hosts only,
-e.g. local test servers); anything else is refused with
-`Error::Validation`.
+Every base URL (and the browser-form actions) is enforced https-only —
+validated once at `BaseUrl::new`/`Env::Custom` construction and re-checked
+at request time (`http` allowed for loopback hosts only, e.g. local test
+servers); anything else is refused with `Error::Validation`.
 See the table above for the full API mapping, and
 [`examples/`](examples/) for ports of the official samples.
 
@@ -603,9 +588,9 @@ sandbox records behind. The full staging walkthrough (what each suite does,
 what residue it leaves, every pinned server truth) is in the Chinese section
 above.
 
-Key material can be scrubbed from memory explicitly via
-`client.zeroize_signing_keys()` — see the method docs for the deliberate
-best-effort caveats.
+Key material scrubs on drop (whole `Keys` pairs zeroize), or explicitly —
+and refusal-guaranteed — via `client.zeroize_signing_keys()` (see the
+method docs for the deliberate best-effort caveats).
 
 ## License
 

@@ -9,7 +9,7 @@ use ecpay::payment::{
     AioCheckOutParams, ChoosePayment, CreditAction, Donation, InvType, InvoiceExtend, PrintMark,
     TaxType,
 };
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 
 mod common;
 use common::spawn_http_server;
@@ -19,12 +19,13 @@ const HASH_KEY: &str = "pwFHCqoQZGmho4w6";
 const HASH_IV: &str = "EkRm7iFT261dpevs";
 
 fn sdk() -> Ecpay {
-    Ecpay {
-        merchant_id: MERCHANT_ID.to_owned(),
-        hash_key: HASH_KEY.to_owned(),
-        hash_iv: HASH_IV.to_owned(),
-        ..Default::default()
-    }
+    sdk_env(Env::Production)
+}
+
+fn sdk_env(env: Env) -> Ecpay {
+    Ecpay::new(MERCHANT_ID, env)
+        .unwrap()
+        .with_payment_keys(Keys::new(HASH_KEY, HASH_IV).unwrap())
 }
 
 fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -61,10 +62,10 @@ async fn order_search_verifies_the_response_mac() {
                 .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .order_search(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_abc".into(),
@@ -108,10 +109,10 @@ async fn order_search_ignores_a_response_chosen_encrypt_type() {
                 .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .order_search(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_abc".into(),
@@ -158,11 +159,14 @@ async fn order_search_refuses_an_empty_key_client_before_sending() {
                 .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        merchant_id: MERCHANT_ID.to_owned(),
-        ..Default::default() // hash_key/hash_iv never configured
-    };
+    let client = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            payment: Some(BaseUrl::new(srv).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap(); // payment keys never configured
     let err = client
         .order_search(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_abc".into(),
@@ -190,10 +194,10 @@ async fn order_search_refuses_an_empty_key_client_before_sending() {
 #[tokio::test]
 async fn credit_do_action_rejects_a_negative_total_amount() {
     // Port 1: nothing listens there — the guard must fire BEFORE the request.
-    let client = Ecpay {
-        credit_api_url: "http://127.0.0.1:1/CreditDetail/".to_owned(),
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        credit: Some(BaseUrl::new("http://127.0.0.1:1/CreditDetail/".to_owned()).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .credit_do_action(&ecpay::payment::CreditDoActionParams {
             merchant_trade_no: "order_abc".into(),
@@ -237,10 +241,10 @@ async fn credit_do_action_zero_amount_still_reaches_the_wire() {
             "RtnCode=1&RtnMsg=OK".to_owned().into_bytes(),
         )
     });
-    let client = Ecpay {
-        credit_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        credit: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .credit_do_action(&ecpay::payment::CreditDoActionParams {
             merchant_trade_no: "order_abc".into(),
@@ -270,10 +274,10 @@ async fn order_search_rejects_a_tampered_response_mac() {
                 .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .order_search(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_abc".into(),
@@ -294,10 +298,10 @@ async fn order_search_rejects_a_tampered_response_mac() {
                 .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .order_search(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_abc".into(),
@@ -340,10 +344,10 @@ async fn order_search_request_is_signed_and_routed() {
             .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv.clone(),
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv.clone()).unwrap()),
+        ..Default::default()
+    }));
     client
         .order_search(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_abc".into(),
@@ -396,10 +400,10 @@ async fn query_payment_info_verifies_the_response_mac() {
                 .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .query_payment_info(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_abc".into(),
@@ -451,10 +455,10 @@ async fn query_payment_info_accepts_a_response_with_blank_merchant_id() {
                 .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .query_payment_info(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_missing".into(),
@@ -481,10 +485,10 @@ async fn query_payment_info_request_is_signed_and_routed() {
             format!("MerchantID={MERCHANT_ID}&RtnCode=10200047&CheckMacValue={mac}").into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     client
         .query_payment_info(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_abc".into(),
@@ -524,10 +528,10 @@ async fn json_apis_parse_their_replies() {
                 .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .order_search_period(&ecpay::payment::OrderSearchPeriodParams {
             merchant_trade_no: "period_1".into(),
@@ -548,10 +552,10 @@ async fn json_apis_parse_their_replies() {
             br#"{"RtnCode":1,"RtnMsg":"Succeeded","CreditAmount":100}"#.to_vec(),
         )
     });
-    let client = Ecpay {
-        credit_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        credit: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .search_single_transaction(&ecpay::payment::SearchSingleTransactionParams {
             credit_refund_id: 123,
@@ -585,11 +589,11 @@ async fn big5_endpoints_decode_the_reply() {
         );
         (200, "text/plain".to_owned(), bytes[0].to_vec())
     });
-    let client = Ecpay {
-        vendor_api_url: srv.clone(),
-        credit_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        vendor: Some(BaseUrl::new(srv.clone()).unwrap()),
+        credit: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .download_merchant_balance(&ecpay::payment::DownloadMerchantBalanceParams {
             date_type: "1".into(),
@@ -642,11 +646,11 @@ async fn action_apis_route_and_parse() {
             )
         }
     });
-    let client = Ecpay {
-        credit_api_url: srv.clone(),
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        credit: Some(BaseUrl::new(srv.clone()).unwrap()),
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
 
     let got = client
         .credit_do_action(&ecpay::payment::CreditDoActionParams {
@@ -705,10 +709,10 @@ async fn call_payment_api_signature_covers_the_sent_fields() {
             b"MerchantID=3002607&TradeStatus=1".to_vec(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     client
         .call_payment_api(
             "QueryTradeInfo",
@@ -756,12 +760,15 @@ async fn call_payment_api_parses_like_go_parse_query() {
         })
     };
 
-    let client = Ecpay {
-        payment_api_url: serve(
-            "MerchantTradeNo=first&MerchantTradeNo=second&TradeStatus=1&TradeDesc=a%20b%2Bc",
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(
+            BaseUrl::new(serve(
+                "MerchantTradeNo=first&MerchantTradeNo=second&TradeStatus=1&TradeDesc=a%20b%2Bc",
+            ))
+            .unwrap(),
         ),
-        ..sdk()
-    };
+        ..Default::default()
+    }));
     let out = client
         .call_payment_api("QueryTradeInfo", &map(&[("MerchantTradeNo", "x")]))
         .await
@@ -773,20 +780,20 @@ async fn call_payment_api_parses_like_go_parse_query() {
     );
     assert_eq!(out.get("TradeStatus").map(String::as_str), Some("1"));
 
-    let client = Ecpay {
-        payment_api_url: serve("MerchantTradeNo=a;TradeStatus=1"),
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(serve("MerchantTradeNo=a;TradeStatus=1")).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .call_payment_api("QueryTradeInfo", &map(&[("MerchantTradeNo", "x")]))
         .await
         .expect_err("a semicolon separator is rejected");
     assert!(matches!(err, ecpay::Error::SemicolonInQuery), "{err:?}");
 
-    let client = Ecpay {
-        payment_api_url: serve("MerchantTradeNo=%zz&TradeStatus=1"),
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(serve("MerchantTradeNo=%zz&TradeStatus=1")).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .call_payment_api("QueryTradeInfo", &map(&[("MerchantTradeNo", "x")]))
         .await
@@ -823,10 +830,10 @@ async fn query_trade_info_verifies_the_response_mac() {
                 .into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let out = client
         .query_trade_info("order_abc")
         .await
@@ -843,10 +850,10 @@ async fn query_trade_info_verifies_the_response_mac() {
             b"MerchantID=3002607&TradeStatus=1&CheckMacValue=DEADBEEF".to_vec(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .query_trade_info("order_abc")
         .await
@@ -880,10 +887,10 @@ async fn credit_do_action_parses_like_python_parse_qsl() {
             b"RtnCode=1&RtnMsg=%zz+ok&Extra=a=b&Flag".to_vec(),
         )
     });
-    let client = Ecpay {
-        credit_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        credit: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .credit_do_action(&ecpay::payment::CreditDoActionParams {
             merchant_trade_no: "no1".into(),
@@ -913,10 +920,10 @@ async fn order_search_accepts_a_lowercase_response_mac() {
             format!("MerchantID={MERCHANT_ID}&TradeStatus=1&CheckMacValue={mac}").into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .order_search(&ecpay::payment::OrderSearchParams {
             merchant_trade_no: "order_abc".into(),
@@ -947,10 +954,10 @@ async fn platform_id_is_sent_only_when_non_empty() {
             format!("MerchantID={MERCHANT_ID}&TradeStatus=1&CheckMacValue={mac}").into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     for platform_id in [None, Some(String::new()), Some("3002599".to_owned())] {
         client
             .order_search(&ecpay::payment::OrderSearchParams {
@@ -1015,12 +1022,12 @@ fn generate_check_value_forces_the_merchant_id() {
 async fn server_side_apis_validate_before_sending() {
     use ecpay::payment::*;
     let unreachable = "http://127.0.0.1:1/".to_owned();
-    let client = Ecpay {
-        payment_api_url: unreachable.clone(),
-        credit_api_url: unreachable.clone(),
-        vendor_api_url: unreachable,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(unreachable.clone()).unwrap()),
+        credit: Some(BaseUrl::new(unreachable.clone()).unwrap()),
+        vendor: Some(BaseUrl::new(unreachable).unwrap()),
+        ..Default::default()
+    }));
     let validation = |err: ecpay::Error| match err {
         ecpay::Error::Validation(m) => m,
         other => panic!("expected a validation error before any I/O, got {other:?}"),
@@ -1220,10 +1227,10 @@ async fn credit_card_period_action_verifies_the_response_check_mac_value() {
             body.into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .credit_card_period_action(&ecpay::payment::CreditCardPeriodActionParams {
             merchant_trade_no: "no1".into(),
@@ -1249,10 +1256,10 @@ async fn credit_card_period_action_verifies_the_response_check_mac_value() {
             tampered.into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .credit_card_period_action(&ecpay::payment::CreditCardPeriodActionParams {
             merchant_trade_no: "no1".into(),
@@ -1275,10 +1282,10 @@ async fn credit_card_period_action_verifies_the_response_check_mac_value() {
             b"RtnCode=1&RtnMsg=OK".to_vec(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .credit_card_period_action(&ecpay::payment::CreditCardPeriodActionParams {
             merchant_trade_no: "no1".into(),

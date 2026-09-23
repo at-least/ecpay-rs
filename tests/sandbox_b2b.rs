@@ -6,7 +6,10 @@
 //! and every run consumes one stage 字軌 number.
 
 use ecpay::invoice_b2b::{GetIssueInput, InvalidInput, IssueB2bInput};
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
+
+/// The fixed GUID from the official PHP examples / stage probe.
+const B2B_RQ_ID: &str = "701b3264-a538-437e-ad45-2505eb7dde39";
 mod common;
 use common::sandbox::{taipei_today, unique_no};
 
@@ -15,20 +18,21 @@ const B2B_KEY: &str = "ejCk326UnaZWKisg";
 const B2B_IV: &str = "q9jcZX8Ib9LM8wYk";
 
 fn sdk() -> Ecpay {
-    Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        // Inert placeholders: this suite only calls invoice-family APIs
-        // (invoice_hash_key below); the payment pair is never used. Keep the
-        // struct shape explicit so an AIO call added here fails loudly at a
-        // wrong-key MAC rather than silently.
-        hash_key: "pwFHCqoQZGmho4w6".into(),
-        hash_iv: "EkRm7iFT261dpevs".into(),
-        invoice_hash_key: B2B_KEY.to_owned(),
-        invoice_hash_iv: B2B_IV.to_owned(),
-        b2b_invoice_api_url: "https://einvoice-stage.ecpay.com.tw/B2BInvoice/".into(),
-        b2b_rq_id: "701b3264-a538-437e-ad45-2505eb7dde39".into(),
-        ..Default::default()
-    }
+    // B2B-only suite: only the invoice pair is attached (the family
+    // accessors refuse an AIO call loudly instead of silently using a
+    // wrong pair).
+    Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            b2b_invoice: Some(
+                BaseUrl::new("https://einvoice-stage.ecpay.com.tw/B2BInvoice/").unwrap(),
+            ),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_invoice_keys(Keys::new(B2B_KEY, B2B_IV).unwrap())
+    .with_b2b_rq_id(B2B_RQ_ID)
 }
 
 fn sample_issue(relate_number: String) -> IssueB2bInput {

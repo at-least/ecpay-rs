@@ -29,7 +29,8 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ecpay::ecpg::EcpgCreditAction;
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
+
 use serde_json::{json, Value};
 mod common;
 use common::sandbox::{taipei_now, unique_no_millis as unique_no, urlencode};
@@ -344,15 +345,16 @@ async fn allinone_v2_print_and_redirect_response_shapes() {
     // order (minted via CreateTestData) and run the store-selection redirect
     // (TempLogisticsID "0" mints a temp trade). Creates real stage-side
     // records, like the other logistics probes.
-    let client = Ecpay {
-        merchant_id: "2000132".into(),
-        hash_key: "pwFHCqoQZGmho4w6".into(),
-        hash_iv: "EkRm7iFT261dpevs".into(),
-        logistics_api_url: "https://logistics-stage.ecpay.com.tw/".into(),
-        logistics_hash_key: "5294y06JbISpM5x9".into(),
-        logistics_hash_iv: "v77hoKGq4kWxNNIS".into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(
+        "2000132",
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new("https://logistics-stage.ecpay.com.tw/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap())
+    .with_logistics_keys(Keys::new("5294y06JbISpM5x9", "v77hoKGq4kWxNNIS").unwrap());
 
     let created = client
         .allinone_create_test_data(&ecpay::logistics::AllInOneCreateTestDataInput {
@@ -415,14 +417,16 @@ async fn ecpg_query_family_error_shapes() {
     // The ecpayment-domain queries can only be captured on error paths
     // without a browser-completed payment; pin what stage answers for an
     // unknown MerchantTradeNo (TransCode gate + Data field sets).
-    let client = Ecpay {
-        merchant_id: "3002607".into(),
-        hash_key: "pwFHCqoQZGmho4w6".into(),
-        hash_iv: "EkRm7iFT261dpevs".into(),
-        ecpg_api_url: "https://ecpg-stage.ecpay.com.tw/Merchant/".into(),
-        ecpayment_api_url: "https://ecpayment-stage.ecpay.com.tw/1.0.0/".into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(
+        "3002607",
+        Env::Custom(Urls {
+            ecpg: Some(BaseUrl::new("https://ecpg-stage.ecpay.com.tw/Merchant/").unwrap()),
+            ecpayment: Some(BaseUrl::new("https://ecpayment-stage.ecpay.com.tw/1.0.0/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap());
     let unknown = format!("NOSUCH{}", unix_now());
     let trade_ref = ecpay::ecpg::EcpgTradeRefInput {
         merchant_id: "3002607".into(),
@@ -770,12 +774,14 @@ async fn aio_credit_card_period_action_responses_are_signed_and_verify() {
 }
 
 fn command_probe_client() -> Ecpay {
-    Ecpay {
-        merchant_id: ECPG_MERCHANT.into(),
-        hash_key: ECPG_KEY.into(),
-        hash_iv: ECPG_IV.into(),
-        payment_api_url: "https://payment-stage.ecpay.com.tw/Cashier/".into(),
-        credit_api_url: "https://payment-stage.ecpay.com.tw/CreditDetail/".into(),
-        ..Default::default()
-    }
+    Ecpay::new(
+        ECPG_MERCHANT,
+        Env::Custom(Urls {
+            payment: Some(BaseUrl::new("https://payment-stage.ecpay.com.tw/Cashier/").unwrap()),
+            credit: Some(BaseUrl::new("https://payment-stage.ecpay.com.tw/CreditDetail/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new(ECPG_KEY, ECPG_IV).unwrap())
 }

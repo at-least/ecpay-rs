@@ -13,7 +13,7 @@ use ecpay::logistics::{
     AllInOneUpdateStoreInfoInput, CancelC2cInput, CrossBorderCreateTestDataInput,
     DomesticQueryInput, GetStoreListInput, LogisticsCreateInput, UpdateStoreInfoInput,
 };
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 mod common;
 use common::sandbox::{taipei_now, taipei_today, unique_no};
 
@@ -22,17 +22,18 @@ const LOGISTICS_KEY: &str = "5294y06JbISpM5x9";
 const LOGISTICS_IV: &str = "v77hoKGq4kWxNNIS";
 
 fn sdk() -> Ecpay {
-    Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        // Inert placeholders: logistics calls sign/verify through
-        // logistics_keys() (the pair below); the payment pair is never used.
-        hash_key: "pwFHCqoQZGmho4w6".into(),
-        hash_iv: "EkRm7iFT261dpevs".into(),
-        logistics_api_url: "https://logistics-stage.ecpay.com.tw/".into(),
-        logistics_hash_key: LOGISTICS_KEY.to_owned(),
-        logistics_hash_iv: LOGISTICS_IV.to_owned(),
-        ..Default::default()
-    }
+    // Logistics-only suite: sign/verify through the dedicated logistics
+    // pair; NO payment pair is attached (the family accessors refuse an
+    // AIO call loudly instead of silently using a wrong pair).
+    Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new("https://logistics-stage.ecpay.com.tw/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_logistics_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap())
 }
 
 #[tokio::test]
@@ -350,10 +351,15 @@ async fn allinone_v2_endpoints_answer_with_the_aes_envelope() {
 #[tokio::test]
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn wrong_aes_key_is_answered_in_band_by_the_v2_envelope() {
-    let wrong_key = Ecpay {
-        logistics_hash_key: "0000000000000000".into(),
-        ..sdk()
-    };
+    let wrong_key = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new("https://logistics-stage.ecpay.com.tw/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_logistics_keys(Keys::new("0000000000000000", LOGISTICS_IV).unwrap());
     match wrong_key
         .allinone_query_logistics_trade_info(&AllInOneQueryInput {
             merchant_id: MERCHANT_ID.into(),
@@ -409,10 +415,15 @@ async fn domestic_rejections_share_one_shape_on_any_http_status() {
             .await,
         "找不到訂單",
     );
-    let wrong_key = Ecpay {
-        logistics_hash_key: "0000000000000000".into(),
-        ..sdk()
-    };
+    let wrong_key = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new("https://logistics-stage.ecpay.com.tw/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_logistics_keys(Keys::new("0000000000000000", LOGISTICS_IV).unwrap());
     expect_rejection(
         "wrong MD5 key (HTTP 500)",
         wrong_key

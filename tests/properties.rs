@@ -10,7 +10,7 @@ use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
 use sha2::{Digest, Sha256};
 
-use ecpay::{decrypt, encrypt, hash_mac, url_encode};
+use ecpay::{decrypt, encrypt, hash_mac, url_encode, Env, Keys};
 
 /// Field names ECPay actually exchanges, plus hostile punctuation.
 fn key_strategy() -> impl Strategy<Value = String> {
@@ -48,12 +48,9 @@ fn value_strategy() -> impl Strategy<Value = String> {
 }
 
 fn stage_client() -> ecpay::Ecpay {
-    ecpay::Ecpay {
-        merchant_id: "3002607".into(),
-        hash_key: KEY.into(),
-        hash_iv: IV.into(),
-        ..Default::default()
-    }
+    ecpay::Ecpay::new("3002607", ecpay::Env::Production)
+        .unwrap()
+        .with_payment_keys(ecpay::Keys::new(KEY, IV).unwrap())
 }
 
 fn params_strategy() -> impl Strategy<Value = HashMap<String, String>> {
@@ -305,12 +302,9 @@ proptest! {
         prop_assert!(matches!(got, Err(ecpay::Error::UnsupportedEncryptType(_))));
         let mut params = params;
         params.insert("EncryptType".to_owned(), t.to_string());
-        let client = ecpay::Ecpay {
-            merchant_id: "3002607".into(),
-            hash_key: KEY.to_owned(),
-            hash_iv: IV.to_owned(),
-            ..Default::default()
-        };
+        let client = ecpay::Ecpay::new("3002607", Env::Production)
+            .unwrap()
+            .with_payment_keys(Keys::new(KEY, IV).unwrap());
         let got = client.generate_check_value(&params);
         prop_assert!(matches!(got, Err(ecpay::Error::UnsupportedEncryptType(_))));
     }

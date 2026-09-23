@@ -3,7 +3,7 @@
 //! determinism.
 
 use ecpay::payment::{AioCheckOutParams, ChoosePayment, OrderSearchParams};
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 
 mod common;
 use common::spawn_http_server;
@@ -13,12 +13,13 @@ const HASH_KEY: &str = "pwFHCqoQZGmho4w6";
 const HASH_IV: &str = "EkRm7iFT261dpevs";
 
 fn sdk() -> Ecpay {
-    Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: HASH_KEY.into(),
-        hash_iv: HASH_IV.into(),
-        ..Default::default()
-    }
+    sdk_env(Env::Production)
+}
+
+fn sdk_env(env: Env) -> Ecpay {
+    Ecpay::new(MERCHANT_ID, env)
+        .unwrap()
+        .with_payment_keys(Keys::new(HASH_KEY, HASH_IV).unwrap())
 }
 
 /// A response body larger than the 1 MiB read cap must fail loudly (a
@@ -31,10 +32,10 @@ async fn oversized_response_bodies_are_rejected() {
         let payload = vec![b'a'; (1 << 21) + 16];
         (200, "application/json".to_owned(), payload)
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .order_search(&OrderSearchParams {
             merchant_trade_no: "x".into(),
@@ -77,10 +78,10 @@ async fn redirects_are_not_followed() {
             )
         }
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .order_search(&OrderSearchParams {
             merchant_trade_no: "x".into(),
@@ -110,10 +111,10 @@ async fn oversized_balance_reports_error() {
     let srv = spawn_http_server(move |_path, _body| {
         (200, "text/plain".to_owned(), vec![b'a'; (1 << 20) + 16])
     });
-    let client = Ecpay {
-        vendor_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        vendor: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .download_merchant_balance(&ecpay::payment::DownloadMerchantBalanceParams {
             date_type: "1".into(),
@@ -139,10 +140,10 @@ async fn empty_bodies_error() {
     for status in [204u16, 200] {
         let srv =
             spawn_http_server(move |_path, _body| (status, "text/plain".to_owned(), Vec::new()));
-        let client = Ecpay {
-            payment_api_url: srv,
-            ..sdk()
-        };
+        let client = sdk_env(Env::Custom(Urls {
+            payment: Some(BaseUrl::new(srv).unwrap()),
+            ..Default::default()
+        }));
         let err = client
             .order_search(&OrderSearchParams {
                 merchant_trade_no: "x".into(),
@@ -173,10 +174,10 @@ async fn oversized_close_delimited_bodies_are_rejected() {
     };
 
     let srv = common::spawn_close_delimited_server(vec![b'a'; (1 << 20) + 1]);
-    let client = Ecpay {
-        vendor_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        vendor: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .download_merchant_balance(&params)
         .await
@@ -191,10 +192,10 @@ async fn oversized_close_delimited_bodies_are_rejected() {
     );
 
     let srv = common::spawn_close_delimited_server(vec![b'a'; 1 << 20]);
-    let client = Ecpay {
-        vendor_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        vendor: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .download_merchant_balance(&params)
         .await
@@ -209,10 +210,10 @@ async fn exactly_one_mib_body_is_accepted() {
     let payload = vec![b'a'; 1 << 20];
     let srv =
         spawn_http_server(move |_path, _body| (200, "text/plain".to_owned(), payload.clone()));
-    let client = Ecpay {
-        vendor_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        vendor: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .download_merchant_balance(&ecpay::payment::DownloadMerchantBalanceParams {
             date_type: "1".into(),
@@ -228,26 +229,14 @@ async fn exactly_one_mib_body_is_accepted() {
 
 /// A signed request — or a browser form action — aimed at a non-loopback
 /// `http://` URL would carry the CheckMacValue / AES payload in cleartext.
-/// The crate must refuse such URLs; `http` stays allowed for loopback hosts
-/// (every hermetic mock in this suite binds `http://127.0.0.1:0`).
+/// The crate refuses such URLs AT CONSTRUCTION (`BaseUrl::new`), before any
+/// signed payload exists to ship; the request-time rule remains as defense
+/// in depth. `http` stays allowed for loopback hosts (every hermetic mock
+/// in this suite binds `http://127.0.0.1:0`).
 #[test]
 fn non_loopback_http_url_is_refused() {
-    let client = Ecpay {
-        payment_api_url: "http://payment-stage.ecpay.com.tw/Cashier/".into(),
-        ..sdk()
-    };
-    let err = client
-        .aio_check_out(&AioCheckOutParams {
-            merchant_trade_no: "NO20240101120000".into(),
-            merchant_trade_date: "2024/01/01 12:00:00".into(),
-            total_amount: 100,
-            trade_desc: "desc".into(),
-            item_name: "item".into(),
-            return_url: "https://example.com/return".into(),
-            choose_payment: ChoosePayment::Atm,
-            ..Default::default()
-        })
-        .expect_err("a cleartext http checkout action must be refused");
+    let err = BaseUrl::new("http://payment-stage.ecpay.com.tw/Cashier/")
+        .expect_err("a cleartext base URL must be refused at construction");
     assert!(
         matches!(&err, ecpay::Error::Validation(m) if m.contains("https")),
         "expected the https guard, got {err:?}"
@@ -255,23 +244,13 @@ fn non_loopback_http_url_is_refused() {
 }
 
 /// The guard must fire BEFORE any network I/O: an http POST target fails as
-/// `Error::Validation`, never as a connection/DNS result. The `.invalid`
-/// TLD is reserved to never resolve, so without the guard this test's error
-/// is `Error::Http` (DNS failure) and the test fails.
+/// `Error::Validation` at CONSTRUCTION, never as a connection/DNS result.
+/// The `.invalid` TLD is reserved to never resolve, so without the guard a
+/// client pointed there would fail with `Error::Http` (DNS failure) instead.
 #[tokio::test]
 async fn non_loopback_http_post_is_refused_before_send() {
-    let client = Ecpay {
-        payment_api_url: "http://nonexistent.host.invalid/Cashier/".into(),
-        ..sdk()
-    };
-    let err = client
-        .order_search(&OrderSearchParams {
-            merchant_trade_no: "x".into(),
-            time_stamp: 1,
-            platform_id: None,
-        })
-        .await
-        .expect_err("a cleartext http POST target must be refused");
+    let err = BaseUrl::new("http://nonexistent.host.invalid/Cashier/")
+        .expect_err("a cleartext POST target must be refused at construction");
     assert!(
         matches!(&err, ecpay::Error::Validation(m) if m.contains("https")),
         "expected the pre-send https guard, got {err:?}"
@@ -298,20 +277,15 @@ fn loopback_http_urls_are_allowed_but_lookalikes_are_not() {
         "http://localhost/Cashier/",
         "http://[::1]:9527/Cashier/",
     ] {
-        let client = Ecpay {
-            payment_api_url: base.into(),
-            ..sdk()
-        };
+        let client = sdk_env(Env::Custom(Urls {
+            payment: Some(BaseUrl::new(base).unwrap()),
+            ..Default::default()
+        }));
         client
             .aio_check_out(&params)
             .unwrap_or_else(|e| panic!("{base} must be allowed, got {e}"));
     }
-    let client = Ecpay {
-        payment_api_url: "http://127.0.0.1.evil.com/Cashier/".into(),
-        ..sdk()
-    };
-    let err = client
-        .aio_check_out(&params)
+    let err = BaseUrl::new("http://127.0.0.1.evil.com/Cashier/")
         .expect_err("a lookalike loopback host is still cleartext to the wire");
     assert!(
         matches!(err, ecpay::Error::Validation(_)),
@@ -374,11 +348,11 @@ async fn injected_http_client_is_used() {
             format!("MerchantID={MERCHANT_ID}&TradeStatus=1&CheckMacValue={mac}").into_bytes(),
         )
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        http: Some(injected.clone()),
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }))
+    .with_http(injected.clone());
     client.query_trade_info("x").await.expect("decodes");
     let head = seen.lock().unwrap_or_else(|e| e.into_inner()).clone();
     assert!(
@@ -407,13 +381,12 @@ async fn injected_http_client_is_used() {
             serde_json::to_vec(&res).unwrap(),
         )
     });
-    let client = Ecpay {
-        invoice_api_url: srv,
-        invoice_hash_key: "ejCk326UnaZWKisg".into(),
-        invoice_hash_iv: "q9jcZX8Ib9LM8wYk".into(),
-        http: Some(injected),
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        invoice: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }))
+    .with_invoice_keys(Keys::new("ejCk326UnaZWKisg", "q9jcZX8Ib9LM8wYk").unwrap())
+    .with_http(injected);
     client
         .get_issue(&Default::default())
         .await
@@ -440,12 +413,11 @@ async fn invoice_2xx_non_envelope_bodies_are_reported_with_the_body() {
         let srv = spawn_http_server(move |_path, _body| {
             (200, content_type.to_owned(), body.as_bytes().to_vec())
         });
-        let client = Ecpay {
-            invoice_api_url: srv,
-            invoice_hash_key: "ejCk326UnaZWKisg".into(),
-            invoice_hash_iv: "q9jcZX8Ib9LM8wYk".into(),
-            ..sdk()
-        };
+        let client = sdk_env(Env::Custom(Urls {
+            invoice: Some(BaseUrl::new(srv).unwrap()),
+            ..Default::default()
+        }))
+        .with_invoice_keys(Keys::new("ejCk326UnaZWKisg", "q9jcZX8Ib9LM8wYk").unwrap());
         let err = client
             .get_issue(&Default::default())
             .await
@@ -474,10 +446,10 @@ async fn status_error_display_is_bounded_but_the_field_keeps_the_body() {
     let srv = spawn_http_server(move |_path, _body| {
         (500, "text/html".to_owned(), big.clone().into_bytes())
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
     let err = client
         .query_trade_info("order_x")
         .await
@@ -525,11 +497,9 @@ async fn status_error_display_is_bounded_but_the_field_keeps_the_body() {
 #[test]
 fn callback_payload_failures_are_indistinguishable() {
     use base64::Engine;
-    let client = Ecpay {
-        hash_key: "0123456789abcdef".into(),
-        hash_iv: "0123456789abcdef".into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new("0123456789abcdef", "0123456789abcdef").unwrap());
     let key = b"0123456789abcdef";
     let iv = b"0123456789abcdef";
     let envelope = |data: &str| format!(r#"{{"TransCode":1,"TransMsg":"","Data":"{data}"}}"#);
@@ -603,11 +573,9 @@ fn callback_payload_failures_are_indistinguishable() {
 /// (see the uniformity test above).
 #[test]
 fn callback_allowlist_keeps_config_and_shape_errors_detailed() {
-    let client = Ecpay {
-        hash_key: "0123456789abcdef".into(),
-        hash_iv: "0123456789abcdef".into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new("0123456789abcdef", "0123456789abcdef").unwrap());
     let envelope = |d: &str| format!(r#"{{"TransCode":1,"TransMsg":"","Data":"{d}"}}"#);
     let uniform = "ecpay: callback payload failed to decrypt or parse";
 
@@ -615,34 +583,26 @@ fn callback_allowlist_keeps_config_and_shape_errors_detailed() {
         b"0123456789abcdef".as_slice(),
         b"0123456789abcdef".as_slice(),
     );
-    let data = ecpay::encrypt(b"payload", good.0, good.1).unwrap();
+    let _data = ecpay::encrypt(b"payload", good.0, good.1).unwrap();
 
-    // Misconfigured key size → detailed AesKeySize, not the uniform message.
-    let bad_key = Ecpay {
-        hash_key: "short".into(),
-        hash_iv: "0123456789abcdef".into(),
-        ..Default::default()
-    };
-    let e = bad_key
-        .decrypt_ecpg_callback::<serde_json::Value>(&envelope(&data))
-        .expect_err("bad key size must fail");
+    // Misconfigured key size / IV length used to surface as DETAILED AES
+    // errors from the decrypt path; the redesigned client refuses them at
+    // CONSTRUCTION instead (Keys::new validates byte lengths — pinned in
+    // tests/client_construction.rs), which is the same debuggability
+    // without any ciphertext ever being processed with broken keys.
     assert!(
-        e.to_string().contains("invalid key size") && !e.to_string().contains(uniform),
-        "AesKeySize must stay detailed, got {e}"
+        matches!(
+            Keys::new("short", "0123456789abcdef"),
+            Err(ecpay::Error::Validation(_))
+        ),
+        "a wrong-size key must be refused at construction"
     );
-
-    // Misconfigured IV length → detailed InvalidIvLength.
-    let bad_iv = Ecpay {
-        hash_key: "0123456789abcdef".into(),
-        hash_iv: "0123456789abcdef0".into(),
-        ..Default::default()
-    };
-    let e = bad_iv
-        .decrypt_ecpg_callback::<serde_json::Value>(&envelope(&data))
-        .expect_err("bad IV length must fail");
     assert!(
-        e.to_string().contains("invalid IV length") && !e.to_string().contains(uniform),
-        "InvalidIvLength must stay detailed, got {e}"
+        matches!(
+            Keys::new("0123456789abcdef", "0123456789abcdef0"),
+            Err(ecpay::Error::Validation(_))
+        ),
+        "a wrong-length IV must be refused at construction"
     );
 
     // Attacker's own ciphertext shape: not a block multiple → detailed
@@ -670,13 +630,10 @@ fn callback_allowlist_keeps_config_and_shape_errors_detailed() {
 /// also collapses into the same fixed message.
 #[test]
 fn callback_decoders_route_through_their_own_key_pairs() {
-    let client = Ecpay {
-        hash_key: "0123456789abcdef".into(),
-        hash_iv: "0123456789abcdef".into(),
-        logistics_hash_key: "fedcba9876543210".into(),
-        logistics_hash_iv: "fedcba9876543210".into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new("0123456789abcdef", "0123456789abcdef").unwrap())
+        .with_logistics_keys(Keys::new("fedcba9876543210", "fedcba9876543210").unwrap());
     let payment = (
         b"0123456789abcdef".as_slice(),
         b"0123456789abcdef".as_slice(),
@@ -731,10 +688,10 @@ async fn a_panicking_handler_surfaces_as_500_and_the_server_survives() {
         }
         (200, "text/plain".to_owned(), b"ping=1".to_vec())
     });
-    let client = Ecpay {
-        payment_api_url: srv,
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }));
 
     // The panicking request: the failure must carry the assertion, not a
     // connection error.
@@ -772,11 +729,9 @@ async fn a_panicking_handler_surfaces_as_500_and_the_server_survives() {
 /// ordinary log-line material).
 #[test]
 fn callback_transcode_error_reports_a_bounded_escaped_excerpt() {
-    let client = Ecpay {
-        hash_key: "0123456789abcdef".into(),
-        hash_iv: "0123456789abcdef".into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new("0123456789abcdef", "0123456789abcdef").unwrap());
     let attacker_msg = format!("boom\n{}", "x".repeat(10_000));
     let envelope = format!(
         r#"{{"TransCode":0,"TransMsg":{},"Data":""}}"#,
@@ -815,11 +770,11 @@ async fn injected_client_timeout_surfaces_as_http_timeout_error() {
         .timeout(std::time::Duration::from_millis(100))
         .build()
         .expect("test client");
-    let client = Ecpay {
-        payment_api_url: srv,
-        http: Some(http),
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(srv).unwrap()),
+        ..Default::default()
+    }))
+    .with_http(http);
     let err = client
         .order_search(&OrderSearchParams {
             merchant_trade_no: "x".into(),

@@ -3,16 +3,16 @@
 
 use std::collections::HashMap;
 
-use ecpay::{check_mac_value, hash_mac, Ecpay};
+use ecpay::{check_mac_value, hash_mac, Ecpay, Env, Keys};
 
-fn test_payment_ecpay(base_url: &str) -> Ecpay {
-    Ecpay {
-        merchant_id: "2000132".to_owned(),
-        hash_key: "5294y06JbISpM5x9".to_owned(),
-        hash_iv: "v77hoKGq4kWxNNIS".to_owned(),
-        payment_api_url: base_url.to_owned(),
-        ..Default::default()
-    }
+const PAY_KEY: &str = "5294y06JbISpM5x9";
+const PAY_IV: &str = "v77hoKGq4kWxNNIS";
+
+fn test_payment_ecpay() -> Ecpay {
+    // Signature-only tests: no URL is ever contacted, so no Custom env.
+    Ecpay::new("2000132", Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new(PAY_KEY, PAY_IV).unwrap())
 }
 
 fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -24,7 +24,7 @@ fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
 
 #[test]
 fn test_verify_check_mac_value() {
-    let ec = test_payment_ecpay("");
+    let ec = test_payment_ecpay();
     let base = map(&[
         ("MerchantID", "3002607"),
         ("MerchantTradeNo", "Test1234567890"),
@@ -32,7 +32,7 @@ fn test_verify_check_mac_value() {
         ("TradeAmt", "100"),
         ("PaymentDate", "2025/01/01 12:05:00"),
     ]);
-    let mac = hash_mac(&base, &ec.hash_key, &ec.hash_iv);
+    let mac = hash_mac(&base, PAY_KEY, PAY_IV);
 
     let with_mac = |extra: &[(&str, &str)]| {
         let mut m = base.clone();
@@ -86,11 +86,9 @@ fn test_verify_check_mac_value() {
 /// CheckMacValue check accepts a genuine ECPay-computed callback MAC.
 #[test]
 fn test_verify_check_mac_value_official_callback() {
-    let ec = Ecpay {
-        hash_key: "pwFHCqoQZGmho4w6".to_owned(),
-        hash_iv: "EkRm7iFT261dpevs".to_owned(),
-        ..Default::default()
-    };
+    let ec = Ecpay::new("3002607", Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap());
     let mut params = map(&[
         ("MerchantID", "3002607"),
         ("MerchantTradeNo", "Test1234567890"),
@@ -126,11 +124,9 @@ fn test_verify_check_mac_value_official_callback() {
 /// this guards the attacker-crafted direction).
 #[test]
 fn empty_key_client_rejects_empty_key_forged_mac() {
-    let ec = Ecpay {
-        merchant_id: "2000132".to_owned(),
-        ..Default::default()
-    };
-    assert!(ec.hash_key.is_empty() && ec.hash_iv.is_empty());
+    // No payment pair attached — the unconfigured state is now simply
+    // "the setter was never called".
+    let ec = Ecpay::new("2000132", Env::Production).unwrap();
     let mut params = map(&[
         ("MerchantID", "2000132"),
         ("MerchantTradeNo", "Test1234567890"),
@@ -155,7 +151,7 @@ fn empty_key_client_rejects_empty_key_forged_mac() {
 /// used to fall into.
 #[test]
 fn parse_form_decodes_a_raw_callback_body_for_verification() {
-    let ec = test_payment_ecpay("");
+    let ec = test_payment_ecpay();
     let params = map(&[
         ("MerchantID", "3002607"),
         ("MerchantTradeNo", "Test1234567890"),
@@ -164,7 +160,7 @@ fn parse_form_decodes_a_raw_callback_body_for_verification() {
         ("PaymentDate", "2025/01/01 12:05:00"),
         ("ItemName", "商品壹#商品貳"),
     ]);
-    let mac = hash_mac(&params, &ec.hash_key, &ec.hash_iv);
+    let mac = hash_mac(&params, PAY_KEY, PAY_IV);
 
     // Serialize the way a real form POST body looks: url-encoded values,
     // then the CheckMacValue ECPay appends.

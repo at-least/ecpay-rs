@@ -399,39 +399,44 @@ fn test_get_issue_input_encrypt_decrypt_round_trip() {
     );
 }
 
-/// `Ecpay::stage` must set EVERY service base URL to its stage endpoint in
-/// one call: a partially-configured stage client silently falls back to the
-/// PRODUCTION endpoints field by field, which is how signed production
-/// traffic gets sent by mistake. All eight URL fields (plus the credentials)
-/// are asserted here; the constructor itself builds the struct field-by-field
-/// without `..Default::default()`, so a future URL field added to `Ecpay`
-/// breaks its compilation until it gains a stage entry — this test pins the
-/// eight that exist today.
+/// `Env::Stage` must resolve EVERY service family's base URL to its stage
+/// endpoint (the successor of the old `Ecpay::stage` one-shot constructor):
+/// a partially-configured stage client used to silently fall back to the
+/// PRODUCTION endpoints field by field — exactly how signed production
+/// traffic gets sent by mistake. All eight families are asserted through
+/// `urls()`; Env::Stage/Production resolve every family, Env::Custom
+/// resolves exactly what was set (pinned in tests/client_construction.rs).
 #[test]
-fn stage_constructor_sets_every_base_url_to_its_stage_endpoint() {
-    use ecpay::Ecpay;
+fn stage_env_sets_every_base_url_to_its_stage_endpoint() {
     use ecpay::{
         B2B_INVOICE_API_URL_STAGE, CREDIT_API_URL_STAGE, ECPAYMENT_API_URL_STAGE,
-        ECPG_API_URL_STAGE, LOGISTICS_API_URL_STAGE, PAYMENT_API_URL_STAGE, VENDOR_API_URL_STAGE,
+        ECPG_API_URL_STAGE, INVOICE_API_URL_STAGE, LOGISTICS_API_URL_STAGE, PAYMENT_API_URL_STAGE,
+        VENDOR_API_URL_STAGE,
     };
-    let client = Ecpay::stage("3002607", "pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs");
-    assert_eq!(client.merchant_id, "3002607");
-    assert_eq!(client.hash_key, "pwFHCqoQZGmho4w6");
-    assert_eq!(client.hash_iv, "EkRm7iFT261dpevs");
-    assert_eq!(client.payment_api_url, PAYMENT_API_URL_STAGE);
-    assert_eq!(client.invoice_api_url, INVOICE_API_URL_STAGE);
-    assert_eq!(client.b2b_invoice_api_url, B2B_INVOICE_API_URL_STAGE);
-    assert_eq!(client.logistics_api_url, LOGISTICS_API_URL_STAGE);
-    assert_eq!(client.ecpg_api_url, ECPG_API_URL_STAGE);
-    assert_eq!(client.ecpayment_api_url, ECPAYMENT_API_URL_STAGE);
-    assert_eq!(client.credit_api_url, CREDIT_API_URL_STAGE);
-    assert_eq!(client.vendor_api_url, VENDOR_API_URL_STAGE);
+    let client = ecpay::Ecpay::new("3002607", ecpay::Env::Stage)
+        .unwrap()
+        .with_payment_keys(ecpay::Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap());
+    assert_eq!(client.merchant_id(), "3002607");
+    let urls = client.urls();
+    fn as_str(u: &Option<ecpay::BaseUrl>) -> &str {
+        u.as_ref().unwrap().as_str()
+    }
+    assert_eq!(as_str(&urls.payment), PAYMENT_API_URL_STAGE);
+    assert_eq!(as_str(&urls.invoice), INVOICE_API_URL_STAGE);
+    assert_eq!(as_str(&urls.b2b_invoice), B2B_INVOICE_API_URL_STAGE);
+    assert_eq!(as_str(&urls.logistics), LOGISTICS_API_URL_STAGE);
+    assert_eq!(as_str(&urls.ecpg), ECPG_API_URL_STAGE);
+    assert_eq!(as_str(&urls.ecpayment), ECPAYMENT_API_URL_STAGE);
+    assert_eq!(as_str(&urls.credit), CREDIT_API_URL_STAGE);
+    assert_eq!(as_str(&urls.vendor), VENDOR_API_URL_STAGE);
     assert_eq!(
-        client.credit_api_url, "https://payment-stage.ecpay.com.tw/CreditDetail/",
+        as_str(&urls.credit),
+        "https://payment-stage.ecpay.com.tw/CreditDetail/",
         "the CreditDetail stage base shares the payment stage host"
     );
     assert_eq!(
-        client.vendor_api_url, "https://vendor-stage.ecpay.com.tw/PaymentMedia/",
+        as_str(&urls.vendor),
+        "https://vendor-stage.ecpay.com.tw/PaymentMedia/",
         "the vendor stage base is the stage 特店後台 host"
     );
 }

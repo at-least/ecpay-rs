@@ -14,7 +14,8 @@ use ecpay::ecpg::{
     AtmInfo, BarcodeInfo, CardInfo, ConsumerInfo, CreatePaymentWithCardIdInput, CvsInfo,
     EcpgCreditAction, EcpgDoActionInput, EcpgTradeRefInput, GetTokenbyTradeInput, OrderInfo,
 };
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
+
 mod common;
 use common::sandbox::{taipei_now, unique_no};
 
@@ -25,14 +26,16 @@ const KEY: &str = "pwFHCqoQZGmho4w6";
 const IV: &str = "EkRm7iFT261dpevs";
 
 fn sdk() -> Ecpay {
-    Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: KEY.into(),
-        hash_iv: IV.into(),
-        ecpg_api_url: "https://ecpg-stage.ecpay.com.tw/Merchant/".into(),
-        ecpayment_api_url: "https://ecpayment-stage.ecpay.com.tw/1.0.0/".into(),
-        ..Default::default()
-    }
+    Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            ecpg: Some(BaseUrl::new("https://ecpg-stage.ecpay.com.tw/Merchant/").unwrap()),
+            ecpayment: Some(BaseUrl::new("https://ecpayment-stage.ecpay.com.tw/1.0.0/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new(KEY, IV).unwrap())
 }
 
 /// The full field set mirrors example/Payment/Ecpg/CreateAllOrder/

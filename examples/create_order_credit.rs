@@ -2,18 +2,20 @@
 //! checkout form (offline — the browser does the POST).
 
 use ecpay::payment::{need_extra_paid_info, union_pay, AioCheckOutParams, ChoosePayment};
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 
 fn main() {
-    let client = Ecpay {
-        // 測試環境的帳號(官方 sample 使用);正式環境請換成你的金鑰。
-        merchant_id: "3002607".into(),
-        hash_key: "pwFHCqoQZGmho4w6".into(),
-        hash_iv: "EkRm7iFT261dpevs".into(),
-        // 測試環境:https://payment-stage.ecpay.com.tw/Cashier/
-        payment_api_url: "https://payment-stage.ecpay.com.tw/Cashier/".into(),
-        ..Default::default()
-    };
+    // 測試環境的帳號(官方 sample 使用);正式環境請換成你的金鑰。
+    let client = Ecpay::new(
+        "3002607",
+        Env::Custom(Urls {
+            // 測試環境:https://payment-stage.ecpay.com.tw/Cashier/
+            payment: Some(BaseUrl::new("https://payment-stage.ecpay.com.tw/Cashier/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap());
 
     let checkout = client
         .aio_check_out(&AioCheckOutParams {

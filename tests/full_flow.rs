@@ -28,7 +28,7 @@ mod common;
 
 use common::sandbox::urlencode;
 use ecpay::payment::{AioCheckOutParams, ChoosePayment};
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 
 const MERCHANT_ID: &str = "3002607";
 const HASH_KEY: &str = "pwFHCqoQZGmho4w6";
@@ -288,12 +288,9 @@ fn spawn_simulator(state: Arc<Mutex<SimulatorState>>) -> String {
 fn spawn_return_url(verified: Arc<Mutex<Vec<HashMap<String, String>>>>) -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind return url");
     let addr = listener.local_addr().unwrap();
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: HASH_KEY.into(),
-        hash_iv: HASH_IV.into(),
-        ..Default::default()
-    };
+    let client = Ecpay::new(MERCHANT_ID, Env::Production)
+        .unwrap()
+        .with_payment_keys(Keys::new(HASH_KEY, HASH_IV).unwrap());
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
@@ -402,13 +399,15 @@ async fn full_payment_flow_end_to_end() {
     let simulator = spawn_simulator(state.clone());
     let verified: Arc<Mutex<Vec<HashMap<String, String>>>> = Arc::new(Mutex::new(Vec::new()));
     let return_url = spawn_return_url(verified.clone());
-    let client = Ecpay {
-        merchant_id: MERCHANT_ID.into(),
-        hash_key: HASH_KEY.into(),
-        hash_iv: HASH_IV.into(),
-        payment_api_url: format!("{simulator}Cashier/"),
-        ..Default::default()
-    };
+    let client = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            payment: Some(BaseUrl::new(format!("{simulator}Cashier/")).unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new(HASH_KEY, HASH_IV).unwrap());
     let trade_no = format!(
         "E2E{}",
         std::time::SystemTime::now()

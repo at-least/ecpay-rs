@@ -13,15 +13,21 @@
 use std::collections::HashMap;
 use std::io::Read;
 
-use ecpay::Ecpay;
+use ecpay::{Ecpay, Env, Keys};
 
 fn main() {
-    let client = Ecpay {
-        merchant_id: std::env::var("ECPAY_MERCHANT_ID").unwrap_or_default(),
-        hash_key: std::env::var("ECPAY_HASH_KEY").expect("ECPAY_HASH_KEY"),
-        hash_iv: std::env::var("ECPAY_HASH_IV").expect("ECPAY_HASH_IV"),
-        ..Default::default()
-    };
+    let client = Ecpay::new(
+        std::env::var("ECPAY_MERCHANT_ID").unwrap_or_default(),
+        Env::Production,
+    )
+    .unwrap()
+    .with_payment_keys(
+        Keys::new(
+            std::env::var("ECPAY_HASH_KEY").expect("ECPAY_HASH_KEY"),
+            std::env::var("ECPAY_HASH_IV").expect("ECPAY_HASH_IV"),
+        )
+        .unwrap(),
+    );
 
     let mut body = String::new();
     std::io::stdin()

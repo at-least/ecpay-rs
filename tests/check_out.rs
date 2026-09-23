@@ -9,15 +9,18 @@ use ecpay::payment::{
     reply_payment_type, union_pay, AioCheckOutParams, CarruerType, ChoosePayment, Donation,
     InvType, InvoiceExtend, PrintMark, TaxType,
 };
-use ecpay::{Ecpay, Error, PAYMENT_API_URL_PRODUCTION, PAYMENT_API_URL_STAGE};
+use ecpay::{
+    BaseUrl, Ecpay, Env, Error, Keys, Urls, PAYMENT_API_URL_PRODUCTION, PAYMENT_API_URL_STAGE,
+};
 
 fn sdk() -> Ecpay {
-    Ecpay {
-        merchant_id: "3002607".into(),
-        hash_key: "pwFHCqoQZGmho4w6".into(),
-        hash_iv: "EkRm7iFT261dpevs".into(),
-        ..Default::default()
-    }
+    sdk_env(Env::Production)
+}
+
+fn sdk_env(env: Env) -> Ecpay {
+    Ecpay::new("3002607", env)
+        .unwrap()
+        .with_payment_keys(Keys::new("pwFHCqoQZGmho4w6", "EkRm7iFT261dpevs").unwrap())
 }
 
 fn base(choose_payment: ChoosePayment) -> AioCheckOutParams {
@@ -92,10 +95,10 @@ fn html_form_escapes_attribute_values() {
     // in `"` — the join normalizes the missing `/` first, then the whole
     // URL is attribute-escaped; the join policy itself is pinned by
     // `base_url_missing_trailing_slash_is_normalized`.)
-    let out = Ecpay {
-        payment_api_url: "https://x.example/?a=1&b=2\"".into(),
-        ..sdk()
-    }
+    let out = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new("https://x.example/?a=1&b=2\"").unwrap()),
+        ..Default::default()
+    }))
     .aio_check_out(&base(ChoosePayment::Credit))
     .unwrap();
     assert!(
@@ -142,10 +145,10 @@ fn action_follows_the_payment_api_url_and_defaults_to_production() {
         out.action(),
         "https://payment.ecpay.com.tw/Cashier/AioCheckOut/V5"
     );
-    let out = Ecpay {
-        payment_api_url: PAYMENT_API_URL_STAGE.into(),
-        ..sdk()
-    }
+    let out = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new(PAYMENT_API_URL_STAGE).unwrap()),
+        ..Default::default()
+    }))
     .aio_check_out(&base(ChoosePayment::Credit))
     .unwrap();
     assert_eq!(
@@ -572,8 +575,10 @@ fn invoice_mark_rules() {
 /// you can see locally.
 #[test]
 fn base_url_missing_trailing_slash_is_normalized() {
-    let mut client = sdk();
-    client.payment_api_url = "https://payment-stage.ecpay.com.tw/Cashier".into(); // no '/'
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new("https://payment-stage.ecpay.com.tw/Cashier").unwrap()), // no '/'
+        ..Default::default()
+    }));
     let out = client
         .aio_check_out(&base(ChoosePayment::Credit))
         .expect("a slash-less base is a config slip, not a request error");
@@ -982,35 +987,21 @@ fn invoice_mark_some_empty_string_behaves_as_unset() {
     assert!(param(&out, "InvoiceMark").is_none());
 }
 
-/// The deliberate empty-key boundary, pinned so it reads as a stance and
-/// not an oversight: the guards added in this cycle refuse an unconfigured
-/// client only on paths that MAKE A MAC CLAIM (response-MAC verification
-/// like `order_search`, the MD5 logistics form family) — `aio_check_out`
-/// is a pure signing helper that never verifies anything, so with empty
-/// keys it still produces a (vacuously-signed) form and the real ECPay
-/// endpoint rejects it. If this pin ever fails, the boundary moved:
-/// update it and the CHANGELOG note together.
+/// The signing-boundary pin, updated for the redesigned client: there is
+/// no route to empty-but-present keys anymore, so `aio_check_out` on a
+/// client with NO payment pair refuses loudly at the signing call — the
+/// same uniform family rule the verify paths hold. If this pin ever
+/// fails, the boundary moved: update it and the CHANGELOG note together.
 #[test]
-fn aio_check_out_with_empty_keys_still_signs_the_documented_boundary() {
-    let client = ecpay::Ecpay {
-        merchant_id: "3002607".into(),
-        // hash_key/hash_iv deliberately empty.
-        ..Default::default()
-    };
-    let out = client.aio_check_out(&base(ChoosePayment::Credit)).expect(
-        "aio_check_out makes no MAC-verification claim; empty keys are the server's to reject",
-    );
-    // The MAC it computed is the empty-key one — computable by anyone, which
-    // is exactly why the VERIFY paths refuse these keys instead.
-    let mut m: std::collections::HashMap<String, String> = out
-        .params()
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    let mac = m.remove("CheckMacValue").expect("signed");
-    assert_eq!(
-        mac,
-        ecpay::check_mac_value(&m, "", "", ecpay::EncryptType::Sha256),
-        "with empty keys the form carries the empty-key MAC"
-    );
+fn aio_check_out_without_payment_keys_is_refused_loudly() {
+    // The old boundary pin ("empty keys still sign, the server rejects the
+    // vacuous MAC") is GONE by design: the redesigned client has no route
+    // to empty-but-present keys. The new boundary is "no payment pair
+    // attached", and it refuses loudly at the signing call — one uniform
+    // rule for every family, construction-side.
+    let client = ecpay::Ecpay::new("3002607", ecpay::Env::Production).unwrap();
+    let err = client
+        .aio_check_out(&base(ChoosePayment::Credit))
+        .expect_err("a client without payment keys must not sign");
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
 }

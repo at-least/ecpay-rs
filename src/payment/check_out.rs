@@ -440,7 +440,7 @@ impl Ecpay {
 
         let mut pairs: Vec<(String, String)> = m.into_iter().collect();
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
-        let action = crate::client::join_url(self.payment_base_url(), "AioCheckOut/V5");
+        let action = crate::client::join_url(self.payment_base_url()?, "AioCheckOut/V5");
         crate::client::ensure_https(&action)?;
         Ok(AioCheckOut {
             params: pairs,

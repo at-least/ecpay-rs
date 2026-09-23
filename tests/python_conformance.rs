@@ -22,7 +22,7 @@ use ecpay::payment::{
     union_pay, AioCheckOutParams, CarruerType, ChoosePayment, CreditAction, Donation, InvType,
     InvoiceExtend, PeriodType, PrintMark, TaxType,
 };
-use ecpay::Ecpay;
+use ecpay::{BaseUrl, Ecpay, Env, Keys, Urls};
 
 const FIXTURE: &str = include_str!("fixtures/python_sdk_vectors.json");
 
@@ -31,12 +31,13 @@ const TEST_HASH_KEY: &str = "pwFHCqoQZGmho4w6";
 const TEST_HASH_IV: &str = "EkRm7iFT261dpevs";
 
 fn sdk() -> Ecpay {
-    Ecpay {
-        merchant_id: TEST_MERCHANT_ID.to_owned(),
-        hash_key: TEST_HASH_KEY.to_owned(),
-        hash_iv: TEST_HASH_IV.to_owned(),
-        ..Default::default()
-    }
+    sdk_env(Env::Production)
+}
+
+fn sdk_env(env: Env) -> Ecpay {
+    Ecpay::new(TEST_MERCHANT_ID, env)
+        .unwrap()
+        .with_payment_keys(Keys::new(TEST_HASH_KEY, TEST_HASH_IV).unwrap())
 }
 
 #[derive(serde::Deserialize)]
@@ -381,10 +382,10 @@ fn check_mac_value_reference(params: &BTreeMap<String, String>) -> String {
 #[test]
 fn html_form_matches_the_official_sdk() {
     let f = fixture();
-    let client = Ecpay {
-        payment_api_url: "https://payment-stage.ecpay.com.tw/Cashier/".into(),
-        ..sdk()
-    };
+    let client = sdk_env(Env::Custom(Urls {
+        payment: Some(BaseUrl::new("https://payment-stage.ecpay.com.tw/Cashier/").unwrap()),
+        ..Default::default()
+    }));
     let got = client
         .aio_check_out(&scenario("atm"))
         .expect("checkout builds");
