@@ -38,6 +38,12 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
+- **`ApiError` 的 Display 與 `HttpStatus`/`TransCode` 同款有界**(程式碼審查 🟢):
+  `RtnMsg` 過去原樣、無界輸出——被注入的 client 或被擊穿的傳輸可在加密
+  成功的回應裡塞近 1 MiB 的 `RtnMsg`,一條 log 就被撐成百萬字元。現在
+  經共用的 `truncate_for_display`(512 字元上限、控制字元跳脫)渲染,
+  Go-parity 的 `RtnMsg=%q` 形狀對正常訊息不變;`msg` 欄位仍保留完整
+  原文供程式化取用(`tests/api_error.rs::api_error_display_bounds_the_server_message`)。
 - **`get_issue` 強制互斥查詢模式**(程式碼審查 🟢):`GetIssueInput` 文件的
   「擇一」過去只是文件——兩邊都填、或 `invoice_no`/`invoice_date` 只填
   半對,三個 key 都會簽進信封送出;伺服器以 key 是否存在決定查詢模式

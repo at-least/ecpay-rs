@@ -23,6 +23,42 @@ fn test_api_error() {
     );
 }
 
+/// `ApiError`'s Display renders the server's `RtnMsg` — the same log
+/// surface `HttpStatus`/`TransCode` already bound (see their tests above):
+/// a hostile endpoint that answers a successfully-encrypted `Data` with a
+/// megabyte `RtnMsg` must not turn one log line into a megabyte. The
+/// Go-parity `RtnMsg=%q` shape is unchanged for normal messages, and the
+/// `msg` field keeps the full verbatim string for programmatic access.
+#[test]
+fn api_error_display_bounds_the_server_message() {
+    // Normal messages keep the Go-parity shape, verbatim.
+    assert_eq!(
+        ApiError {
+            code: 1,
+            msg: "Succeeded".to_owned(),
+        }
+        .to_string(),
+        "ecpay: RtnCode=1, RtnMsg=\"Succeeded\""
+    );
+
+    let big = "x".repeat(1000);
+    let err = ApiError {
+        code: 2,
+        msg: big.clone(),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.starts_with("ecpay: RtnCode=2, RtnMsg="),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("truncated") && rendered.chars().count() < 1200,
+        "a long RtnMsg must render bounded, got {} chars",
+        rendered.chars().count()
+    );
+    assert_eq!(err.msg.len(), 1000, "the field keeps the full message");
+}
+
 /// Every [`ecpay::Service`] gets its own label in the `HttpStatus` Display —
 /// a logistics 500 must not render as "ecpay payment API error" (the reason
 /// the service-tagged variant replaced `PaymentStatus`/`InvoiceStatus`).
