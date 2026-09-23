@@ -79,6 +79,16 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
+- **重塑後的 live-stage 驗證補全**(staging 缺口):建構期驗證重塑後,五個
+  sandbox 套件 + `stage_smoke` 首次對**真實 stage** 全數執行通過
+  (12+4+5+8+2+6 全綠,2026-09 實測)。新增 `tests/sandbox_logistics.rs::
+  domestic_round_trip_via_whole_pair_payment_fallback`:只附掛 payment 金鑰組
+  (刻意不設物流組)對真實國內物流 MD5 端點完成建單→查詢往返——whole-pair
+  fallback 此前只有 hermetic 釘子(`client_construction`/`logistics_wire`),
+  現在加上真實伺服器接受其簽章的端對端證明;同時是 `Env::Stage` 物流
+  映射的唯一 live 釘(其餘套件用 `Env::Custom` 帶同款常數)。注意:此測試
+  與既有建單測試同 residue 類別(CI 每次 push 在 stage 建立一筆物流測單,
+  不取消)。
 - **回呼入口的 panic-freedom 屬性測試**(審查後續項):`tests/properties.rs`
   新增兩條 proptest(各 512 案例),對攻擊者可達的公開回呼端點入口——
   `parse_form`、`decrypt_ecpg_callback`、`decrypt_logistics_callback`、

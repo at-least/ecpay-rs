@@ -465,3 +465,59 @@ async fn crossborder_create_test_data_answers_with_the_aes_envelope() {
         Err(e) => panic!("unexpected error: {e:?}"),
     }
 }
+
+/// The redesigned client's whole-pair fallback, proven against the REAL
+/// domestic MD5 endpoint (the hermetic pins in `tests/client_construction.rs`
+/// and `tests/logistics_wire.rs` prove the local routing; this proves the
+/// real server accepts what the fallback signs): a client with ONLY the
+/// payment pair attached — no `with_logistics_keys` — signs and queries a
+/// logistics order through the ENTIRE payment pair. The stage account's
+/// logistics credentials are attached as the payment pair, so the request
+/// is exactly what a merchant with payment==logistics keys produces.
+/// Also the one live pin of the `Env::Stage` logistics mapping (the other
+/// suites use `Env::Custom` with the same constant).
+#[tokio::test]
+#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
+async fn domestic_round_trip_via_whole_pair_payment_fallback() {
+    let client = Ecpay::new(MERCHANT_ID, Env::Stage)
+        .unwrap()
+        // The logistics credentials riding as the PAYMENT pair — no
+        // dedicated logistics pair attached on purpose.
+        .with_payment_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap());
+    let out = client
+        .logistics_create(&LogisticsCreateInput {
+            merchant_trade_no: unique_no("FB"),
+            merchant_trade_date: taipei_now(),
+            logistics_type: "CVS".into(),
+            logistics_sub_type: "FAMI".into(),
+            goods_amount: 1000,
+            goods_name: "綠界 SDK 範例商品".into(),
+            sender_name: "陳大明".into(),
+            sender_cell_phone: "0911222333".into(),
+            receiver_name: "王小美".into(),
+            receiver_cell_phone: "0933222111".into(),
+            receiver_store_id: Some("006598".into()),
+            server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
+            ..Default::default()
+        })
+        .await
+        .expect("the whole payment pair signs a request the real MD5 endpoint accepts");
+    assert_eq!(
+        out["RtnCode"], "300",
+        "accepted like any dedicated-pair create"
+    );
+    let logistics_id = out["AllPayLogisticsID"].clone();
+    assert!(!logistics_id.is_empty(), "a logistics order id is minted");
+
+    let info = client
+        .logistics_query_logistics_trade_info(&DomesticQueryInput {
+            all_pay_logistics_id: logistics_id,
+            time_stamp: None,
+        })
+        .await
+        .expect("the query's reply MAC verifies through the same fallback pair");
+    assert!(
+        info.contains_key("LogisticsStatus"),
+        "the trade is carried back: {info:?}"
+    );
+}
