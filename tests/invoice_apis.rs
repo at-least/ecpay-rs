@@ -6,8 +6,8 @@
 use std::sync::{Arc, Mutex};
 
 use ecpay::{
-    encrypt, encrypt_data, ApiError, Ecpay, Error, IssueInput, IssueModel, VoidModel,
-    VoidWithReIssueInput,
+    encrypt, encrypt_data, ApiError, DelayIssueInput, Ecpay, Error, IssueInput, IssueModel,
+    VoidModel, VoidWithReIssueInput,
 };
 
 mod common;
@@ -367,4 +367,57 @@ async fn b2c_inputs_carrying_a_mismatched_data_merchant_id_are_rejected_locally(
     let err = client.void_with_reissue(&nested).await.unwrap_err();
     assert!(matches!(err, Error::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("IssueModel.MerchantID"), "{err}");
+}
+
+/// The invoice issue family (issue / delay_issue / void_with_reissue's
+/// nested IssueModel) refuses a negative SalesAmount locally — the same
+/// "a negative amount is never a valid wire value" stance `aio_check_out`
+/// and the logistics amount fields take — instead of signing it into the
+/// AES envelope for an opaque server rejection. Zero stays allowed (the
+/// 金額不可為 0 元 rule on the field is ECPay's to enforce).
+#[tokio::test]
+async fn invoice_issue_family_rejects_a_negative_sales_amount() {
+    // Port 1: nothing listens there — the guard must fire BEFORE the request.
+    let client = client("http://127.0.0.1:1/B2CInvoice/".to_owned());
+
+    let err = client
+        .issue(&IssueInput {
+            merchant_id: "2000132".into(),
+            sales_amount: -1,
+            ..Default::default()
+        })
+        .await
+        .expect_err("a negative SalesAmount must be refused locally");
+    assert!(
+        matches!(&err, Error::Validation(m) if m == "SalesAmount cannot be negative."),
+        "{err:?}"
+    );
+
+    let err = client
+        .delay_issue(&DelayIssueInput {
+            merchant_id: "2000132".into(),
+            sales_amount: -1,
+            ..Default::default()
+        })
+        .await
+        .expect_err("a negative SalesAmount must be refused locally (delay_issue)");
+    assert!(
+        matches!(&err, Error::Validation(m) if m == "SalesAmount cannot be negative."),
+        "{err:?}"
+    );
+
+    let err = client
+        .void_with_reissue(&VoidWithReIssueInput {
+            issue_model: IssueModel {
+                sales_amount: -1,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .await
+        .expect_err("a negative SalesAmount must be refused locally (void_with_reissue)");
+    assert!(
+        matches!(&err, Error::Validation(m) if m == "SalesAmount cannot be negative."),
+        "{err:?}"
+    );
 }

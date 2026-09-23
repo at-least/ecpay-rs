@@ -216,6 +216,12 @@ impl Ecpay {
     /// 傳輸/解密失敗回各自的錯誤。ECPay 規格：開立失敗時 InvoiceNo/
     /// InvoiceDate 為空值，故失敗路徑不需要、也不回傳部分輸出。
     pub async fn issue(&self, input: &IssueInput) -> Result<IssueOutput> {
+        // A negative total is never a valid wire value (same stance as
+        // `aio_check_out`'s TotalAmount); zero stays allowed — the field's
+        // documented 金額不可為 0 元 rule is the server's to enforce.
+        if input.sales_amount < 0 {
+            return Err(Error::Validation("SalesAmount cannot be negative.".into()));
+        }
         let output: IssueOutput = self.call_invoice_api("Issue", input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
         Ok(output)
@@ -357,6 +363,11 @@ impl Ecpay {
                     self.merchant_id
                 )));
             }
+        }
+        // The re-issued invoice's total follows `issue`'s negative-amount
+        // stance (zero stays allowed — the server adjudicates it).
+        if input.issue_model.sales_amount < 0 {
+            return Err(Error::Validation("SalesAmount cannot be negative.".into()));
         }
         let output: VoidWithReIssueOutput = self.call_invoice_api("VoidWithReIssue", input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
@@ -859,6 +870,10 @@ impl Ecpay {
     /// 延遲開立發票。A command: a non-success RtnCode surfaces as a
     /// [`crate::ApiError`] rather than being silently swallowed.
     pub async fn delay_issue(&self, input: &DelayIssueInput) -> Result<DelayIssueOutput> {
+        // Same negative-amount stance as `issue` (zero stays allowed).
+        if input.sales_amount < 0 {
+            return Err(Error::Validation("SalesAmount cannot be negative.".into()));
+        }
         let output: DelayIssueOutput = self.call_invoice_api("DelayIssue", input).await?;
         api_error(output.rtn_code, &output.rtn_msg)?;
         Ok(output)

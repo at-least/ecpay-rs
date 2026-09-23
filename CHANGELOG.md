@@ -38,6 +38,17 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
+- **金額欄位補上負數防護**(程式碼審查 🟢):`aio_check_out` 的 `TotalAmount`
+  與物流 `GoodsAmount` 早有「負數永遠不是合法 wire 值」的本地拒絕,但
+  `credit_do_action`/`ecpg_do_action` 的 `TotalAmount`、
+  `search_single_transaction` 的 `CreditAmount`、發票開立家族
+  (`issue`/`delay_issue`/`void_with_reissue` 的 `IssueModel`)的
+  `SalesAmount` 會把負數簽名送出,換一個不透明的伺服器端錯誤(退款金額的
+  正負號手誤正是這種)。現在這些欄位一律在出網前以
+  `Error::Validation("{name} cannot be negative.")` 拒絕;零維持放行——
+  是否接受零值是伺服器端規則(`issue` 的 `SalesAmount` 欄位文件註明的
+  金額不可為 0 元由綠界裁定),`credit_do_action` 的零值出網由
+  `credit_do_action_zero_amount_still_reaches_the_wire` 釘住。
 - **出網的 MAC 簽署/驗證路徑拒絕未設定的金鑰**(程式碼審查 🟡):金流查詢的
   `post_cmv_verified`(`order_search`/`query_trade_info`/`query_payment_info`/
   `credit_card_period_action` 共用)過去對空 `hash_key`/`hash_iv` 照簽照驗——

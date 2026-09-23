@@ -182,6 +182,83 @@ async fn order_search_refuses_an_empty_key_client_before_sending() {
     );
 }
 
+/// Negative money is never a valid wire value — the same local refusal
+/// `aio_check_out` and the logistics amount fields make — instead of an
+/// opaque server rejection after signing (a sign typo on a refund would
+/// otherwise ride the wire). Zero stays allowed: whether zero is accepted
+/// is a server-side rule, pinned by the zero-amount test below.
+#[tokio::test]
+async fn credit_do_action_rejects_a_negative_total_amount() {
+    // Port 1: nothing listens there — the guard must fire BEFORE the request.
+    let client = Ecpay {
+        credit_api_url: "http://127.0.0.1:1/CreditDetail/".to_owned(),
+        ..sdk()
+    };
+    let err = client
+        .credit_do_action(&ecpay::payment::CreditDoActionParams {
+            merchant_trade_no: "order_abc".into(),
+            trade_no: "trade123".into(),
+            action: CreditAction::Refund,
+            total_amount: -500,
+            platform_id: None,
+        })
+        .await
+        .expect_err("a negative TotalAmount must be refused locally");
+    assert!(
+        matches!(&err, ecpay::Error::Validation(m) if m == "TotalAmount cannot be negative."),
+        "{err:?}"
+    );
+
+    let err = client
+        .search_single_transaction(&ecpay::payment::SearchSingleTransactionParams {
+            credit_refund_id: 1,
+            credit_amount: -100,
+            credit_check_code: 1,
+        })
+        .await
+        .expect_err("a negative CreditAmount must be refused locally");
+    assert!(
+        matches!(&err, ecpay::Error::Validation(m) if m == "CreditAmount cannot be negative."),
+        "{err:?}"
+    );
+}
+
+/// The negative guard must not over-reach: zero still goes out on the wire
+/// (the crate's stated stance — zero is the server's rule to adjudicate).
+#[tokio::test]
+async fn credit_do_action_zero_amount_still_reaches_the_wire() {
+    let hit = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = Arc::clone(&hit);
+    let srv = spawn_http_server(move |_path, _body| {
+        seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            "RtnCode=1&RtnMsg=OK".to_owned().into_bytes(),
+        )
+    });
+    let client = Ecpay {
+        credit_api_url: srv,
+        ..sdk()
+    };
+    let got = client
+        .credit_do_action(&ecpay::payment::CreditDoActionParams {
+            merchant_trade_no: "order_abc".into(),
+            trade_no: "trade123".into(),
+            action: CreditAction::Close,
+            total_amount: 0,
+            platform_id: None,
+        })
+        .await
+        .expect("zero TotalAmount is the server's rule, not ours");
+    assert_eq!(got.get("RtnCode").map(String::as_str), Some("1"));
+    assert_eq!(
+        hit.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the zero-amount request must actually be sent"
+    );
+}
+
 #[tokio::test]
 async fn order_search_rejects_a_tampered_response_mac() {
     let srv = spawn_http_server(move |_path, _body| {

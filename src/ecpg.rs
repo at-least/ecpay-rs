@@ -761,6 +761,14 @@ impl Ecpay {
     /// `RtnCode 10000185 "Cant not find the trade data"`）。
     pub async fn ecpg_do_action(&self, input: &EcpgDoActionInput) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
+        // A negative amount is never a valid wire value (same stance as the
+        // payment family's money fields); zero stays allowed — whether zero
+        // is accepted is a server-side rule.
+        if input.total_amount < 0 {
+            return Err(crate::error::Error::Validation(
+                "TotalAmount cannot be negative.".into(),
+            ));
+        }
         self.ecpg_post(
             crate::client::join_url(self.ecpayment_base_url(), "Credit/DoAction"),
             input,

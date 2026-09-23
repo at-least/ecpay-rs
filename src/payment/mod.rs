@@ -548,6 +548,13 @@ impl Ecpay {
         required_str("TradeNo", &p.trade_no, 20)?;
         required_code("Action", &p.action)?;
         optional_str("PlatformID", &p.platform_id, 10)?;
+        // A negative TWD amount is never a valid wire value (a sign typo on
+        // a refund would otherwise be signed and sent); zero stays allowed —
+        // whether zero is accepted is a server-side rule, same stance as
+        // `aio_check_out`'s TotalAmount.
+        if p.total_amount < 0 {
+            return Err(Error::Validation("TotalAmount cannot be negative.".into()));
+        }
 
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
@@ -599,6 +606,12 @@ impl Ecpay {
         &self,
         p: &SearchSingleTransactionParams,
     ) -> Result<serde_json::Value> {
+        // Same negative-amount stance as `credit_do_action` (the amount is a
+        // lookup key here, not a money movement — the guard keeps the
+        // family's money fields uniformly refused below zero).
+        if p.credit_amount < 0 {
+            return Err(Error::Validation("CreditAmount cannot be negative.".into()));
+        }
         let mut m = HashMap::new();
         m.insert("MerchantID".to_owned(), self.merchant_id.clone());
         m.insert("CreditRefundId".to_owned(), p.credit_refund_id.to_string());

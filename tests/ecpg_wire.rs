@@ -1038,3 +1038,31 @@ async fn delete_member_bind_card_posts_the_bind_card_id() {
         .expect("delete_member_bind_card");
     assert_eq!(out["RtnCode"], 1);
 }
+
+/// Negative money never rides the encrypted request: the same local
+/// refusal `aio_check_out` and the payment family make for TWD amounts
+/// (a sign typo on a refund would otherwise ride the AES envelope and come
+/// back as an opaque server error).
+#[tokio::test]
+async fn ecpg_do_action_rejects_a_negative_total_amount() {
+    // Port 1: nothing listens there — the guard must fire BEFORE the request.
+    let ec = client(
+        "http://127.0.0.1:1/Merchant/".to_owned(),
+        "http://127.0.0.1:1/1.0.0/".to_owned(),
+    );
+    let err = ec
+        .ecpg_do_action(&EcpgDoActionInput {
+            merchant_id: MERCHANT.to_owned(),
+            merchant_trade_no: "no".to_owned(),
+            trade_no: "ecpay-trade-no".to_owned(),
+            action: EcpgCreditAction::Refund,
+            total_amount: -1,
+            ..Default::default()
+        })
+        .await
+        .expect_err("a negative TotalAmount must be refused locally");
+    assert!(
+        matches!(&err, Error::Validation(m) if m == "TotalAmount cannot be negative."),
+        "{err:?}"
+    );
+}
