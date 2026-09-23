@@ -28,6 +28,19 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
+- **出網的 MAC 簽署/驗證路徑拒絕未設定的金鑰**(程式碼審查 🟡):金流查詢的
+  `post_cmv_verified`(`order_search`/`query_trade_info`/`query_payment_info`/
+  `credit_card_period_action` 共用)過去對空 `hash_key`/`hash_iv` 照簽照驗——
+  空金鑰的 MAC 任何知道參數集的人都算得出來,端點回應被掌控時
+  (base URL 誤填/遭劫、注入的 client),偽造的「已付款」查詢回應會通過
+  驗證。進站驗證器(`verify_check_mac_value`)早有同一拒絕
+  (`tests/verify.rs::empty_key_client_rejects_empty_key_forged_mac` 釘住),
+  出站這半邊現在對齊:空金鑰直接回 `Error::Validation`,且在出網前生效
+  (`tests/payment_apis.rs::order_search_refuses_an_empty_key_client_before_sending`
+  同時釘住「mock 收到零個請求」)。國內物流的 MD5 form 家族同日補上同一
+  防護:守衛放在 `sign_logistics`(國內 form API 與瀏覽器表單的唯一簽署點),
+  物流金鑰與 payment fallback 兩組皆空時拒絕
+  (`tests/logistics_wire.rs::domestic_form_api_refuses_an_empty_key_client_before_sending`)。
 - **`InvoiceMark` 帶發票欄位時不再靜默改成 `Y`**(程式碼審查 🟡):明確
   填了非 `Y` 的註記(小寫 `"n"` 拼錯也算)又帶 `InvoiceExtend`,過去會
   被靜默覆寫成 `InvoiceMark=Y` 送出——等於替呼叫端開出一張沒要求的

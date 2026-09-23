@@ -132,6 +132,22 @@ impl Ecpay {
     /// the ONLY service family using MD5), appends CheckMacValue.
     fn sign_logistics(&self, params: &mut HashMap<String, String>) -> Result<()> {
         let (key, iv) = self.logistics_keys();
+        // An unconfigured client must never reach a MAC claim, outbound or
+        // inbound: the empty-key MD5 is computable by whoever controls the
+        // endpoint's answers, so signing (and then "verifying" the reply)
+        // with it would rubber-stamp a forged response — the same refusal
+        // `verify_logistics_check_mac_value` makes on the way in, and the
+        // payment query path makes for its SHA-256 MAC. Firing here covers
+        // every form call (API and browser-form builders) before any bytes
+        // go out or any form is handed to a caller.
+        if key.is_empty() || iv.is_empty() {
+            return Err(Error::Validation(
+                "logistics HashKey/HashIV are empty (payment fallback keys are \
+                 empty too) — refusing to sign or MAC-verify with an \
+                 unconfigured client"
+                    .into(),
+            ));
+        }
         let mac = check_mac_value(params, key, iv, EncryptType::Md5);
         params.insert("CheckMacValue".to_owned(), mac);
         Ok(())

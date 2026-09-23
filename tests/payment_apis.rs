@@ -126,6 +126,62 @@ async fn order_search_ignores_a_response_chosen_encrypt_type() {
     );
 }
 
+/// A client whose HashKey/HashIV were never configured must not "verify" a
+/// response MAC: the empty-key MAC is computable by whoever controls the
+/// endpoint's answers, so accepting one rubber-stamps a forged "paid" reply
+/// (the inbound `verify_check_mac_value` refuses the same empty keys — see
+/// `empty_key_client_rejects_empty_key_forged_mac` in `tests/verify.rs`).
+/// The refusal must happen before anything is sent.
+#[tokio::test]
+async fn order_search_refuses_an_empty_key_client_before_sending() {
+    let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = Arc::clone(&requests);
+    let srv = spawn_http_server(move |_path, _body| {
+        seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // A "paid" answer forged with the empty keys the client has.
+        let respond = map(&[
+            ("MerchantID", MERCHANT_ID),
+            ("MerchantTradeNo", "order_abc"),
+            ("TradeAmt", "999999"),
+            ("TradeStatus", "1"),
+        ]);
+        let mac = ecpay::check_mac_value(&respond, "", "", ecpay::EncryptType::Sha256);
+        (
+            200,
+            "application/x-www-form-urlencoded".to_owned(),
+            respond
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .chain(std::iter::once(format!("CheckMacValue={mac}")))
+                .collect::<Vec<_>>()
+                .join("&")
+                .into_bytes(),
+        )
+    });
+    let client = Ecpay {
+        payment_api_url: srv,
+        merchant_id: MERCHANT_ID.to_owned(),
+        ..Default::default() // hash_key/hash_iv never configured
+    };
+    let err = client
+        .order_search(&ecpay::payment::OrderSearchParams {
+            merchant_trade_no: "order_abc".into(),
+            time_stamp: 1_700_000_000,
+            platform_id: None,
+        })
+        .await
+        .expect_err("an empty-key client must not verify a response MAC");
+    assert!(
+        matches!(err, ecpay::Error::Validation(_)),
+        "expected Error::Validation, got {err:?}"
+    );
+    assert_eq!(
+        requests.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the refusal must happen before anything is sent"
+    );
+}
+
 #[tokio::test]
 async fn order_search_rejects_a_tampered_response_mac() {
     let srv = spawn_http_server(move |_path, _body| {

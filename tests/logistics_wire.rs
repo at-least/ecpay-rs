@@ -58,6 +58,51 @@ fn md5(fields: &HashMap<String, String>) -> String {
     check_mac_value(fields, LOGISTICS_KEY, LOGISTICS_IV, ecpay::EncryptType::Md5)
 }
 
+/// Same refusal as the payment query path (`order_search_refuses_an_empty_
+/// key_client_before_sending`): an unconfigured client — no logistics keys
+/// AND no payment fallback — must not "verify" a logistics response MAC,
+/// because the empty-key MD5 is computable by whoever controls the
+/// endpoint's answers (the inbound `verify_logistics_check_mac_value`
+/// already refuses these keys). The refusal must happen before anything
+/// is sent.
+#[tokio::test]
+async fn domestic_form_api_refuses_an_empty_key_client_before_sending() {
+    let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = std::sync::Arc::clone(&requests);
+    let server = spawn_http_server(move |_path, _body| {
+        seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // A forged `1|<signed query>` reply MAC'd with the empty keys.
+        let mut reply = HashMap::new();
+        reply.insert("AllPayLogisticsID".to_string(), "3657295".to_string());
+        reply.insert("RtnCode".to_string(), "300".to_string());
+        let mac = check_mac_value(&reply, "", "", ecpay::EncryptType::Md5);
+        (
+            200,
+            "text/plain".into(),
+            format!("1|AllPayLogisticsID=3657295&RtnCode=300&CheckMacValue={mac}")
+                .into_bytes(),
+        )
+    });
+    let sdk = Ecpay {
+        merchant_id: MERCHANT_ID.into(),
+        logistics_api_url: server,
+        ..Default::default() // no logistics keys, no payment fallback keys
+    };
+    let err = sdk
+        .logistics_create(&sample_create())
+        .await
+        .expect_err("an empty-key client must not verify a logistics response MAC");
+    assert!(
+        matches!(err, ecpay::Error::Validation(_)),
+        "expected Error::Validation, got {err:?}"
+    );
+    assert_eq!(
+        requests.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the refusal must happen before anything is sent"
+    );
+}
+
 #[tokio::test]
 async fn domestic_create_signs_md5_and_parses_the_pipe_response() {
     let server = spawn_http_server(|path, body| {

@@ -402,14 +402,26 @@ impl Ecpay {
     /// response's own `CheckMacValue` (raising [`Error::CheckMacValueMismatch`]
     /// on mismatch or absence), and returns the response fields with
     /// CheckMacValue stripped (blank values kept, like
-    /// `parse_qsl(keep_blank_values=True)`). Shared by [`Self::order_search`],
-    /// [`Self::query_payment_info`], and [`Self::query_trade_info`], which
-    /// only differ in endpoint and request fields.
+    /// `parse_qsl(keep_blank_values=True)`). An unconfigured client (empty
+    /// payment HashKey/HashIV) is refused with [`Error::Validation`] before
+    /// anything is sent: the empty-key MAC is computable by whoever controls
+    /// the endpoint's answers, so verifying with it would rubber-stamp a
+    /// forged "paid" reply — the same refusal the inbound verifiers make.
+    /// Shared by [`Self::order_search`], [`Self::query_payment_info`],
+    /// [`Self::query_trade_info`], and [`Self::credit_card_period_action`],
+    /// which only differ in endpoint and request fields.
     async fn post_cmv_verified(
         &self,
         endpoint: &str,
         mut m: HashMap<String, String>,
     ) -> Result<BTreeMap<String, String>> {
+        if self.hash_key.is_empty() || self.hash_iv.is_empty() {
+            return Err(Error::Validation(
+                "payment HashKey/HashIV are empty — refusing to sign or \
+                 MAC-verify a query with an unconfigured client"
+                    .into(),
+            ));
+        }
         // Verify with the digest the REQUEST was signed under (its own
         // EncryptType field, defaulting to SHA-256) — never the response's:
         // a verifier must not take its algorithm selector from the very
