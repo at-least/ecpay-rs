@@ -79,8 +79,7 @@ async fn domestic_form_api_refuses_an_empty_key_client_before_sending() {
         (
             200,
             "text/plain".into(),
-            format!("1|AllPayLogisticsID=3657295&RtnCode=300&CheckMacValue={mac}")
-                .into_bytes(),
+            format!("1|AllPayLogisticsID=3657295&RtnCode=300&CheckMacValue={mac}").into_bytes(),
         )
     });
     let sdk = Ecpay {
@@ -951,8 +950,6 @@ fn verify_logistics_check_mac_value_is_md5_keyed() {
     let json = serde_json::to_value(&input).unwrap();
     assert!(json.get("MerchantID").is_some() && json.get("LogisticsSubType").is_some());
 }
-
-
 
 // --- Untested-endpoint sweep, part 1: domestic MD5-form family. Each test
 // pins the exact posted key set (a serde rename typo or a stray field breaks

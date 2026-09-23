@@ -50,8 +50,6 @@ fn test_payment_ecpay(base_url: &str) -> Ecpay {
     }
 }
 
-
-
 fn form_escape(s: &str) -> String {
     // Go url.QueryEscape: unreserved A-Za-z0-9-_.~ literal, space -> '+',
     // everything else uppercase %XX.

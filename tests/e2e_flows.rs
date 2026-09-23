@@ -90,8 +90,6 @@ async fn post_json(url: &str, body: String) -> (u16, String) {
     (status, resp.text().await.expect("body"))
 }
 
-
-
 /// Builds `k=v&...` sorted by key, URL-encoded — how ECPay signs and sends
 /// its query-string responses.
 fn signed_query(
