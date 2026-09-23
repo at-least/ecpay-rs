@@ -256,7 +256,7 @@ async fn logistics_domestic_create_with_md5_cmv_answers() {
     // CMV never matches.
     let (status_prefix, query) = body.split_once('|').expect("response starts with `1|`");
     assert_eq!(status_prefix, "1", "status segment of the pipe response");
-    let fields = parse_query(query);
+    let fields = ecpay::parse_form(query);
     let sent = fields
         .get("CheckMacValue")
         .expect("response carries a CheckMacValue");
@@ -669,41 +669,6 @@ async fn form_post(endpoint: &str, params: &HashMap<String, String>) -> String {
     text
 }
 
-fn parse_query(query: &str) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for part in query.split('&') {
-        if let Some((k, v)) = part.split_once('=') {
-            out.insert(unquote_plus(k), unquote_plus(v));
-        }
-    }
-    out
-}
-
-fn unquote_plus(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'+' => out.push(b' '),
-            b'%' if i + 2 < b.len() => {
-                let hi = (b[i + 1] as char).to_digit(16);
-                let lo = (b[i + 2] as char).to_digit(16);
-                match (hi, lo) {
-                    (Some(h), Some(l)) => {
-                        out.push((h * 16 + l) as u8);
-                        i += 2;
-                    }
-                    _ => out.push(b'%'),
-                }
-            }
-            c => out.push(c),
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 fn unix_now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -750,7 +715,7 @@ async fn aio_do_action_responses_are_unsigned_query_strings() {
     )
     .await;
     println!("CreditDetail/DoAction raw => {body}");
-    let fields = parse_query(&body);
+    let fields = ecpay::parse_form(&body);
     assert!(
         !fields.is_empty() && fields.contains_key("RtnCode"),
         "expected the in-band RtnCode business answer, got: {body}"
@@ -785,7 +750,7 @@ async fn aio_credit_card_period_action_responses_are_signed_and_verify() {
     )
     .await;
     println!("Cashier/CreditCardPeriodAction raw => {body}");
-    let fields = parse_query(&body);
+    let fields = ecpay::parse_form(&body);
     assert!(
         fields.contains_key("RtnCode"),
         "expected the in-band RtnCode business answer, got: {body}"

@@ -38,14 +38,16 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
-- **測試端四份本地 `parse_form` 副本收編為 `ecpay::parse_form`**(程式碼審查
+- **測試端五份本地 form 解碼器副本收編為 `ecpay::parse_form`**(程式碼審查
   🟢):`tests/{e2e_flows,logistics_wire,conformance,full_flow}.rs` 各自帶一份
-  form 解碼器,其中兩份(`e2e_flows`、`logistics_wire`)已漂移——無 `=`
+  `parse_form`,其中兩份(`e2e_flows`、`logistics_wire`)已漂移——無 `=`
   的 valueless key 被靜默丟棄,而 crate 的 `parse_qsl`/`parse_form` 語意
   (Python `parse_qsl(keep_blank_values=True)`,空白值保留)把此行為文件化為
-  載重契約。四份連同各自的 `unquote`/`urldecode`/`form_unescape` 助手
+  載重契約;`tests/stage_probes.rs` 另有一份同名漂移的
+  `parse_query`/`unquote_plus`。五份連同各自助手
   (與 crate `unquote_plus` 演算法逐位元組相同)全數刪除,改呼叫公開的
-  `ecpay::parse_form`;四個套件在替換下全綠(行為保持),漂移同時歸零。
+  `ecpay::parse_form`;四個離線套件在替換下全綠(行為保持),漂移同時歸零
+  (stage_probes 為 `#[ignore]` 手動探測套件,僅編譯驗證)。
   另:`c2c_form_api_posts_the_c2c_field_set` 補上排序鍵集斷言(與
   `update_shipment_info` 同款)——過去只驗兩個欄位值與 MAC 重算,無法抓
   掉欄/多欄的回歸。
@@ -63,9 +65,11 @@ _非破壞性：_
 - **`ApiError` 的 Display 與 `HttpStatus`/`TransCode` 同款有界**(程式碼審查 🟢):
   `RtnMsg` 過去原樣、無界輸出——被注入的 client 或被擊穿的傳輸可在加密
   成功的回應裡塞近 1 MiB 的 `RtnMsg`,一條 log 就被撐成百萬字元。現在
-  經共用的 `truncate_for_display`(512 字元上限、控制字元跳脫)渲染,
-  Go-parity 的 `RtnMsg=%q` 形狀對正常訊息不變;`msg` 欄位仍保留完整
-  原文供程式化取用(`tests/api_error.rs::api_error_display_bounds_the_server_message`)。
+  經共用的 `truncate_for_display`(512 字元上限)渲染,引號保留 Go-parity
+  的 `%q` 外觀、控制字元與兩個兄弟 variant 同款**單層**跳脫
+  (終審回歸修正:先前的 `{:?}` 疊層會把 `\n` 再跳一次變 `\\n`);
+  `msg` 欄位仍保留完整原文供程式化取用
+  (`tests/api_error.rs::api_error_display_bounds_the_server_message`)。
 - **`get_issue` 強制互斥查詢模式**(程式碼審查 🟢):`GetIssueInput` 文件的
   「擇一」過去只是文件——兩邊都填、或 `invoice_no`/`invoice_date` 只填
   半對,三個 key 都會簽進信封送出;伺服器以 key 是否存在決定查詢模式

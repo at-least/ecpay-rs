@@ -57,6 +57,25 @@ fn api_error_display_bounds_the_server_message() {
         rendered.chars().count()
     );
     assert_eq!(err.msg.len(), 1000, "the field keeps the full message");
+
+    // Control characters render SINGLE-escaped, exactly like the
+    // HttpStatus/TransCode Displays (see their tests above) — not
+    // double-escaped by an extra Debug quote — and no raw newline reaches
+    // a log line.
+    let err = ApiError {
+        code: 2,
+        msg: "line1\nline2\tTAIL\u{7}".to_owned(),
+    };
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains(r"line1\nline2\tTAIL\u{7}"),
+        "control characters must be single-escaped in Display, got {rendered:?}"
+    );
+    assert!(
+        !rendered.contains('\n'),
+        "raw newline must not reach Display, got {rendered:?}"
+    );
+    assert_eq!(err.msg, "line1\nline2\tTAIL\u{7}");
 }
 
 /// Every [`ecpay::Service`] gets its own label in the `HttpStatus` Display —

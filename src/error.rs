@@ -35,9 +35,13 @@ impl fmt::Display for ApiError {
     /// must not echo it whole into a log line. The `msg` field keeps the
     /// full verbatim string for programmatic access.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // `truncate_for_display` output is already control-escaped, the
+        // same single-escape rendering `HttpStatus`/`TransCode` use;
+        // wrapping it in `{:?}` would double-escape, so the Go-parity
+        // quotes are manual and the content renders like the siblings'.
         write!(
             f,
-            "ecpay: RtnCode={}, RtnMsg={:?}",
+            "ecpay: RtnCode={}, RtnMsg=\"{}\"",
             self.code,
             crate::client::truncate_for_display(&self.msg)
         )
