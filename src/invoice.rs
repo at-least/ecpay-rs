@@ -651,8 +651,8 @@ impl Ecpay {
 /// 查詢發票開立資訊的輸入參數。兩種互斥的查詢方式擇一：只填
 /// `relate_number`；或只填 `invoice_no` + `invoice_date`（格式 yyyy-MM-dd）。
 /// 衝突（兩邊都填）或只填半對（`invoice_no`/`invoice_date` 缺一）由
-/// [`Ecpay::get_issue`](Self::get_issue) 在出網前以 `Error::Validation`
-/// 拒絕；全空交給伺服器裁定。
+/// [`Ecpay::get_issue`](crate::Ecpay::get_issue) 在出網前以
+/// `Error::Validation` 拒絕；全空交給伺服器裁定。
 ///
 /// ECPay 沙盒實測(2026-09):是否存在於 JSON（而非其值是否為空字串）決定
 /// 查詢模式——就算欄位是空字串,只要 key 出現在請求裡,伺服器就會採用該

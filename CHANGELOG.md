@@ -38,6 +38,17 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
+- **文件修正**(程式碼審查 🟡/🟢):README 英文版「Differences from the
+  official Python SDK」補上第五點刻意差異(InvoiceMark 衝突大聲報錯,
+  過去僅中文版「五點」列表有——只讀英文段的整合者會以為差異清單到此
+  為止);`tests/python_conformance.rs` 模組標頭的「Three deliberate
+  divergences」過時計數改為指向 README 權威清單並標明其餘兩點釘在
+  `tests/check_out.rs`;`tests/official_skill_vectors.rs` 的向量出處註記
+  從機器特定路徑 `~/.zcode/skills/ecpay` 改為 repo 內可重現的
+  `.claude/skills/ecpay` submodule(同一 commit);`B2C_INVOICE_REVISION`
+  的文件修正為如實描述——ECPG 信封**不帶 `Revision`**(RqHeader 只有
+  `Timestamp`,沙盒實測釘住),舊文字「AES-JSON families in ecpg/… speak
+  1.0.0」會誤導維護者對 ECPG 加上 Revision、送出未經實測的 wire 形狀。
 - **`ApiError` 的 Display 與 `HttpStatus`/`TransCode` 同款有界**(程式碼審查 🟢):
   `RtnMsg` 過去原樣、無界輸出——被注入的 client 或被擊穿的傳輸可在加密
   成功的回應裡塞近 1 MiB 的 `RtnMsg`,一條 log 就被撐成百萬字元。現在

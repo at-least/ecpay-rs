@@ -26,8 +26,10 @@ pub struct Request {
 }
 
 /// The B2C invoice envelope's `RqHeader.Revision` (the B2C service speaks
-/// `3.0.0`; the AES-JSON families in `ecpg`/`logistics`/`invoice_b2b` speak
-/// `1.0.0` — see the constants in those modules).
+/// `3.0.0`; the logistics v2 and B2B AES-JSON families speak `1.0.0` — see
+/// their module constants). ECPG sends NO Revision at all: its RqHeader
+/// carries only `Timestamp` (live-pinned 2026-09; see the `ecpg` module
+/// docs — adding a Revision there would change an unverified wire shape).
 pub(crate) const B2C_INVOICE_REVISION: &str = "3.0.0";
 
 /// Go's anonymous `Request.RqHeader` struct.

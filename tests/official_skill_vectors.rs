@@ -1,7 +1,8 @@
 //! Vectors from ECPay's OWN AI-skill repository
 //! (github.com/ECPay/ECPay-API-Skill, test-vectors/checkmacvalue.json,
-//! maintained by ECPay's team; skill installed at ~/.zcode/skills/ecpay,
-//! commit ae964f7 2026-09-01). These are ECPay's current official test
+//! maintained by ECPay's team; available in this repo as the
+//! `.claude/skills/ecpay` git submodule, commit ae964f7 2026-09-01).
+//! These are ECPay's current official test
 //! vectors — note the tilde vector's note: "ecpayUrlEncode 會將 ~ 編碼為
 //! %7e", confirming the Python SDK's literal-~ behavior is the deviation.
 

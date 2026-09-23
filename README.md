@@ -581,6 +581,12 @@ confirming this crate follows ECPay's backend):
    fail locally with `Error::Validation("{name} max langth is {max}.")` —
    the official SDK's message text, typo included — instead of a
    server-side error.
+5. An explicit non-`Y` `InvoiceMark` combined with invoice fields is a loud
+   validation error as well (the official SDK signs the conflict and lets
+   ECPay reject it server-side). Before 0.4 this crate silently overwrote
+   the mark to `Y` — issuing an electronic invoice (a Taiwanese accounting
+   document that then needs an allowance/void flow) the caller never asked
+   for. The Chinese section's 五點刻意差異 above is the canonical list.
 
 `AioCheckOut::html_form` also HTML-escapes attribute values (the upstream
 form breaks on `"` and is an injection vector).

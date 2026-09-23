@@ -29,7 +29,7 @@ pub struct ApiError {
 impl fmt::Display for ApiError {
     /// Go: `fmt.Sprintf("ecpay: RtnCode=%d, RtnMsg=%q", e.Code, e.Msg)` —
     /// with `RtnMsg` rendered through the shared bounded/escaped
-    /// [`crate::client::truncate_for_display`] (the same 512-char contract
+    /// `truncate_for_display` (the same 512-char contract
     /// `HttpStatus`/`TransCode` Displays hold): a hostile endpoint can put a
     /// near-1 MiB `RtnMsg` in a successfully-encrypted answer, and Display
     /// must not echo it whole into a log line. The `msg` field keeps the
