@@ -759,6 +759,13 @@ impl Ecpay {
     /// ⚠️ Data 內的 `MerchantID` 為**必要**（stage 實測 2026-09：省略時回
     /// `5000220 "The parameter [MerchantID] is required."`；帶了則查無訂單回
     /// `RtnCode 10000185 "Cant not find the trade data"`）。
+    ///
+    /// ⚠️ 動錢的動作有**未定結局**問題：傳輸失敗（共用 client 的 30 秒
+    /// 逾時、連線中斷）只代表「回應丟了」，不代表動作沒有執行——綠界
+    /// 可能已請款/退款後回應才遺失，盲目重試可能重複動作。對本呼叫的
+    /// 任何 [`Error::Http`](crate::Error::Http) 都應視為「狀態未知」：
+    /// 先以 [`Ecpay::ecpg_query_trade`](Self::ecpg_query_trade) 查詢確認，
+    /// 再決定重試或告警（同金流側 `credit_do_action` 的規則）。
     pub async fn ecpg_do_action(&self, input: &EcpgDoActionInput) -> Result<serde_json::Value> {
         self.require_data_merchant_id(&input.merchant_id)?;
         // A negative amount is never a valid wire value (same stance as the

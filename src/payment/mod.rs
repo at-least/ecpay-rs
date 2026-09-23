@@ -540,6 +540,16 @@ impl Ecpay {
     /// — even the normal not-found answer (`RtnCode=0&RtnMsg=訂單不存在`)
     /// carries no CheckMacValue, so a verification gate would reject it.
     /// Transport integrity is TLS's job here, exactly like the official SDK.
+    ///
+    /// ⚠ Ambiguous outcomes on a MONEY-MOVING action: a transport failure
+    /// (the shared client's 30s timeout, a reset connection) tells you the
+    /// ANSWER was lost, not that the action did not run — ECPay may have
+    /// applied the capture/refund before the response went missing, and a
+    /// blind retry can apply it twice. Treat any [`Error::Http`] on this
+    /// call as "unknown state": confirm with [`Self::query_trade_info`] (or
+    /// [`Self::order_search`]) before retrying or alerting, the same rule
+    /// [`Self::credit_card_period_action`] states for its own untrusted
+    /// answers.
     pub async fn credit_do_action(
         &self,
         p: &CreditDoActionParams,

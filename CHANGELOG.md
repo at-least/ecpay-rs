@@ -38,6 +38,19 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
+- **回呼入口的 panic-freedom 屬性測試**(審查後續項):`tests/properties.rs`
+  新增兩條 proptest(各 512 案例),對攻擊者可達的公開回呼端點入口——
+  `parse_form`、`decrypt_ecpg_callback`、`decrypt_logistics_callback`、
+  `decrypt_temp_trade_established`,以及 `parse_form`→`verify_check_mac_value`
+  整段進站管線——灌入敵意碎片組合(斷裂/截斷的 `%XX` 跳脫、跨跳脫邊界切半的
+  多位元組 UTF-8、form/JSON metacharacter、控制字元、BOM):任何輸入都必須
+  落在 `Ok`/`Err`,絕不 unwind(回呼 handler 的 panic 就是 DoS)。現況
+  全綠(特性釘住,非 RED 修復——未有 panic 被發現)。
+- **動錢動作的「未定結局」文件**(審查後續項):`credit_do_action` 與
+  `ecpg_do_action` 的文件補上與 `credit_card_period_action` 同款的 ⚠ 規則:
+  傳輸失敗(30 秒逾時、連線中斷)只代表回應遺失,不代表動作未執行——
+  盲目重試可能重複請款/退款;任何 `Error::Http` 應視為「狀態未知」,
+  先查詢(`query_trade_info`/`order_search`/`ecpg_query_trade`)確認再重試。
 - **測試端五份本地 form 解碼器副本收編為 `ecpay::parse_form`**(程式碼審查
   🟢):`tests/{e2e_flows,logistics_wire,conformance,full_flow}.rs` 各自帶一份
   `parse_form`,其中兩份(`e2e_flows`、`logistics_wire`)已漂移——無 `=`

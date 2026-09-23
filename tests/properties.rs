@@ -71,6 +71,59 @@ fn or_fail<T>(r: ecpay::Result<T>) -> Result<T, TestCaseError> {
     r.map_err(|e| TestCaseError::fail(e.to_string()))
 }
 
+/// Hostile callback-body fragments: broken and truncated `%XX` escapes,
+/// multi-byte UTF-8 split across escape boundaries, form and JSON
+/// metacharacters, control characters, BOM, real wire key names, and key
+/// material (so accidental decryption of "valid-looking" garbage is also
+/// exercised). Joined in random order and length.
+fn hostile_bodies() -> impl Strategy<Value = String> {
+    let fragment = prop::sample::select(vec![
+        "%",
+        "%%",
+        "%A",
+        "%G1",
+        "%ZZ",
+        "%e4%b8",
+        "%E4%B8%AD",
+        "+",
+        "=",
+        "&",
+        "MerchantID",
+        "RqHeader",
+        "TransCode",
+        "TransMsg",
+        "Data",
+        "RtnCode",
+        "RtnMsg",
+        "CheckMacValue",
+        "ResultData",
+        "1",
+        "0",
+        "3002607",
+        KEY,
+        IV,
+        "中文",
+        "\u{1F600}",
+        "\u{0}",
+        "\u{7}",
+        "\u{7f}",
+        "\u{feff}",
+        "\"",
+        "{",
+        "}",
+        "[",
+        "]",
+        ":",
+        "\\",
+        "\n",
+        "\t",
+        " ",
+        "eJw=",
+        "AAAA",
+    ]);
+    vec(fragment, 0..24).prop_map(|parts| parts.join(""))
+}
+
 const KEY: &str = "pwFHCqoQZGmho4w6";
 const IV: &str = "EkRm7iFT261dpevs";
 
@@ -260,6 +313,34 @@ proptest! {
         };
         let got = client.generate_check_value(&params);
         prop_assert!(matches!(got, Err(ecpay::Error::UnsupportedEncryptType(_))));
+    }
+
+    /// Panic-freedom of the attacker-reachable callback entry points. A
+    /// merchant's ReturnURL/ServerReplyURL handler feeds whatever arrived
+    /// on a PUBLIC endpoint into `parse_form` and the three decryptors; a
+    /// panic there is a DoS of the handler, so every input must land in
+    /// `Ok` or `Err` — never unwind. The fragment pool is hostile on
+    /// purpose: broken/truncated `%XX` escapes, multi-byte UTF-8 split
+    /// across escape boundaries, JSON and form metacharacters, control
+    /// characters, BOM.
+    #[test]
+    fn callback_entry_points_never_panic_on_arbitrary_bodies(body in hostile_bodies()) {
+        // Form decoder (payment callbacks).
+        let _ = ecpay::parse_form(&body);
+        // AES-envelope decryptors (ECPG / logistics v2 / ResultData form).
+        let client = stage_client();
+        let _ = client.decrypt_ecpg_callback::<serde_json::Value>(&body);
+        let _ = client.decrypt_logistics_callback::<serde_json::Value>(&body);
+        let _ = client.decrypt_temp_trade_established::<serde_json::Value>(&body);
+    }
+
+    /// Whatever `parse_form` accepts must also flow through MAC
+    /// verification without panicking (the full inbound payment-callback
+    /// pipeline: raw body → decoded map → verify).
+    #[test]
+    fn verify_pipeline_never_panics_on_arbitrary_bodies(body in hostile_bodies()) {
+        let client = stage_client();
+        let _ = client.verify_check_mac_value(&ecpay::parse_form(&body));
     }
 }
 
