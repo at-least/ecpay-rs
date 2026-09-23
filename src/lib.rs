@@ -193,7 +193,9 @@ pub const VENDOR_API_URL_STAGE: &str = "https://vendor-stage.ecpay.com.tw/Paymen
 ///
 /// Dropping a `Keys` zeroizes its buffers ([`zeroize`] semantics); the
 /// pairs are whole by construction, so a key from one pair can never be
-/// mixed with another pair's IV.
+/// mixed with another pair's IV. Note a pair REJECTED by [`Keys::new`]
+/// (empty halves, wrong lengths) is dropped unzeroized — only constructed
+/// values scrub.
 #[derive(Clone, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct Keys {
     key: String,
@@ -357,13 +359,15 @@ impl Env {
     }
 }
 
-/// The configured client. Invalid states are unrepresentable by
+/// The configured client. Keys and URLs are invalid-state-free by
 /// construction: [`Ecpay::new`] requires a merchant ID and an [`Env`]
 /// (URLs https-validated once, no silent production fallback for a family
 /// you did not configure), and each family's [`Keys`] enter only through
 /// the `with_*_keys` setters after [`Keys::new`] validated them. A family
-/// whose keys or URL were never configured refuses LOUDLY at that
-/// family's call site, before anything is sent.
+/// whose keys or URL were never configured — and an empty `b2b_rq_id` —
+/// refuses LOUDLY at that family's call site, before anything is sent
+/// (call-time checks, not type-level: the empty-`String` defaults for
+/// `platform_id`/`b2b_rq_id` are legitimate until first use).
 ///
 /// ```no_run
 /// # fn main() -> ecpay::Result<()> {

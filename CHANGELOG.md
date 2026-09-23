@@ -4,10 +4,12 @@
 
 _breaking changes（程式碼審查後的型別/一致性修正）：_
 
-- **建構期驗證重塑:無效狀態改為不可構造**(重新設計建議 #1,0.4.0
-  發佈前的自由重塑窗口)。`Ecpay` 不再是 `#[derive(Default)]` 的公開欄位
-  struct——空金鑰、靜默 fallback 到正式環境 URL、跨家族混搭金鑰,這三類
-  「可構造的無效狀態」正是本輪審查修掉的空金鑰漏洞類的根因。新 API:
+- **建構期驗證重塑:金鑰與 URL 的無效狀態改為不可構造**(重新設計建議
+  #1,0.4.0 發佈前的自由重塑窗口)。`Ecpay` 不再是 `#[derive(Default)]`
+  的公開欄位 struct——空金鑰、靜默 fallback 到正式環境 URL、跨家族混搭
+  金鑰,這三類「可構造的無效狀態」正是本輪審查修掉的空金鑰漏洞類的根因
+  (`platform_id`/`b2b_rq_id` 的空字串預設維持呼叫期大聲檢查——空值在
+  首次使用前是合法狀態)。新 API:
   - `Ecpay::new(merchant_id, env) -> Result<Ecpay>`:唯一建構路徑,空
     MerchantID 拒絕。`Env::{Stage, Production, Custom(Urls)}`:前兩者
     一次設定全部八個家族的端點;`Custom` 只用你給的——某家族 URL 沒給,

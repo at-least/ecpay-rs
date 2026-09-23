@@ -402,9 +402,9 @@ impl Ecpay {
     /// response's own `CheckMacValue` (raising [`Error::CheckMacValueMismatch`]
     /// on mismatch or absence), and returns the response fields with
     /// CheckMacValue stripped (blank values kept, like
-    /// `parse_qsl(keep_blank_values=True)`). An unconfigured client (empty
-    /// payment HashKey/HashIV) is refused with [`Error::Validation`] before
-    /// anything is sent: the empty-key MAC is computable by whoever controls
+    /// `parse_qsl(keep_blank_values=True)`). A client with no payment
+    /// [`Keys`](crate::Keys) attached is refused with [`Error::Validation`]
+    /// before anything is sent: an empty-key MAC is computable by whoever controls
     /// the endpoint's answers, so verifying with it would rubber-stamp a
     /// forged "paid" reply — the same refusal the inbound verifiers make.
     /// Shared by [`Self::order_search`], [`Self::query_payment_info`],
