@@ -38,6 +38,14 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
+- **`get_issue` 強制互斥查詢模式**(程式碼審查 🟢):`GetIssueInput` 文件的
+  「擇一」過去只是文件——兩邊都填、或 `invoice_no`/`invoice_date` 只填
+  半對,三個 key 都會簽進信封送出;伺服器以 key 是否存在決定查詢模式
+  (struct 文件釘住的沙盒實測),衝突時每張真實發票都回
+  `RtnCode=2 查無資料` 且無任何本地提示。現在衝突直接回
+  `Error::Validation`(與組別衝突、InvoiceMark 衝突同款大聲報錯);
+  任一完整模式照常出網,全空交給伺服器
+  (`tests/invoice_apis.rs::get_issue_rejects_conflicting_or_half_filled_query_modes`)。
 - **金額欄位補上負數防護**(程式碼審查 🟢):`aio_check_out` 的 `TotalAmount`
   與物流 `GoodsAmount` 早有「負數永遠不是合法 wire 值」的本地拒絕,但
   `credit_do_action`/`ecpg_do_action` 的 `TotalAmount`、

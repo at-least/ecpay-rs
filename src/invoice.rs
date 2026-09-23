@@ -650,6 +650,9 @@ impl Ecpay {
 
 /// 查詢發票開立資訊的輸入參數。兩種互斥的查詢方式擇一：只填
 /// `relate_number`；或只填 `invoice_no` + `invoice_date`（格式 yyyy-MM-dd）。
+/// 衝突（兩邊都填）或只填半對（`invoice_no`/`invoice_date` 缺一）由
+/// [`Ecpay::get_issue`](Self::get_issue) 在出網前以 `Error::Validation`
+/// 拒絕；全空交給伺服器裁定。
 ///
 /// ECPay 沙盒實測(2026-09):是否存在於 JSON（而非其值是否為空字串）決定
 /// 查詢模式——就算欄位是空字串,只要 key 出現在請求裡,伺服器就會採用該
@@ -765,7 +768,24 @@ pub struct GetIssueOutput {
 impl Ecpay {
     /// A query: a non-1 RtnCode (e.g. not-found) is a normal result, NOT an
     /// [`crate::ApiError`] — the caller inspects RtnCode directly.
+    ///
+    /// The struct's 擇一 contract is enforced here: the server picks the
+    /// query mode by KEY PRESENCE, so a filled second mode (or a
+    /// half-filled `InvoiceNo`/`InvoiceDate` pair) silently breaks the
+    /// other — every real invoice answers `RtnCode=2` not-found. Refused
+    /// loudly before the envelope, like the crate's other
+    /// representable-conflict guards. All-empty is left to the server.
     pub async fn get_issue(&self, input: &GetIssueInput) -> Result<GetIssueOutput> {
+        let has_relate = !input.relate_number.is_empty();
+        let has_no = !input.invoice_no.is_empty();
+        let has_date = !input.invoice_date.is_empty();
+        if (has_relate && (has_no || has_date)) || (has_no != has_date) {
+            return Err(Error::Validation(
+                "GetIssue query modes are mutually exclusive: fill RelateNumber, \
+                 or InvoiceNo + InvoiceDate together — never both, never half a pair"
+                    .into(),
+            ));
+        }
         self.call_invoice_api("GetIssue", input).await
     }
 }

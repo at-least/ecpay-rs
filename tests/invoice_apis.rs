@@ -6,8 +6,8 @@
 use std::sync::{Arc, Mutex};
 
 use ecpay::{
-    encrypt, encrypt_data, ApiError, DelayIssueInput, Ecpay, Error, IssueInput, IssueModel,
-    VoidModel, VoidWithReIssueInput,
+    encrypt, encrypt_data, ApiError, DelayIssueInput, Ecpay, Error, GetIssueInput, IssueInput,
+    IssueModel, VoidModel, VoidWithReIssueInput,
 };
 
 mod common;
@@ -420,4 +420,75 @@ async fn invoice_issue_family_rejects_a_negative_sales_amount() {
         matches!(&err, Error::Validation(m) if m == "SalesAmount cannot be negative."),
         "{err:?}"
     );
+}
+
+/// `GetIssueInput`'s documented 擇一 contract, enforced locally: the server
+/// picks the query mode by KEY PRESENCE (live 2026-09, pinned in the struct
+/// doc), so a filled second mode — or a half-filled InvoiceNo/InvoiceDate
+/// pair — silently breaks the other and every real invoice answers
+/// RtnCode=2 not-found. The conflict is refused loudly, like the crate's
+/// other representable-conflict guards; either COMPLETE mode still passes
+/// the guard (failing here only as the unreachable transport).
+#[tokio::test]
+async fn get_issue_rejects_conflicting_or_half_filled_query_modes() {
+    // Port 1: nothing listens there — valid inputs fail only as Error::Http.
+    let client = client("http://127.0.0.1:1/B2CInvoice/".to_owned());
+
+    // Both modes set: the server would pick one by key presence and the
+    // other half of the input silently breaks the query.
+    let err = client
+        .get_issue(&GetIssueInput {
+            merchant_id: "2000132".into(),
+            relate_number: "TEA20260001".into(),
+            invoice_no: "AB12345678".into(),
+            invoice_date: "2026-09-01".into(),
+        })
+        .await
+        .expect_err("both query modes set must be refused locally");
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
+    assert!(err.to_string().contains("RelateNumber"), "{err}");
+
+    // InvoiceNo without its required InvoiceDate partner.
+    let err = client
+        .get_issue(&GetIssueInput {
+            merchant_id: "2000132".into(),
+            invoice_no: "AB12345678".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("a half-filled InvoiceNo/InvoiceDate pair must be refused");
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
+
+    // InvoiceDate without InvoiceNo.
+    let err = client
+        .get_issue(&GetIssueInput {
+            merchant_id: "2000132".into(),
+            invoice_date: "2026-09-01".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("a half-filled InvoiceNo/InvoiceDate pair must be refused");
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
+
+    // Either complete mode passes the guard and fails only as the transport.
+    let err = client
+        .get_issue(&GetIssueInput {
+            merchant_id: "2000132".into(),
+            relate_number: "TEA20260001".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("port 1 is unreachable");
+    assert!(matches!(err, Error::Http(_)), "{err:?}");
+
+    let err = client
+        .get_issue(&GetIssueInput {
+            merchant_id: "2000132".into(),
+            invoice_no: "AB12345678".into(),
+            invoice_date: "2026-09-01".into(),
+            ..Default::default()
+        })
+        .await
+        .expect_err("port 1 is unreachable");
+    assert!(matches!(err, Error::Http(_)), "{err:?}");
 }
