@@ -330,10 +330,12 @@ async fn envelope_carries_the_platform_id() {
 /// ECPay accepts it is service-specific and unproven for B2C).
 /// `VoidWithReIssue` nests its two MerchantIDs below the top level and is
 /// checked field-by-field (`IssueModel` fails even with a valid `VoidModel`).
+/// Both refusals are `Error::Validation` — the variant its doc promises for
+/// every per-family request guard.
 #[tokio::test]
 async fn b2c_inputs_carrying_a_mismatched_data_merchant_id_are_rejected_locally() {
     // Port 1 is reserved and never served; an outbound request would fail
-    // with Error::Http, so matching Error::Message proves the local guard.
+    // with Error::Http, so matching Error::Validation proves the local guard.
     let client = client("http://127.0.0.1:1/B2CInvoice/".to_owned());
 
     let mismatch = IssueInput {
@@ -341,7 +343,7 @@ async fn b2c_inputs_carrying_a_mismatched_data_merchant_id_are_rejected_locally(
         ..Default::default()
     };
     let err = client.issue(&mismatch).await.unwrap_err();
-    assert!(matches!(err, Error::Message(_)), "{err:?}");
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("Data MerchantID"), "{err}");
 
     // Empty passes through to the wire (fails here only as the transport).
@@ -363,5 +365,6 @@ async fn b2c_inputs_carrying_a_mismatched_data_merchant_id_are_rejected_locally(
         },
     };
     let err = client.void_with_reissue(&nested).await.unwrap_err();
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("IssueModel.MerchantID"), "{err}");
 }

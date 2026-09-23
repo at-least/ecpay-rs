@@ -350,7 +350,7 @@ impl Ecpay {
             ("IssueModel.MerchantID", &input.issue_model.merchant_id),
         ] {
             if !mid.is_empty() && mid != &self.merchant_id {
-                return Err(Error::Message(format!(
+                return Err(Error::Validation(format!(
                     "ecpay: {label} must equal the client's MerchantID \
                      (got {mid:?}, client has {:?}); ECPay rejects a mismatch opaquely \
                      with RtnCode != 1 and no message",

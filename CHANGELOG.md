@@ -25,6 +25,16 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
   PHP 範例 `Issue.php` 全部不送,且 B2B 明確無載具/捐贈;舊欄位名
   `CustomerAddr`/`CustomerPhone` 是 B2C 名,設了值綠界不會讀。wire
   key-set 由 `issue_b2b_data_is_exactly_the_documented_field_set` 逐鍵釘住。
+- **四個出網前防護改回 `Error::Validation`**(程式碼審查 🟡):Data 層
+  MerchantID 防呆(信封比對 `encrypt_checked` 與欄位級
+  `require_data_merchant_id_with`,涵蓋 B2C 發票/ECPG/物流 v2/跨境/B2B)、
+  B2B 空 `RqHeader.RqID` 拒絕、`void_with_reissue` 巢狀 MerchantID 比對——
+  過去回 `Error::Message`,與 `Error::Validation` 文件契約
+  (「出網前的各家族請求防護」)不一致:以
+  `matches!(err, Error::Validation(_))` 區分「本地拒絕、未出網」的呼叫端
+  會把這些歸進「其他/傳輸」分支。現在全部對齊為 `Error::Validation`
+  (訊息原文不變);對 variant 做匹配的呼叫端需要跟著改。傳輸層的
+  `Error::Message`(body 上限、非簽章回應、回呼解密統一訊息)不變。
 
 _非破壞性：_
 

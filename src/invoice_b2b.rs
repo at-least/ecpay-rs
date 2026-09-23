@@ -109,7 +109,7 @@ impl Ecpay {
         // 送出）；空值是否被伺服器接受未經實測，與其賭一把，不如在出網
         // 前拒絕並給出可執行的訊息。
         if self.b2b_rq_id.is_empty() {
-            return Err(Error::Message(
+            return Err(Error::Validation(
                 "ecpay: B2B invoice requires Ecpay::b2b_rq_id (GUID format, \
                  unique per request) — refusing to send an empty RqHeader.RqID"
                     .into(),

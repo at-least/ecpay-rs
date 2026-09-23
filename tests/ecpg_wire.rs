@@ -395,7 +395,8 @@ async fn transcode_rejection_surfaces_as_a_transcode_error() {
 
 /// The MerchantID duplicated inside Data must equal the client's: ECPay
 /// rejects a mismatch server-side (5000261 / 5100074, live 2026-09), so the client
-/// refuses locally before any request leaves.
+/// refuses locally before any request leaves — as the `Error::Validation`
+/// doc promises for every per-family request guard.
 #[tokio::test]
 async fn data_merchant_id_must_match_the_client_merchant() {
     // Port 1: nothing listens there — the guard must fire BEFORE the request.
@@ -409,7 +410,7 @@ async fn data_merchant_id_must_match_the_client_merchant() {
         .get_token_by_trade(&input)
         .await
         .expect_err("mismatched Data MerchantID must be refused locally");
-    assert!(matches!(err, Error::Message(_)), "{err:?}");
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("MerchantID"), "{err}");
 
     let mut empty = token_input();
@@ -418,7 +419,7 @@ async fn data_merchant_id_must_match_the_client_merchant() {
         .get_token_by_trade(&empty)
         .await
         .expect_err("empty Data MerchantID must be refused locally");
-    assert!(matches!(err, Error::Message(_)), "{err:?}");
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
 }
 
 /// Every one of the 14 methods posts to its exact dual-domain path — the
@@ -727,7 +728,7 @@ async fn query_inputs_omit_unset_platform_id_and_require_merchant_id() {
 
     // 4) A set-but-mismatched Data MerchantID never leaves the process:
     // port 1 is reserved, so an outbound request would fail with
-    // Error::Http — Error::Message proves the local guard fired.
+    // Error::Http — Error::Validation proves the local guard fired.
     let offline = client(
         "http://127.0.0.1:1/Merchant/".to_owned(),
         "http://127.0.0.1:1/1.0.0/".to_owned(),
@@ -740,7 +741,7 @@ async fn query_inputs_omit_unset_platform_id_and_require_merchant_id() {
         })
         .await
         .unwrap_err();
-    assert!(matches!(err, Error::Message(_)), "{err:?}");
+    assert!(matches!(err, Error::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("Data MerchantID"), "{err}");
 }
 

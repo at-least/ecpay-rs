@@ -497,7 +497,7 @@ async fn mismatched_data_merchant_id_is_rejected_before_the_wire() {
         .await
         .expect_err("an empty Data MerchantID must be rejected locally");
     assert!(
-        matches!(&err, ecpay::Error::Message(m) if m.contains("Data MerchantID")),
+        matches!(&err, ecpay::Error::Validation(m) if m.contains("Data MerchantID")),
         "expected the Data-MerchantID guard, got {err:?}"
     );
     assert!(
@@ -863,6 +863,7 @@ async fn empty_b2b_rq_id_is_refused_before_any_bytes_go_out() {
         })
         .await
         .expect_err("empty b2b_rq_id must be refused");
+    assert!(matches!(err, ecpay::Error::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("RqID"), "{err}");
     assert!(
         !sent.load(std::sync::atomic::Ordering::SeqCst),

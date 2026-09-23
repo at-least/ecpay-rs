@@ -118,7 +118,7 @@ impl Ecpay {
         let value: serde_json::Value = serde_json::from_str(&json)?;
         if let Some(mid) = value.get("MerchantID").and_then(serde_json::Value::as_str) {
             if !mid.is_empty() && mid != envelope_merchant_id {
-                return Err(Error::Message(format!(
+                return Err(Error::Validation(format!(
                     "ecpay: Data MerchantID must equal the envelope MerchantID \
                      (got {mid:?}, envelope has {envelope_merchant_id:?}); ECPay rejects a \
                      mismatch server-side"
@@ -141,7 +141,7 @@ impl Ecpay {
         tail: &str,
     ) -> Result<()> {
         if data_merchant_id.is_empty() || data_merchant_id != self.merchant_id {
-            return Err(Error::Message(format!(
+            return Err(Error::Validation(format!(
                 "ecpay: Data MerchantID must be set and equal the client's MerchantID \
                  (got {data_merchant_id:?}, client has {:?}){tail}",
                 self.merchant_id

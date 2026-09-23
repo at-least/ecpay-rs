@@ -1639,7 +1639,7 @@ async fn allinone_v2_inputs_carrying_a_mismatched_data_merchant_id_are_rejected_
         })
         .await
         .unwrap_err();
-    assert!(matches!(err, ecpay::Error::Message(_)), "{err:?}");
+    assert!(matches!(err, ecpay::Error::Validation(_)), "{err:?}");
     assert!(err.to_string().contains("Data MerchantID"), "{err}");
 }
 
