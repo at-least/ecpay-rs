@@ -596,6 +596,25 @@ async fn c2c_form_api_posts_the_c2c_field_set() {
     let server = spawn_http_server(|path, body| {
         assert!(path.ends_with("/Express/CancelC2COrder"), "{path}");
         let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        // The EXACT field set, like update_shipment_info's pin: the MAC
+        // recompute below covers whatever fields were sent, so only this
+        // key-list assertion catches a dropped or stray field.
+        let mut keys: Vec<_> = sent.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys.remove(keys.iter().position(|k| k == "CheckMacValue").unwrap()),
+            "CheckMacValue"
+        );
+        assert_eq!(
+            keys,
+            [
+                "AllPayLogisticsID",
+                "CVSPaymentNo",
+                "CVSValidationNo",
+                "MerchantID"
+            ],
+            "exact C2C cancel field set"
+        );
         assert_eq!(sent["CVSPaymentNo"], "C9681067");
         assert_eq!(md5(&sent), sent["CheckMacValue"]);
         let mut reply = HashMap::new();
