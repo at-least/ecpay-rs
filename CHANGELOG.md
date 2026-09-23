@@ -81,14 +81,18 @@ _非破壞性：_
 
 - **重塑後的 live-stage 驗證補全**(staging 缺口):建構期驗證重塑後,五個
   sandbox 套件 + `stage_smoke` 首次對**真實 stage** 全數執行通過
-  (12+4+5+8+2+6 全綠,2026-09 實測)。新增 `tests/sandbox_logistics.rs::
-  domestic_round_trip_via_whole_pair_payment_fallback`:只附掛 payment 金鑰組
-  (刻意不設物流組)對真實國內物流 MD5 端點完成建單→查詢往返——whole-pair
-  fallback 此前只有 hermetic 釘子(`client_construction`/`logistics_wire`),
-  現在加上真實伺服器接受其簽章的端對端證明;同時是 `Env::Stage` 物流
-  映射的唯一 live 釘(其餘套件用 `Env::Custom` 帶同款常數)。注意:此測試
-  與既有建單測試同 residue 類別(CI 每次 push 在 stage 建立一筆物流測單,
-  不取消)。
+  (12+4+5+8+2+6 全綠,2026-09 實測——此為加入下述新測試「前」的計數)。
+  加入後物流套件為 9:本 commit 的 CI(run 35894149351)以 12+4+5+9+2 全綠
+  跑完五個 sandbox 套件;`stage_smoke` 那 6 條不在 push CI 內(stage-smoke
+  job 僅 schedule/workflow_dispatch 觸發),其綠燈來自上述手動實測。新增
+  `tests/sandbox_logistics.rs::domestic_round_trip_via_whole_pair_payment_fallback`:
+  只附掛 payment 金鑰組(刻意不設物流組)對真實國內物流 MD5 端點完成
+  建單→查詢往返——whole-pair fallback 此前只有 hermetic 釘子
+  (`client_construction`/`logistics_wire`),現在加上真實伺服器接受其簽章的
+  端對端證明。注意:此測試與既有建單測試同 residue 類別,在 stage 建立一筆
+  不取消的物流測單;live 套件在 push 到 main、每個 pull_request、手動
+  workflow_dispatch 與每月排程都會跑(.github/workflows/ci.yml 的 test
+  job),residue 依該頻率累積。
 - **回呼入口的 panic-freedom 屬性測試**(審查後續項):`tests/properties.rs`
   新增兩條 proptest(各 512 案例),對攻擊者可達的公開回呼端點入口——
   `parse_form`、`decrypt_ecpg_callback`、`decrypt_logistics_callback`、

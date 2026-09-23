@@ -36,29 +36,37 @@ fn sdk() -> Ecpay {
     .with_logistics_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap())
 }
 
+/// The CVS/FAMI order every live create in this suite mints — only the
+/// MerchantTradeNo tag and the amount differ between them. Previously
+/// copy-pasted per test, so a wire-field fix needed four edits.
+///
+/// `server_reply_url` is stage-only: ECPay's example receiver page (this
+/// suite never processes the callback). In production point
+/// `server_reply_url` at YOUR https endpoint.
+fn cvs_order(tag: &str, goods_amount: i64) -> LogisticsCreateInput {
+    LogisticsCreateInput {
+        merchant_trade_no: unique_no(tag),
+        merchant_trade_date: taipei_now(),
+        logistics_type: "CVS".into(),
+        logistics_sub_type: "FAMI".into(),
+        goods_amount,
+        goods_name: "綠界 SDK 範例商品".into(),
+        sender_name: "陳大明".into(),
+        sender_cell_phone: "0911222333".into(),
+        receiver_name: "王小美".into(),
+        receiver_cell_phone: "0933222111".into(),
+        receiver_store_id: Some("006598".into()),
+        server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn domestic_create_then_query_roundtrip() {
     let client = sdk();
     let out = client
-        .logistics_create(&LogisticsCreateInput {
-            merchant_trade_no: unique_no("SBX"),
-            merchant_trade_date: taipei_now(),
-            logistics_type: "CVS".into(),
-            logistics_sub_type: "FAMI".into(),
-            goods_amount: 1000,
-            goods_name: "綠界 SDK 範例商品".into(),
-            sender_name: "陳大明".into(),
-            sender_cell_phone: "0911222333".into(),
-            receiver_name: "王小美".into(),
-            receiver_cell_phone: "0933222111".into(),
-            receiver_store_id: Some("006598".into()),
-            // Stage-only: ECPay's example receiver page (this suite never
-            // processes the callback). In production point server_reply_url
-            // at YOUR https endpoint.
-            server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
-            ..Default::default()
-        })
+        .logistics_create(&cvs_order("SBX", 1000))
         .await
         .expect("Express/Create round-trips the MD5 MAC and parses");
     println!("create = {out:?}");
@@ -100,22 +108,7 @@ async fn domestic_create_update_shipment_query_chain() {
     // three signed round-trips against stage on the same order.
     let client = sdk();
     let created = client
-        .logistics_create(&LogisticsCreateInput {
-            merchant_trade_no: unique_no("SBXU"),
-            merchant_trade_date: taipei_now(),
-            logistics_type: "CVS".into(),
-            logistics_sub_type: "FAMI".into(),
-            goods_amount: 500,
-            goods_name: "綠界 SDK 範例商品".into(),
-            sender_name: "陳大明".into(),
-            sender_cell_phone: "0911222333".into(),
-            receiver_name: "王小美".into(),
-            receiver_cell_phone: "0933222111".into(),
-            receiver_store_id: Some("006598".into()),
-            // Stage-only receiver — see the server_reply_url note above.
-            server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
-            ..Default::default()
-        })
+        .logistics_create(&cvs_order("SBXU", 500))
         .await
         .expect("create");
     assert_eq!(created["RtnCode"], "300");
@@ -213,22 +206,7 @@ async fn judged_rejection_of_unconfirmed_c2c(
 async fn cancel_and_update_store_on_unconfirmed_order_are_judged() {
     let client = sdk();
     let created = client
-        .logistics_create(&LogisticsCreateInput {
-            merchant_trade_no: unique_no("SBXC"),
-            merchant_trade_date: taipei_now(),
-            logistics_type: "CVS".into(),
-            logistics_sub_type: "FAMI".into(),
-            goods_amount: 100,
-            goods_name: "綠界 SDK 範例商品".into(),
-            sender_name: "陳大明".into(),
-            sender_cell_phone: "0911222333".into(),
-            receiver_name: "王小美".into(),
-            receiver_cell_phone: "0933222111".into(),
-            receiver_store_id: Some("006598".into()),
-            // Stage-only receiver — see the server_reply_url note above.
-            server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
-            ..Default::default()
-        })
+        .logistics_create(&cvs_order("SBXC", 100))
         .await
         .expect("create");
     assert_eq!(created["RtnCode"], "300");
@@ -471,37 +449,43 @@ async fn crossborder_create_test_data_answers_with_the_aes_envelope() {
 /// and `tests/logistics_wire.rs` prove the local routing; this proves the
 /// real server accepts what the fallback signs): a client with ONLY the
 /// payment pair attached — no `with_logistics_keys` — signs and queries a
-/// logistics order through the ENTIRE payment pair. The stage account's
-/// logistics credentials are attached as the payment pair, so the request
-/// is exactly what a merchant with payment==logistics keys produces.
-/// Also the one live pin of the `Env::Stage` logistics mapping (the other
-/// suites use `Env::Custom` with the same constant).
+/// logistics order through the payment pair. The stage account's logistics
+/// credentials are attached as the payment pair, so the request is exactly
+/// what a merchant with payment==logistics keys produces.
+///
+/// Scope, precisely: with a single pair in play the bytes signed here are
+/// identical to what the old key-from-one/IV-from-another mix would sign,
+/// so this test CANNOT discriminate whole-pair from per-field fallback —
+/// `tests/logistics_wire.rs` (Shape 3) is what pins that. All this adds
+/// over the hermetic pins is that the live server accepts the result.
+/// Like the rest of the suite it uses `Env::Custom` with only the logistics
+/// base wired, so the families this test never calls stay unset and refuse
+/// loudly (lines 25-28) instead of riding the attached payment pair out to
+/// a real stage endpoint. That base is byte-identical to what `Env::Stage`
+/// resolves to, and the Stage mapping itself is pinned exactly and offline
+/// by `tests/ecpay.rs` (`urls.logistics == LOGISTICS_API_URL_STAGE`).
 #[tokio::test]
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn domestic_round_trip_via_whole_pair_payment_fallback() {
-    let client = Ecpay::new(MERCHANT_ID, Env::Stage)
-        .unwrap()
-        // The logistics credentials riding as the PAYMENT pair — no
-        // dedicated logistics pair attached on purpose.
-        .with_payment_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap());
-    let out = client
-        .logistics_create(&LogisticsCreateInput {
-            merchant_trade_no: unique_no("FB"),
-            merchant_trade_date: taipei_now(),
-            logistics_type: "CVS".into(),
-            logistics_sub_type: "FAMI".into(),
-            goods_amount: 1000,
-            goods_name: "綠界 SDK 範例商品".into(),
-            sender_name: "陳大明".into(),
-            sender_cell_phone: "0911222333".into(),
-            receiver_name: "王小美".into(),
-            receiver_cell_phone: "0933222111".into(),
-            receiver_store_id: Some("006598".into()),
-            server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
+    let client = Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new("https://logistics-stage.ecpay.com.tw/").unwrap()),
             ..Default::default()
-        })
+        }),
+    )
+    .unwrap()
+    // The logistics credentials riding as the PAYMENT pair — no
+    // dedicated logistics pair attached on purpose.
+    .with_payment_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap());
+    let out = client
+        .logistics_create(&cvs_order("SBF", 1000))
         .await
         .expect("the whole payment pair signs a request the real MD5 endpoint accepts");
+    // Printed like every sibling: a live failure on the per-push CI run must
+    // carry the server's own RtnMsg, not just the assert's two values.
+    println!("fallback create = {out:?}");
+    assert_eq!(out["_status_prefix"], "1", "status segment must be 1");
     assert_eq!(
         out["RtnCode"], "300",
         "accepted like any dedicated-pair create"
@@ -511,11 +495,22 @@ async fn domestic_round_trip_via_whole_pair_payment_fallback() {
 
     let info = client
         .logistics_query_logistics_trade_info(&DomesticQueryInput {
-            all_pay_logistics_id: logistics_id,
+            all_pay_logistics_id: logistics_id.clone(),
             time_stamp: None,
         })
         .await
         .expect("the query's reply MAC verifies through the same fallback pair");
+    println!("fallback query = {info:?}");
+    // The same reply-integrity anchors the dedicated-pair round-trip pins:
+    // a query reply carries no status prefix, and it must carry THIS trade
+    // back (echoed AllPayLogisticsID, guides/06) — not merely decode to
+    // something that happens to hold LogisticsStatus.
+    assert!(!info.contains_key("_status_prefix"));
+    assert_eq!(
+        info.get("AllPayLogisticsID").map(String::as_str),
+        Some(logistics_id.as_str()),
+        "spec: the reply carries AllPayLogisticsID (guides/06) — got {info:?}"
+    );
     assert!(
         info.contains_key("LogisticsStatus"),
         "the trade is carried back: {info:?}"
