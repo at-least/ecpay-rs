@@ -108,7 +108,7 @@ async fn domestic_create_signs_md5_and_parses_the_pipe_response() {
     let server = spawn_http_server(|path, body| {
         assert!(path.ends_with("/Express/Create"), "{path}");
         let body = String::from_utf8_lossy(body).into_owned();
-        let sent = parse_form(&body);
+        let sent = ecpay::parse_form(&body);
         // MD5 signature over the sent fields (minus CheckMacValue itself).
         let mut sans_mac = sent.clone();
         let mac = sans_mac.remove("CheckMacValue").expect("signed");
@@ -147,7 +147,7 @@ async fn domestic_query_v2_parses_a_bare_signed_query_without_prefix() {
             path.ends_with("/Helper/QueryLogisticsTradeInfo/V2"),
             "{path}"
         );
-        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let sent = ecpay::parse_form(String::from_utf8_lossy(body).as_ref());
         assert_eq!(sent["AllPayLogisticsID"], "3657295");
         assert!(sent.contains_key("TimeStamp"), "TimeStamp rides along");
         let mut reply = HashMap::new();
@@ -573,7 +573,7 @@ async fn domestic_forms_carry_the_md5_mac() {
 async fn get_store_list_posts_md5_and_parses_json() {
     let server = spawn_http_server(|path, body| {
         assert!(path.ends_with("/Helper/GetStoreList"), "{path}");
-        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let sent = ecpay::parse_form(String::from_utf8_lossy(body).as_ref());
         assert_eq!(sent["CvsType"], "FAMI");
         assert_eq!(md5(&sent), sent["CheckMacValue"]);
         (
@@ -595,7 +595,7 @@ async fn get_store_list_posts_md5_and_parses_json() {
 async fn c2c_form_api_posts_the_c2c_field_set() {
     let server = spawn_http_server(|path, body| {
         assert!(path.ends_with("/Express/CancelC2COrder"), "{path}");
-        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let sent = ecpay::parse_form(String::from_utf8_lossy(body).as_ref());
         // The EXACT field set, like update_shipment_info's pin: the MAC
         // recompute below covers whatever fields were sent, so only this
         // key-list assertion catches a dropped or stray field.
@@ -645,7 +645,7 @@ async fn return_cvs_sends_the_service_type_field() {
             path.ends_with("/express/ReturnCVS"),
             "path must keep the official lowercase `express`: {path}"
         );
-        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let sent = ecpay::parse_form(String::from_utf8_lossy(body).as_ref());
         assert_eq!(sent["ServiceType"], "4");
         assert_eq!(sent["GoodsAmount"], "1000");
         assert_eq!(md5(&sent), sent["CheckMacValue"]);
@@ -740,7 +740,7 @@ async fn domestic_create_accepts_officially_optional_empty_fields() {
         // empties (`MerchantTradeNo=`), exactly like the official SDK sends
         // them — pin that, so a future "helpful" drop-empty refactor here
         // cannot silently change the wire shape.
-        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let sent = ecpay::parse_form(String::from_utf8_lossy(body).as_ref());
         for field in ["MerchantTradeNo", "GoodsName", "SenderCellPhone"] {
             assert_eq!(
                 sent.get(field).map(String::as_str),
@@ -952,41 +952,7 @@ fn verify_logistics_check_mac_value_is_md5_keyed() {
     assert!(json.get("MerchantID").is_some() && json.get("LogisticsSubType").is_some());
 }
 
-fn parse_form(body: &str) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for part in body.split('&') {
-        if let Some((k, v)) = part.split_once('=') {
-            out.insert(urldecode(k), urldecode(v));
-        }
-    }
-    out
-}
 
-fn urldecode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'+' => out.push(b' '),
-            b'%' if i + 2 < b.len() => {
-                let hex = (b[i + 1] as char)
-                    .to_digit(16)
-                    .and_then(|h| (b[i + 2] as char).to_digit(16).map(|l| h * 16 + l));
-                match hex {
-                    Some(v) => {
-                        out.push(v as u8);
-                        i += 2;
-                    }
-                    None => out.push(b'%'),
-                }
-            }
-            c => out.push(c),
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
 
 // --- Untested-endpoint sweep, part 1: domestic MD5-form family. Each test
 // pins the exact posted key set (a serde rename typo or a stray field breaks
@@ -1014,7 +980,7 @@ fn pipe_reply(fields: &[(&str, &str)]) -> (u16, String, Vec<u8>) {
 async fn update_shipment_info_posts_the_exact_field_set() {
     let server = spawn_http_server(|path, body| {
         assert!(path.ends_with("/Helper/UpdateShipmentInfo"), "{path}");
-        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let sent = ecpay::parse_form(String::from_utf8_lossy(body).as_ref());
         let mut keys: Vec<_> = sent.keys().cloned().collect();
         keys.sort();
         assert_eq!(
@@ -1049,7 +1015,7 @@ async fn update_shipment_info_posts_the_exact_field_set() {
 async fn update_store_info_posts_the_c2c_field_set() {
     let server = spawn_http_server(|path, body| {
         assert!(path.ends_with("/Express/UpdateStoreInfo"), "{path}");
-        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let sent = ecpay::parse_form(String::from_utf8_lossy(body).as_ref());
         let mut keys: Vec<_> = sent.keys().cloned().collect();
         keys.sort();
         let mac = keys.remove(keys.iter().position(|k| k == "CheckMacValue").unwrap());
@@ -1089,7 +1055,7 @@ async fn return_unimart_cvs_keeps_the_official_lowercase_path() {
             path.ends_with("/express/ReturnUniMartCVS"),
             "official lowercase `express`: {path}"
         );
-        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let sent = ecpay::parse_form(String::from_utf8_lossy(body).as_ref());
         let mut keys: Vec<_> = sent.keys().cloned().collect();
         keys.sort();
         keys.retain(|k| k != "CheckMacValue");
@@ -1124,7 +1090,7 @@ async fn return_unimart_cvs_keeps_the_official_lowercase_path() {
 async fn return_home_posts_the_home_return_field_set() {
     let server = spawn_http_server(|path, body| {
         assert!(path.ends_with("/Express/ReturnHome"), "{path}");
-        let sent = parse_form(String::from_utf8_lossy(body).as_ref());
+        let sent = ecpay::parse_form(String::from_utf8_lossy(body).as_ref());
         let mut keys: Vec<_> = sent.keys().cloned().collect();
         keys.sort();
         keys.retain(|k| k != "CheckMacValue");

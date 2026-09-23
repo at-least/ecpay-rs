@@ -48,48 +48,6 @@ struct SimulatorState {
     callback_log: Vec<(String, String, String)>,
 }
 
-/// One request's parsed form.
-fn parse_form(body: &str) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for part in body.split('&') {
-        if part.is_empty() {
-            continue;
-        }
-        let (k, v) = part.split_once('=').unwrap_or((part, ""));
-        out.insert(unquote(k), unquote(v));
-    }
-    out
-}
-
-fn unquote(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b'%' if i + 2 < b.len() => {
-                let hex = |c: u8| (c as char).to_digit(16);
-                if let (Some(hi), Some(lo)) = (hex(b[i + 1]), hex(b[i + 2])) {
-                    out.push((hi * 16 + lo) as u8);
-                    i += 3;
-                    continue;
-                }
-                out.push(b'%');
-                i += 1;
-            }
-            c => {
-                out.push(c);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 fn sign(params: &HashMap<String, String>) -> String {
     ecpay::check_mac_value(params, HASH_KEY, HASH_IV, ecpay::EncryptType::Sha256)
 }
@@ -173,7 +131,7 @@ fn spawn_simulator(state: Arc<Mutex<SimulatorState>>) -> String {
                     Err(_) => break,
                 }
             }
-            let params = parse_form(&String::from_utf8_lossy(&body));
+            let params = ecpay::parse_form(&String::from_utf8_lossy(&body));
 
             if path.ends_with("/Cashier/AioCheckOut/V5") {
                 let got = params.get("CheckMacValue").cloned().unwrap_or_default();
@@ -373,7 +331,7 @@ fn spawn_return_url(verified: Arc<Mutex<Vec<HashMap<String, String>>>>) -> Strin
                     Err(_) => break,
                 }
             }
-            let params = parse_form(&String::from_utf8_lossy(&body));
+            let params = ecpay::parse_form(&String::from_utf8_lossy(&body));
             let ok = client.verify_check_mac_value(&params)
                 && params.get("RtnCode").map(String::as_str) == Some("1")
                 && params.get("SimulatePaid").map(String::as_str) == Some("1");

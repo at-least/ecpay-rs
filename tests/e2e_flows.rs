@@ -90,44 +90,7 @@ async fn post_json(url: &str, body: String) -> (u16, String) {
     (status, resp.text().await.expect("body"))
 }
 
-fn parse_form(body: &str) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for part in body.split('&') {
-        if let Some((k, v)) = part.split_once('=') {
-            out.insert(unquote(k), unquote(v));
-        }
-    }
-    out
-}
 
-fn unquote(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b'%' if i + 2 < b.len() => {
-                let hex = |c: u8| (c as char).to_digit(16);
-                if let (Some(hi), Some(lo)) = (hex(b[i + 1]), hex(b[i + 2])) {
-                    out.push((hi * 16 + lo) as u8);
-                    i += 3;
-                } else {
-                    out.push(b'%');
-                    i += 1;
-                }
-            }
-            c => {
-                out.push(c);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
 
 /// Builds `k=v&...` sorted by key, URL-encoded — how ECPay signs and sends
 /// its query-string responses.
@@ -182,7 +145,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
         };
         let log = merchant_log.clone();
         spawn_http_server(move |_path, body| {
-            let fields = parse_form(&String::from_utf8_lossy(body));
+            let fields = ecpay::parse_form(&String::from_utf8_lossy(body));
             if !client.verify_logistics_check_mac_value(&fields) {
                 // Tampered/forged callback: reject so ECPay retries.
                 return (200, "text/plain".into(), b"0|ERR".to_vec());
@@ -204,7 +167,7 @@ async fn domestic_logistics_full_flow_with_idempotent_callback() {
     let ecpay_sim = {
         let sim = sim.clone();
         spawn_http_server(move |path, body| {
-            let fields = parse_form(&String::from_utf8_lossy(body));
+            let fields = ecpay::parse_form(&String::from_utf8_lossy(body));
             let sent_mac = fields.get("CheckMacValue").cloned().unwrap_or_default();
             let mut sans = fields.clone();
             sans.remove("CheckMacValue");
@@ -416,7 +379,7 @@ async fn allinone_v2_full_flow_with_encrypted_ack() {
         };
         spawn_http_server(move |path, body| {
             if path.ends_with("client-reply") {
-                let fields = parse_form(&String::from_utf8_lossy(body));
+                let fields = ecpay::parse_form(&String::from_utf8_lossy(body));
                 let decoded: serde_json::Value = client
                     .decrypt_temp_trade_established(&fields["ResultData"])
                     .expect("ResultData decodes");

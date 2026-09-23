@@ -50,51 +50,7 @@ fn test_payment_ecpay(base_url: &str) -> Ecpay {
     }
 }
 
-fn form_unescape(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        match b[i] {
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b'%' if i + 2 < b.len() => {
-                // Same graceful shape as the four sibling mocks
-                // (e2e_flows/full_flow/logistics_wire/python_conformance): an
-                // invalid hex digit emits the literal '%' and resyncs,
-                // instead of the u32::MAX sentinel overflowing in a debug
-                // build.
-                let hex = |c: u8| (c as char).to_digit(16);
-                if let (Some(hi), Some(lo)) = (hex(b[i + 1]), hex(b[i + 2])) {
-                    out.push((hi * 16 + lo) as u8);
-                    i += 3;
-                } else {
-                    out.push(b'%');
-                    i += 1;
-                }
-            }
-            c => {
-                out.push(c);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
 
-fn parse_form(body: &str) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for part in body.split('&') {
-        if part.is_empty() {
-            continue;
-        }
-        let (k, v) = part.split_once('=').unwrap_or((part, ""));
-        out.insert(form_unescape(k), form_unescape(v));
-    }
-    out
-}
 
 fn form_escape(s: &str) -> String {
     // Go url.QueryEscape: unreserved A-Za-z0-9-_.~ literal, space -> '+',
@@ -131,7 +87,7 @@ fn new_payment_mock(
 ) -> String {
     spawn_http_server(move |_path, body| {
         let body = String::from_utf8_lossy(body);
-        let mut params = parse_form(&body);
+        let mut params = ecpay::parse_form(&body);
         let got_mac = params.remove("CheckMacValue").unwrap_or_default();
         let want_mac = hash_mac(&params, TEST_PAYMENT_HASH_KEY, TEST_PAYMENT_HASH_IV);
         assert_eq!(got_mac, want_mac, "mock: CheckMacValue signing mismatch");

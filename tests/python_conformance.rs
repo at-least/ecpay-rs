@@ -11,6 +11,7 @@
 //!   `.lower()` corrupts ASCII letter case in customer data).
 //! * Fields set outside their ChoosePayment group, and conflicting Credit
 //!   plan groups, are validation errors (the SDK silently signs the mix).
+//!
 //! The remaining two (optional-field max-length validation; the non-`Y`
 //! InvoiceMark + invoice-fields conflict rejection, which also has an
 //! inline case below) are pinned in `tests/check_out.rs`.

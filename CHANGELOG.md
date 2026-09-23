@@ -38,6 +38,17 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
+- **測試端四份本地 `parse_form` 副本收編為 `ecpay::parse_form`**(程式碼審查
+  🟢):`tests/{e2e_flows,logistics_wire,conformance,full_flow}.rs` 各自帶一份
+  form 解碼器,其中兩份(`e2e_flows`、`logistics_wire`)已漂移——無 `=`
+  的 valueless key 被靜默丟棄,而 crate 的 `parse_qsl`/`parse_form` 語意
+  (Python `parse_qsl(keep_blank_values=True)`,空白值保留)把此行為文件化為
+  載重契約。四份連同各自的 `unquote`/`urldecode`/`form_unescape` 助手
+  (與 crate `unquote_plus` 演算法逐位元組相同)全數刪除,改呼叫公開的
+  `ecpay::parse_form`;四個套件在替換下全綠(行為保持),漂移同時歸零。
+  另:`c2c_form_api_posts_the_c2c_field_set` 補上排序鍵集斷言(與
+  `update_shipment_info` 同款)——過去只驗兩個欄位值與 MAC 重算,無法抓
+  掉欄/多欄的回歸。
 - **文件修正**(程式碼審查 🟡/🟢):README 英文版「Differences from the
   official Python SDK」補上第五點刻意差異(InvoiceMark 衝突大聲報錯,
   過去僅中文版「五點」列表有——只讀英文段的整合者會以為差異清單到此
