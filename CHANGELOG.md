@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-09-24
 
 _breaking changes（程式碼審查後的型別/一致性修正）：_
 
@@ -11,7 +11,8 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
   (`platform_id`/`b2b_rq_id` 的空字串預設維持呼叫期大聲檢查——空值在
   首次使用前是合法狀態)。新 API:
   - `Ecpay::new(merchant_id, env) -> Result<Ecpay>`:唯一建構路徑,空
-    MerchantID 拒絕。`Env::{Stage, Production, Custom(Urls)}`:前兩者
+    MerchantID 拒絕。`Env::{Stage, Production, Custom(Urls)}`
+    (`#[non_exhaustive]`:`match` 需留 wildcard 分支):前兩者
     一次設定全部八個家族的端點;`Custom` 只用你給的——某家族 URL 沒給,
     該家族的呼叫**大聲拒絕**,不再靜默 fallback 到正式環境(舊的
     「空欄位 = 正式環境」陷阱移除)。`Urls` 各欄位 `Option<BaseUrl>`,
@@ -21,8 +22,10 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
     16/24/32 位元組、IV 恰 16 位元組——長度寫錯當場報,不再等到 AES
     層),以 `with_payment_keys` / `with_invoice_keys` /
     `with_logistics_keys` 附掛;`with_b2b_rq_id` / `with_platform_id` /
-    `with_http` 對應舊欄位。某家族金鑰沒附掛,該家族的呼叫大聲拒絕
-    (`Error::Validation`,出網前)——手動空金鑰守衛收斂進存取器。
+    `with_http` 對應舊欄位;讀取端改用 `merchant_id()` 與 `urls()`(取代
+    直接讀 `client.merchant_id` / `client.*_api_url`)。某家族金鑰沒附掛,
+    該家族的呼叫大聲拒絕(`Error::Validation`,出網前)——手動空金鑰守衛
+    收斂進存取器。
   - 物流金鑰 fallback 改為**整組**(未設物流組時用整組金鑰組);舊的
     逐欄 fallback 可構造出「物流 key + 金流 IV」混搭,現在不可表示。
   - `Keys` drop 時自動清零(zeroize-on-drop);`zeroize_signing_keys()`
@@ -66,6 +69,12 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
   PHP 範例 `Issue.php` 全部不送,且 B2B 明確無載具/捐贈;舊欄位名
   `CustomerAddr`/`CustomerPhone` 是 B2C 名,設了值綠界不會讀。wire
   key-set 由 `issue_b2b_data_is_exactly_the_documented_field_set` 逐鍵釘住。
+- **`Ecpay::call_payment_api` 送出的欄位與簽名一致**:`MerchantID` 先強制為
+  client 的設定值、再簽、再照同一份 map 送出。0.4.0 一節的同名條目在
+  0.4.0 版本號時只做到簽名側(`generate_check_value` 已把 client 的
+  MerchantID 算進 MAC,wire 仍原樣送呼叫端的 map);「簽與送同一份」的
+  送出側落在本版——呼叫端 map 自帶不同或缺席的 `MerchantID` 時,送出的
+  bytes 與過去不同。
 - **四個出網前防護改回 `Error::Validation`**(程式碼審查 🟡):Data 層
   MerchantID 防呆(信封比對 `encrypt_checked` 與欄位級
   `require_data_merchant_id_with`,涵蓋 B2C 發票/ECPG/物流 v2/跨境/B2B)、
@@ -74,11 +83,21 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
   (「出網前的各家族請求防護」)不一致:以
   `matches!(err, Error::Validation(_))` 區分「本地拒絕、未出網」的呼叫端
   會把這些歸進「其他/傳輸」分支。現在全部對齊為 `Error::Validation`
-  (訊息原文不變);對 variant 做匹配的呼叫端需要跟著改。傳輸層的
+  (`require_data_merchant_id_with` 訊息原文不變;`encrypt_checked` 的訊息
+  同版已由「client's MerchantID」改為「envelope MerchantID」用語);對
+  variant 做匹配的呼叫端需要跟著改。傳輸層的
   `Error::Message`(body 上限、非簽章回應、回呼解密統一訊息)不變。
 
 _非破壞性：_
 
+- **`aio_check_out` 的群組/方案驗證改以過濾階段的「有值」定義計數**(程式碼
+  審查 🟡):`validate_groups` 與 `credit_plan_pairs` 過去以 `is_some()`
+  計數,空字串、負整數、未設的 wire code 也算「有設」——`redeem: Some("")`
+  配 ATM 被當群組違規拒絕(其實什麼都不會送),配 Credit 則佔掉每單一方案
+  的名額卻不簽任何東西。現在兩者與過濾階段共用 `opt_str_set` /
+  `opt_int_set` / `opt_code_set`,驗證只看會真的上 wire 的值:過去被
+  `Error::Validation` 拒絕的這類輸入現在接受(純放寬;0.4.0 接受的輸入
+  產生的 pairs 逐位元組不變),`tests/check_out.rs` 釘住。
 - **MSRV 只寫在 `Cargo.toml` 一處,讀法只寫在 Makefile 一處**(程式碼審查:
   重複釘住、重複讀取):`ci.yml` 的 `msrv` job 原本自帶一份
   `dtolnay/rust-toolchain@1.89`,與 `rust-version = "1.89"` 沒有任何綁定——
@@ -99,7 +118,10 @@ _非破壞性：_
   本體已在本機以 GitHub 預設的 `bash -e` 實跑:repo → `msrv=1.89.0`、無
   rust-version / 雙成員 workspace / 壞 manifest → make 非零、`GITHUB_OUTPUT`
   空、原因在 stderr(Makefile 各項檢查的訊息一律走 stderr,stdout 被
-  `$(make -s print-msrv)` 收走);GitHub 上的首次執行待推送後確認。
+  `$(make -s print-msrv)` 收走);GitHub 上的首次執行已確認(9fcb846,
+  run 36000685797:stable 先裝、`print-msrv` 得 `1.89.0`、釘 SHA 的 action
+  裝 rustc 1.89.0、`cargo "+$MSRV" check --all-targets` 通過,msrv/test/audit
+  三 job 全綠)。
   Makefile 同批:`.SHELLFLAGS` 自 GNU make 3.82 起才存在,3.81(macOS 內建
   `/usr/bin/make`)會當一般變數、配方全數失去 pipefail(容器內 3.81 實測
   `false | true` 狀態為 0;原版 3.82 雖已支援 `.SHELLFLAGS`,`.FEATURES` 卻要
@@ -187,8 +209,9 @@ _非破壞性：_
   經共用的 `truncate_for_display`(512 字元上限)渲染,引號保留 Go-parity
   的 `%q` 外觀、控制字元與兩個兄弟 variant 同款**單層**跳脫
   (終審回歸修正:先前的 `{:?}` 疊層會把 `\n` 再跳一次變 `\\n`)——
-  不含引號與控制字元的訊息形狀與 Go parity 完全一致,含引號的訊息中
-  `"` 不再跳脫(僅外觀差異,非偽造向量:控制字元仍全部跳脫);
+  不含引號、反斜線與控制字元的訊息形狀與 Go parity 完全一致,含引號或
+  反斜線的訊息中 `"` 與 `\` 不再跳脫(僅外觀差異,非偽造向量:控制字元
+  仍全部跳脫);
   `msg` 欄位仍保留完整原文供程式化取用
   (`tests/api_error.rs::api_error_display_bounds_the_server_message`)。
 - **`get_issue` 強制互斥查詢模式**(程式碼審查 🟢):`GetIssueInput` 文件的
@@ -258,9 +281,9 @@ _非破壞性：_
 - **base URL 少了結尾 `/` 不再簽出不存在路徑**(程式碼審查 🟢):所有
   端點以 `{base}{action}` 拼接,base 少 `/` 過去直接產生
   `.../CashierAioCheckOut/V5` 這類簽好名的錯誤路徑(遠端 404,本地看不到
-  配置錯誤)。新增 `join_url` 統一在 44 個拼接點自動補 `/`(空 base 照舊
-  由各 family 換成正式環境預設),`Ecpay` struct 文件新增「Base-URL
-  trailing slash」一節說明。
+  配置錯誤)。新增 `join_url` 統一在 44 個拼接點自動補 `/`(當時「空 base
+  換成正式環境預設」的 fallback 隨後由建構期重塑移除:未設定的家族一律
+  回 `Error::Validation`,見本節首條)。
 - **測試基礎設施與文件清理**(程式碼審查 🟢,行為不變):`urlencode`
   在 `e2e_flows`/`full_flow`/`logistics_wire` 的三份本地副本(已有漂流)
   合併回 `tests/common/mod.rs` 的 `sandbox::urlencode`,`full_flow` 併入
@@ -333,14 +356,14 @@ _非破壞性：_
   `@` 解析 userinfo)。現在凡是 authority 帶 `@` 一律拒絕(ECPay 端點
   從不帶 userinfo);測試釘住三種繞道形狀,以及 `%40`、反斜線等編碼
   花招的 fail-closed 行為。
-- **新增 `Ecpay::zeroize_signing_keys()`**:就地清零六組簽章金鑰緩衝區
-  (bytes 歸零、字串截斷),供嵌入端在程序結束前主動清除記憶體中的金鑰
-  材料。刻意做成**顯式**方法而非 `Drop`:對 `Ecpay` 實作 `Drop` 會禁止
-  從結構體搬出欄位(E0509),破壞全庫與 README 的
-  `Ecpay { .., ..Default::default() }` 慣用法。文件如實記載其「盡力而為」
-  邊界(僅清當前緩衝區;clone 各自保有一份;曾重新配置的字串可能有清不到
-  的殘留副本),以及清零後的 client 並未設防(logistics 金鑰會 fallback 到
-  空的 payment 組)。
+- **新增 `Ecpay::zeroize_signing_keys()`**:供嵌入端在程序結束前主動清除
+  記憶體中的金鑰材料。最終形狀(本版稍後的建構期重塑,見本節首條):清掉
+  三組 `Option<Keys>` 的存在本身,bytes 由 `Keys` 的 zeroize-on-drop 歸零,
+  清零後的 client 對所有簽章/驗證呼叫回 `Error::Validation`。初版曾就地
+  清零六組緩衝區、刻意不實作 `Drop`(E0509 會破壞當時的
+  `Ecpay { .., ..Default::default() }` 慣用法)、且清零後並未設防——這些
+  隨該慣用法與公開欄位一起消失;「盡力而為」邊界(clone 各自保有一份;曾
+  重新配置的字串可能有殘留副本)仍如實記載於方法文件。
 - **staging 測試覆蓋補全**:`tests/sandbox_payment.rs`(唯讀的 Big5 對帳
   下載往返,「空報表 = `Ok("")`」契約由 `stage-sandbox` job 每月重釘)、B2C 發票
   三支無狀態查詢(統編/政府字軌/自有字軌)、國內物流 C2C 取消與更新門市
@@ -445,9 +468,9 @@ _非破壞性：_
   `ReturnURL` 的付款表單）。現在欄位帶 deprecation 警告與指向正確位置
   的文件（`AioCheckOutParams::return_url`、`InvoiceExtend::relate_number`
   等），並以 `compile_fail` doctest 釘住：移除 `#[deprecated]` 而不讓欄位
-  真正生效會使該測試失敗。欄位本體保留（`Debug` 仍顯示，已有設定值不
-  受影響）；是否在未來版本改為「params 留空時 fallback 到 client 欄位」
-  需先實證 Go 參考移植的行為，目前不做。
+  真正生效會使該測試失敗。當時欄位本體保留（`Debug` 仍顯示）；本版稍後
+  的建構期重塑已將這三個欄位連同全部公開欄位一併移除（見本節首條），
+  回呼網址只在 params 上設定。
 - 內部整理（全庫審查 🟢）：`hex_val` 收斂為 `crypto.rs` 單一定義（
   `client.rs` 的 lenient `unquote_plus` 改用之）；`read_body_limited`
   文件補註「超過 1 MiB 的非 2xx 錯誤頁會以 body 上限的 `Error::Message`
@@ -460,7 +483,8 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
 - **`EncryptType` enum 取代 `check_mac_value` 的 `encrypt_type: i64`**：
   `ecpay::EncryptType::{Sha256, Md5}`（closed enum——wire 上只有 0/1，第三
   種摘要會是新協定、必為破壞性更新）。移轉：`1` → `EncryptType::Sha256`、
-  `0` → `EncryptType::Md5`。`EncryptType::try_from(i64)`（以及 crate 內部
+  `0` → `EncryptType::Md5`（反向：`EncryptType::as_i64()` 與
+  `impl From<EncryptType> for i64`）。`EncryptType::try_from(i64)`（以及 crate 內部
   讀取 wire `EncryptType` 欄位的解析）對 0/1 以外的值回**同一個**
   `Error::UnsupportedEncryptType(n)`——對
   [`Ecpay::generate_check_value`] 的呼叫端，`EncryptType=2` 的錯誤形狀與
@@ -476,7 +500,7 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
   密文，而信封不認證 `Data`——先前 padding 失敗與後續 UTF-8/JSON 失敗可
   區分，構成 CBC padding oracle（可用 CBC-R 在不知金鑰下偽造回呼密文）。
   內容相關的解密失敗現在收斂為同一則固定訊息
-  （`Error::Message` "callback payload failed to decrypt or parse"）；
+  （`Error::Message` "ecpay: callback payload failed to decrypt or parse"）；
   base64/長度/金鑰長度錯誤保持原樣（只取決於攻擊者已輸入的資訊）。
   伺服器回應路徑（發票/ECPG/物流 API 呼叫）維持原有詳細錯誤。商戶 handler
   應配合：所有回呼錯誤回同一 HTTP 回應、加 rate limit、不把 `Error`
@@ -493,15 +517,18 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
   不驗 optional 長度；本 crate 對基本 optional 欄位一直有驗，此舉補齊同一
   標準。）
 - **B2B 發票要求 `b2b_rq_id`**：留空時每個 B2B 呼叫在出網前回
-  `Error::Message`——wire 契約每個請求都帶 `RqHeader.RqID`（官方 PHP 範例
+  `Error::Validation`（初版為 `Error::Message`，同版稍後統一，見上方
+  「四個出網前防護改回」條）——wire 契約每個請求都帶 `RqHeader.RqID`（官方 PHP 範例
   一律送出），空值是否被伺服器接受未經實測，不再賭這一把。
 - **ECPG 查詢家族要求 Data 層 MerchantID,`merchant_id` 改為 `String`**:
   `EcpgTradeRefInput` / `EcpgPeriodActionInput` / `EcpgDoActionInput` 的
   `merchant_id` 由 `Option<String>` 改為 `String`(呼叫端把
   `merchant_id: Some(x)` 改成 `merchant_id: x`);`ecpg_query_trade` /
   `ecpg_query_payment_info` / `ecpg_query_credit_trade` 對空值或與信封不
-  一致的值改為出網前回 `Error::Message`,與 DoAction/CreditCardPeriodAction
-  走同一個 `require_data_merchant_id`。依據:2026-09 以原始信封對五支
+  一致的值改為出網前回 `Error::Validation`(初版為 `Error::Message`,同版
+  稍後統一,見上方「四個出網前防護改回」條),與
+  DoAction/CreditCardPeriodAction 走同一個 `require_data_merchant_id`。
+  依據:2026-09 以原始信封對五支
   ecpayment 端點逐一實測(`tests/stage_probes.rs` 的
   `ecpg_data_merchant_id_omitted_or_mismatched_is_named_by_stage` 釘住),
   省略一律回 `5000220 "The parameter [MerchantID] is required."`、不一致回
@@ -511,8 +538,9 @@ _breaking changes（程式碼審查後的安全/一致性修正）：_
   特店自己的 `MerchantID` 並列,沒有可省略的形狀。先前錯誤訊息與文件引用
   的 `10200051` 並非 stage 對此形狀的回應,已全數更正。
 - **物流 v2/跨境要求 Data 層 MerchantID**：輸入結構帶 `MerchantID` 欄位
-  者（依官方範例慣例），留空或與信封不一致時出網前回 `Error::Message`——
-  與 ECPG/B2B 模組同一防呆；先前空值會原樣送出、換來伺服器不帶訊息的
+  者（依官方範例慣例），留空或與信封不一致時出網前回 `Error::Validation`
+  （初版為 `Error::Message`，同版稍後統一，見上方「四個出網前防護改回」
+  條）——與 ECPG/B2B 模組同一防呆；先前空值會原樣送出、換來伺服器不帶訊息的
   拒絕。無 `MerchantID` 欄位的三個結構（`CreateByTempTradeInput`、
   `UpdateTempTradeInput`、`AllInOneRedirectInput`）不受影響。
 
@@ -629,7 +657,8 @@ _非破壞性：_
   `*_api_url` 欄位獨立空值回退**正式環境**，逐欄手設的 stage client 少設
   一個欄位就默默送出簽名過的正式流量——支付 API 動真錢。建構子的測試
   逐一釘住八個欄位，未來新增服務欄位未跟著設 stage 會使測試失敗而非
-  靜默回退。
+  靜默回退。（本版稍後的建構期重塑以 `Ecpay::new(m, Env::Stage)?` 取代並
+  移除此建構子，見本節首條；兩個 stage 常數保留，`Env::Stage` 用之。）
 - 測試基礎設施（全庫審查）：五個 live 套件重複的
   `unique_no`/`taipei_now`/`taipei_today`/`urlencode` helper 合併進
   `tests/common/mod.rs` 的 `sandbox` 模組（counter 版與 millis 版並存，
@@ -657,6 +686,9 @@ _非破壞性：_
   文件標明「一頁一表單」（自動提交腳本以固定 id `data_set` 定位）。
 
 ## 0.4.0 — 2026-09-16
+
+_（此版本只升了 `Cargo.toml` 的版本號:未打標籤、未發佈到 crates.io。其內容
+隨 0.5.0 首次發佈;crates.io 上 0.3.0 的下一版即 0.5.0。）_
 
 _breaking changes（全庫審查後的安全/一致性修正）：_
 

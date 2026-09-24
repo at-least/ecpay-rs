@@ -62,7 +62,7 @@ PHP SDK 範例與 staging 實測補齊 B2C/B2B 電子發票、ECPG 站內付 2.0
 
 ```toml
 [dependencies]
-ecpay = "0.4"
+ecpay = "0.5"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -247,7 +247,7 @@ let client = Ecpay::new("3002607", Env::Production).unwrap()
 | —(金流安全強化) | `Ecpay::zeroize_signing_keys`:顯式清零三組金鑰並讓 client 拒絕後續簽章(`Keys` 本身 drop 時自動清零;盡力而為的邊界見方法文件) |
 
 **平台商(`PlatformID`)模式的支援範圍**:AIO 金流
-(`AioCheckOutParams::platform_id`)與 B2C 電子發票(`Ecpay::platform_id`
+(`AioCheckOutParams::platform_id`)與 B2C 電子發票(`Ecpay::with_platform_id`
 進信封)完整支援;ECPG 站內付 2.0、全方位物流 v2/跨境物流、B2B 發票的
 共用 AES-JSON 信封路徑**不送信封層 `PlatformID`**——ECPG 的 Data 層雖有
 選填 `platform_id` 欄位,但官方平台商契約的信封半邊無法表達,且 Data 層
@@ -569,7 +569,7 @@ confirming this crate follows ECPay's backend):
    server-side error.
 5. An explicit non-`Y` `InvoiceMark` combined with invoice fields is a loud
    validation error as well (the official SDK signs the conflict and lets
-   ECPay reject it server-side). Before 0.4 this crate silently overwrote
+   ECPay reject it server-side). Before 0.5 this crate silently overwrote
    the mark to `Y` — issuing an electronic invoice (a Taiwanese accounting
    document that then needs an allowance/void flow) the caller never asked
    for. The Chinese section's 五點刻意差異 above is the canonical list.
@@ -583,9 +583,10 @@ form breaks on `"` and is an injection vector).
 `sandbox_*` suites plus `stage_smoke` (AIO smoke, scheduled monthly in CI)
 and `stage_probes` (record-creating, manual only) — are all `#[ignore]`d and
 hit ECPay's stage server with the public test accounts only when invoked
-with `-- --ignored`. CI runs the five sandbox suites on every push, which
-consumes one stage 字軌 number per push (sandbox_b2b) and leaves disposable
-sandbox records behind. The full staging walkthrough (what each suite does,
+with `-- --ignored`. CI runs the five sandbox suites only in the
+`stage-sandbox` job, on the monthly schedule and on a manual dispatch, never
+on push or pull request; each run consumes one stage 字軌 number
+(sandbox_b2b) and leaves disposable sandbox records behind. The full staging walkthrough (what each suite does,
 what residue it leaves, every pinned server truth) is in the Chinese section
 above.
 

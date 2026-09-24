@@ -1,6 +1,6 @@
 [package]
 name = "ecpay"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.89"
 description = "ECPay (綠界科技) payment SDK in Rust — AIO payments, B2C/B2B e-invoice, ECPG 站內付 2.0, and logistics; ported from the official SDKs and stage-verified"
