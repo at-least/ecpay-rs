@@ -45,11 +45,12 @@ gates: fmt lint nt
 ## regardless, so all the failures show at once; the red ones are listed at
 ## the end and make exits non-zero. (If the resolution itself fails — no
 ## network, or a requirement nothing satisfies — make stops there with
-## cargo's error.) Ctrl-C, or a signal to a step's make, stops the run; a
-## step whose cargo alone is killed counts as a red step.
+## cargo's error; a missing jq stops it before that, not as a red msrv after
+## every other step ran.) Ctrl-C, or a signal to a step's make, stops the
+## run; a step whose cargo alone is killed counts as a red step.
 CI_STEPS := fmt lint test doctest doc msrv audit
 ci:
-	@$(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile
+	@$(need_jq) $(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile
 	@failed=; \
 	for t in $(CI_STEPS); do \
 		case $$t in \
@@ -163,12 +164,17 @@ fresh_copy = \
 # msrv job pins its own copy). `cargo metadata --no-deps` resolves nothing and
 # writes no Cargo.lock, so the check below still resolves with the MSRV cargo.
 # jq reads the field: a text match on that JSON also hits any rust_version
-# key inside a [package.metadata] or [workspace.metadata] table.
+# key inside a [package.metadata] or [workspace.metadata] table. It prints
+# `null` for a package without one and a line per workspace member, so both
+# fail the single-version check below instead of picking a member's value.
+# `ci` runs need_jq first too, so a missing jq stops it before any step.
+need_jq = \
+	command -v jq >/dev/null 2>&1 || \
+		{ echo "jq not found: make msrv reads cargo metadata's JSON with it"; exit 1; };
 msrv:
-	@command -v jq >/dev/null 2>&1 || { echo "make msrv needs jq (it reads cargo metadata's JSON)"; exit 1; }; \
-	$(fresh_copy) cd "$$FRESH_TREE" && \
+	@$(need_jq) $(fresh_copy) cd "$$FRESH_TREE" && \
 	msrv=$$(cargo metadata --no-deps --offline --format-version 1 | \
-		jq -r '.packages[].rust_version // empty') || exit 1; \
+		jq -r '.packages[].rust_version') || exit 1; \
 	[[ $$msrv =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$$ ]] || \
 		{ echo "no single plain rust-version in Cargo.toml (cargo metadata: '$$msrv')"; exit 1; }; \
 	export CARGO_TARGET_DIR="$$FRESH_BUILD" && set -x && cargo +$$msrv check --all-targets
