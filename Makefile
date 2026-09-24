@@ -9,8 +9,10 @@
 # exactly what running them in CI costs, with nobody reading the log.
 # Trigger them on GitHub instead (see `make stage-run`).
 
-# Recipes use bash features (pipefail, read -d '', [[ =~ ]]).
+# Recipes use bash features (pipefail, read -d '', [[ =~ ]]). .SHELLFLAGS is
+# set explicitly because make would otherwise take it from the environment.
 SHELL := bash
+.SHELLFLAGS := -c
 
 # This file's own path, so the sub-makes of `ci` read it under `make -f` too.
 # (MAKEFILE_LIST ends with this file only before any include. A -f path with
@@ -153,15 +155,20 @@ fresh_copy = \
 		while IFS= read -r -d '' f; do \
 			if [ -f "$$f" ] || [ -L "$$f" ]; then printf '%s\0' "$$f"; fi; \
 		done | \
-		tar --null --no-recursion -T - -cf - | tar -xmf - -C "$$FRESH_TREE" || exit 1;
+		tar --null --no-recursion -T - -cf - | (cd "$$FRESH_TREE" && tar -xmf -) || exit 1;
 
 # The MSRV is the package's rust-version as cargo itself reads it (ci.yml's
 # msrv job pins its own copy). `cargo metadata --no-deps` resolves nothing and
 # writes no Cargo.lock, so the check below still resolves with the MSRV cargo.
+# rust_version is the last field of a package in that JSON, right after
+# default_run; anchoring on the pair skips any rust_version key inside a
+# [package.metadata] or [workspace.metadata] table.
 msrv:
 	@$(fresh_copy) cd "$$FRESH_TREE" && \
 	meta=$$(cargo metadata --no-deps --offline --format-version 1) || exit 1; \
-	msrv=$$(printf '%s' "$$meta" | grep -o '"rust_version":"[^"]*"' | cut -d'"' -f4 || true); \
+	msrv=$$(printf '%s' "$$meta" | \
+		grep -oE '"default_run":(null|"[^"]*"),"rust_version":"[^"]*"' | \
+		sed 's/.*"rust_version":"\([^"]*\)"/\1/' || true); \
 	[[ $$msrv =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$$ ]] || \
 		{ echo "no single plain rust-version in Cargo.toml (cargo metadata: '$$msrv')"; exit 1; }; \
 	export CARGO_TARGET_DIR="$$FRESH_BUILD" && set -x && cargo +$$msrv check --all-targets
