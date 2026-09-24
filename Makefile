@@ -9,10 +9,11 @@
 # exactly what running them in CI costs, with nobody reading the log.
 # Trigger them on GitHub instead (see `make stage-run`).
 
-# Recipes use bash features (pipefail, read -d '', [[ =~ ]]). .SHELLFLAGS is
-# set explicitly because make would otherwise take it from the environment.
+# Recipes use bash features (read -d '', [[ =~ ]]) and all run with pipefail
+# (no -e: the ci loop reads each step's exit status). .SHELLFLAGS is set
+# explicitly because make would otherwise take it from the environment.
 SHELL := bash
-.SHELLFLAGS := -c
+.SHELLFLAGS := -o pipefail -c
 
 # This file's own path, so the sub-makes of `ci` read it under `make -f` too.
 # (MAKEFILE_LIST ends with this file only before any include. A -f path with
@@ -38,14 +39,14 @@ gates: fmt lint nt
 
 ## ci — the full mirror of ci.yml's non-stage jobs, in ci.yml's order, on a
 ## fresh dependency resolution in a copy of the working tree (see "fresh
-## resolution" below; needs network). fmt → doc are the steps of ONE CI job,
-## where a red step skips the rest; msrv and audit are separate jobs. Here,
-## once the fresh resolution succeeds, every step runs regardless, so all the
-## failures show at once; the red ones are listed at the end and make exits
-## non-zero. (If the resolution itself fails — no network, or a requirement
-## nothing satisfies — make stops there with cargo's error.) Ctrl-C, or a
-## signal to a step's make, stops the run; a step whose cargo alone is killed
-## counts as a red step.
+## resolution" below; needs network, and jq for msrv). fmt → doc are the
+## steps of ONE CI job, where a red step skips the rest; msrv and audit are
+## separate jobs. Here, once the fresh resolution succeeds, every step runs
+## regardless, so all the failures show at once; the red ones are listed at
+## the end and make exits non-zero. (If the resolution itself fails — no
+## network, or a requirement nothing satisfies — make stops there with
+## cargo's error.) Ctrl-C, or a signal to a step's make, stops the run; a
+## step whose cargo alone is killed counts as a red step.
 CI_STEPS := fmt lint test doctest doc msrv audit
 ci:
 	@$(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile
@@ -127,6 +128,8 @@ doc:
 # files get the copy time as their mtime, so every run rebuilds this crate
 # (not its registry dependencies): with the original mtimes, a file saved
 # during a run can be older than that run's build and never be rebuilt.
+# (The copy is extracted after a cd, not with tar -C: GNU tar un-escapes
+# backslashes in the -C operand.)
 CACHE_HOME := $(shell case "$$XDG_CACHE_HOME" in (/*) printf %s "$$XDG_CACHE_HOME" ;; \
 	(*) printf %s/.cache "$${HOME:-$$(unset HOME; echo ~)}" ;; esac)
 SCRATCH := $(CACHE_HOME)/ecpay-rs/$(shell pwd -P | git hash-object --stdin)
@@ -137,7 +140,6 @@ FRESH_BUILD := $(SCRATCH)/ci/build
 # variable.
 export SCRATCH FRESH_TREE FRESH_BUILD
 fresh_copy = \
-	set -o pipefail; \
 	[ -f Cargo.toml ] || { echo "no Cargo.toml here: run make from the crate root"; exit 1; }; \
 	mkdir -p "$$SCRATCH" && d=$$(cd "$$SCRATCH" && pwd -P) || exit 1; \
 	while :; do \
@@ -160,15 +162,13 @@ fresh_copy = \
 # The MSRV is the package's rust-version as cargo itself reads it (ci.yml's
 # msrv job pins its own copy). `cargo metadata --no-deps` resolves nothing and
 # writes no Cargo.lock, so the check below still resolves with the MSRV cargo.
-# rust_version is the last field of a package in that JSON, right after
-# default_run; anchoring on the pair skips any rust_version key inside a
-# [package.metadata] or [workspace.metadata] table.
+# jq reads the field: a text match on that JSON also hits any rust_version
+# key inside a [package.metadata] or [workspace.metadata] table.
 msrv:
-	@$(fresh_copy) cd "$$FRESH_TREE" && \
-	meta=$$(cargo metadata --no-deps --offline --format-version 1) || exit 1; \
-	msrv=$$(printf '%s' "$$meta" | \
-		grep -oE '"default_run":(null|"[^"]*"),"rust_version":"[^"]*"' | \
-		sed 's/.*"rust_version":"\([^"]*\)"/\1/' || true); \
+	@command -v jq >/dev/null 2>&1 || { echo "make msrv needs jq (it reads cargo metadata's JSON)"; exit 1; }; \
+	$(fresh_copy) cd "$$FRESH_TREE" && \
+	msrv=$$(cargo metadata --no-deps --offline --format-version 1 | \
+		jq -r '.packages[].rust_version // empty') || exit 1; \
 	[[ $$msrv =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$$ ]] || \
 		{ echo "no single plain rust-version in Cargo.toml (cargo metadata: '$$msrv')"; exit 1; }; \
 	export CARGO_TARGET_DIR="$$FRESH_BUILD" && set -x && cargo +$$msrv check --all-targets
