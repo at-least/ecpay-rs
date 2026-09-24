@@ -36,6 +36,36 @@ fn sdk() -> Ecpay {
     .with_logistics_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap())
 }
 
+/// The same stage account with its logistics credentials attached as the
+/// PAYMENT pair and NO dedicated logistics pair: the whole-pair fallback a
+/// merchant whose payment and logistics keys are the same value produces.
+/// Signs byte-identically to [`sdk`] — same key/IV, only the setter differs
+/// — so the live round-trip below proves the real server accepts what the
+/// fallback signs without minting an order of its own to prove it.
+///
+/// Scope, precisely: with a single pair in play these bytes are identical to
+/// what the old key-from-one/IV-from-another mix would sign, so nothing live
+/// can discriminate whole-pair from per-field fallback. `logistics_wire.rs`
+/// (Shape 3) pins that per-field mixing is now unrepresentable, and
+/// `client_construction.rs` pins the routing; all the live call adds is that
+/// the real MD5 endpoint accepts the result.
+///
+/// `Env::Custom` with only the logistics base wired, like [`sdk`]: a payment
+/// pair IS attached here, so leaving the other families unset is what keeps
+/// an accidental AIO call refusing loudly instead of riding these keys out
+/// to a real stage endpoint.
+fn fallback_sdk() -> Ecpay {
+    Ecpay::new(
+        MERCHANT_ID,
+        Env::Custom(Urls {
+            logistics: Some(BaseUrl::new("https://logistics-stage.ecpay.com.tw/").unwrap()),
+            ..Default::default()
+        }),
+    )
+    .unwrap()
+    .with_payment_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap())
+}
+
 /// The CVS/FAMI order every live create in this suite mints — only the
 /// MerchantTradeNo tag and the amount differ between them. Previously
 /// copy-pasted per test, so a wire-field fix needed four edits.
@@ -64,7 +94,13 @@ fn cvs_order(tag: &str, goods_amount: i64) -> LogisticsCreateInput {
 #[tokio::test]
 #[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
 async fn domestic_create_then_query_roundtrip() {
-    let client = sdk();
+    // Runs through the WHOLE-PAIR FALLBACK client on purpose: it signs the
+    // same bytes as `sdk()`, so this one live order proves both the create
+    // → query round-trip and that the real server accepts a fallback
+    // signature — instead of a second order proving the latter alone. The
+    // dedicated-pair path stays live-pinned by the two other `sdk()` creates
+    // (`domestic_create_update_shipment_query_chain` also queries through it).
+    let client = fallback_sdk();
     let out = client
         .logistics_create(&cvs_order("SBX", 1000))
         .await
@@ -442,77 +478,4 @@ async fn crossborder_create_test_data_answers_with_the_aes_envelope() {
         }
         Err(e) => panic!("unexpected error: {e:?}"),
     }
-}
-
-/// The redesigned client's whole-pair fallback, proven against the REAL
-/// domestic MD5 endpoint (the hermetic pins in `tests/client_construction.rs`
-/// and `tests/logistics_wire.rs` prove the local routing; this proves the
-/// real server accepts what the fallback signs): a client with ONLY the
-/// payment pair attached — no `with_logistics_keys` — signs and queries a
-/// logistics order through the payment pair. The stage account's logistics
-/// credentials are attached as the payment pair, so the request is exactly
-/// what a merchant with payment==logistics keys produces.
-///
-/// Scope, precisely: with a single pair in play the bytes signed here are
-/// identical to what the old key-from-one/IV-from-another mix would sign,
-/// so this test CANNOT discriminate whole-pair from per-field fallback —
-/// `tests/logistics_wire.rs` (Shape 3) is what pins that. All this adds
-/// over the hermetic pins is that the live server accepts the result.
-/// Like the rest of the suite it uses `Env::Custom` with only the logistics
-/// base wired, so the families this test never calls stay unset and refuse
-/// loudly (lines 25-28) instead of riding the attached payment pair out to
-/// a real stage endpoint. That base is byte-identical to what `Env::Stage`
-/// resolves to, and the Stage mapping itself is pinned exactly and offline
-/// by `tests/ecpay.rs` (`urls.logistics == LOGISTICS_API_URL_STAGE`).
-#[tokio::test]
-#[ignore = "hits the live ECPay stage server (public test account); run with: cargo test --test sandbox_logistics -- --ignored --nocapture"]
-async fn domestic_round_trip_via_whole_pair_payment_fallback() {
-    let client = Ecpay::new(
-        MERCHANT_ID,
-        Env::Custom(Urls {
-            logistics: Some(BaseUrl::new("https://logistics-stage.ecpay.com.tw/").unwrap()),
-            ..Default::default()
-        }),
-    )
-    .unwrap()
-    // The logistics credentials riding as the PAYMENT pair — no
-    // dedicated logistics pair attached on purpose.
-    .with_payment_keys(Keys::new(LOGISTICS_KEY, LOGISTICS_IV).unwrap());
-    let out = client
-        .logistics_create(&cvs_order("SBF", 1000))
-        .await
-        .expect("the whole payment pair signs a request the real MD5 endpoint accepts");
-    // Printed like every sibling: a live failure on the per-push CI run must
-    // carry the server's own RtnMsg, not just the assert's two values.
-    println!("fallback create = {out:?}");
-    assert_eq!(out["_status_prefix"], "1", "status segment must be 1");
-    assert_eq!(
-        out["RtnCode"], "300",
-        "accepted like any dedicated-pair create"
-    );
-    let logistics_id = out["AllPayLogisticsID"].clone();
-    assert!(!logistics_id.is_empty(), "a logistics order id is minted");
-
-    let info = client
-        .logistics_query_logistics_trade_info(&DomesticQueryInput {
-            all_pay_logistics_id: logistics_id.clone(),
-            time_stamp: None,
-        })
-        .await
-        .expect("the query's reply MAC verifies through the same fallback pair");
-    println!("fallback query = {info:?}");
-    // The same reply-integrity anchors the dedicated-pair round-trip pins:
-    // a query reply carries no status prefix, and it must carry THIS trade
-    // back (echoed AllPayLogisticsID, guides/06) — not merely decode to
-    // something that happens to hold LogisticsStatus.
-    assert!(!info.contains_key("_status_prefix"));
-    assert_eq!(
-        info.get("AllPayLogisticsID").map(String::as_str),
-        Some(logistics_id.as_str()),
-        "spec: the reply carries AllPayLogisticsID (guides/06) — got {info:?}"
-    );
-    assert!(
-        info.contains_key("LogisticsStatus"),
-        "the trade is carried back: {info:?}"
-    );
 }

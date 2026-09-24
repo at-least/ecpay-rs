@@ -5,11 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  # Monthly AIO smoke (see the stage-smoke job): no logistics orders or
-  # 字軌 consumed (it does register pending checkout trades on the stage
-  # account — the same residue class as sandbox_ecpg). Note the `test` job
-  # also runs on schedule — its sandbox suites burn one B2B 字軌 number per
-  # run; this is the accepted cadence.
+  # The monthly cron drives the two scheduled stage jobs: stage-smoke (AIO
+  # smoke — no logistics orders or 字軌 consumed, though it does register
+  # pending checkout trades, the same residue class as sandbox_ecpg) and
+  # stage-sandbox (the five sandbox suites — three logistics orders plus one
+  # B2B 字軌 number per run). The `test` job is offline only and carries no
+  # live step; this is the accepted cadence.
   schedule:
     - cron: "0 18 4 * *" # monthly, 4th 18:00 UTC (= 台灣時間 5 日 02:00)
 
@@ -33,13 +34,6 @@ jobs:
       # compile_fail pins (deprecated Ecpay fields, EmptyCiphertext) and
       # every rustdoc example explicitly.
       - run: cargo test --doc
-      # Live E2E against ECPay's stage server (public test accounts): the
-      # five sandbox suites, via -- --ignored, at the default parallelism the
-      # first four always ran at (sandbox_ecpg's unique_no carries a
-      # per-process counter; its tests were verified in a parallel run).
-      # stage_smoke (AIO smoke) and stage_probes (record-creating probes)
-      # stay in their own jobs below.
-      - run: cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics --test sandbox_ecpg --test sandbox_payment -- --ignored
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
@@ -82,6 +76,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --test stage_smoke -- --ignored --nocapture
+  # Live E2E against ECPay's stage server (public test accounts): the five
+  # sandbox suites, via -- --ignored, at the default parallelism the first
+  # four always ran at (sandbox_ecpg's unique_no carries a per-process
+  # counter; its tests were verified in a parallel run).
+  #
+  # Gated like stage-smoke rather than running in `test`, because these
+  # suites mint PERMANENT stage records: three logistics orders per run that
+  # nothing can remove (ECPay has no B2C cancel endpoint at all, and
+  # Express/CancelC2COrder needs the CVSPaymentNo/CVSValidationNo an
+  # unconfirmed OTP order never obtains — see the judged-rejection test in
+  # tests/sandbox_logistics.rs), plus one B2B 字軌 number. Running that on
+  # every push AND every pull_request accrued residue on each branch update
+  # for coverage that only changes when stage does; monthly + on demand
+  # keeps the drift signal at a fraction of the cost.
+  #
+  # --nocapture so the raw server answers land in the run log: these suites
+  # are how this repo captures server truth, and cargo swallows stdout for
+  # passing tests otherwise.
+  stage-sandbox:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics --test sandbox_ecpg --test sandbox_payment -- --ignored --nocapture
   # The probes print raw server answers AND create REAL stage-side records
   # (logistics orders, B2B invoices consuming 字軌 numbers, never cancelled),
   # so they run ONLY on a manual workflow_dispatch (Actions tab -> CI ->

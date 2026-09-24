@@ -81,18 +81,37 @@ _非破壞性：_
 
 - **重塑後的 live-stage 驗證補全**(staging 缺口):建構期驗證重塑後,五個
   sandbox 套件 + `stage_smoke` 首次對**真實 stage** 全數執行通過
-  (12+4+5+8+2+6 全綠,2026-09 實測——此為加入下述新測試「前」的計數)。
-  加入後物流套件為 9:本 commit 的 CI(run 35894149351)以 12+4+5+9+2 全綠
-  跑完五個 sandbox 套件;`stage_smoke` 那 6 條不在 push CI 內(stage-smoke
-  job 僅 schedule/workflow_dispatch 觸發),其綠燈來自上述手動實測。新增
-  `tests/sandbox_logistics.rs::domestic_round_trip_via_whole_pair_payment_fallback`:
-  只附掛 payment 金鑰組(刻意不設物流組)對真實國內物流 MD5 端點完成
-  建單→查詢往返——whole-pair fallback 此前只有 hermetic 釘子
-  (`client_construction`/`logistics_wire`),現在加上真實伺服器接受其簽章的
-  端對端證明。注意:此測試與既有建單測試同 residue 類別,在 stage 建立一筆
-  不取消的物流測單;live 套件在 push 到 main、每個 pull_request、手動
-  workflow_dispatch 與每月排程都會跑(.github/workflows/ci.yml 的 test
-  job),residue 依該頻率累積。
+  (12+4+5+8+2+6 全綠,2026-09 實測,早於 7a57b7c)。whole-pair fallback 此前
+  只有 hermetic 釘子(`client_construction`/`logistics_wire`),7a57b7c 以一條
+  專用 live 測試補上「真實伺服器接受其簽章」的證明(CI run 35894149351 /
+  35901725674 全綠,物流套件當時 9 條);該證明現在改由既有的
+  `tests/sandbox_logistics.rs::domestic_create_then_query_roundtrip` 承擔——
+  它改走只附掛 payment 金鑰組(刻意不設物流組)的 `fallback_sdk()`,與 `sdk()`
+  簽出完全相同的 bytes(新增 `tests/client_construction.rs` 的離線釘子逐位元組
+  比對),所以同一筆測單同時證明「建單→查詢往返」與「fallback 簽章被真實端點
+  接受」,不需要專用的第四筆建單;專屬金鑰組路徑仍由另外兩條 `sdk()` 建單測試
+  釘住(`domestic_create_update_shipment_query_chain` 也透過它查詢)。注意:
+  物流套件回到 8 條,但 round-trip 改走 fallback client 的這個組態**尚未**對
+  stage 跑過,下一次 `stage-sandbox` 排程或手動執行才會驗證它。
+- **live 套件改為排程/手動觸發**(residue 止血):`.github/workflows/ci.yml`
+  將五個 sandbox 套件的 `-- --ignored` 步驟從 `test` job 移出為新的
+  `stage-sandbox` job,閘門與 `stage-smoke` 一致(`schedule ||
+  workflow_dispatch`)。原本每次 push 到 main 與每個 pull_request 都跑,而
+  每跑一次就在 stage 留下無法移除的物流測單:依 repo 內的官方規格快照
+  (`.claude/skills/ecpay` guides/06 的端點總表)與本 crate 實作的端點清單,
+  國內物流唯一的取消是 `Express/CancelC2COrder`,僅適用 C2C,且必填的
+  CVSPaymentNo/CVSValidationNo 要消費者完成門市確認才會產生——測試建立的是
+  B2C(`FAMI`)且停在 RtnCode=300 的訂單,兩個條件都不成立。
+  (`cancel_and_update_store_on_unconfirmed_order_are_judged` 釘住的是「伺服器
+  會判並拒絕這種請求」的形狀,不是拒絕的原因。)此外每次執行消耗一個 B2B
+  字軌號。改為每月排程 + 手動後漂移偵測保留,累積速度大幅下降;配合上述重組,
+  單次 live 執行的物流建單數也從 4 降為 3。同時加上 `--nocapture`(與
+  stage-smoke/stage-manual 一致),讓伺服器原始回應進到 run log:cargo 對
+  通過的測試會吞掉 stdout。
+  **取捨**:push/PR 不再有任何 live 覆蓋,live 端的回歸要等到每月排程或手動
+  dispatch 才會浮現,而不是在造成它的那個 PR 上。五個套件的**編譯與 lint**
+  仍在每次 push 跑(`cargo clippy --all-targets` / `cargo test --all-targets`),
+  所以漏掉的只有 runtime/server-truth 層級的回歸。
 - **回呼入口的 panic-freedom 屬性測試**(審查後續項):`tests/properties.rs`
   新增兩條 proptest(各 512 案例),對攻擊者可達的公開回呼端點入口——
   `parse_form`、`decrypt_ecpg_callback`、`decrypt_logistics_callback`、
@@ -291,7 +310,7 @@ _非破壞性：_
   的殘留副本),以及清零後的 client 並未設防(logistics 金鑰會 fallback 到
   空的 payment 組)。
 - **staging 測試覆蓋補全**:`tests/sandbox_payment.rs`(唯讀的 Big5 對帳
-  下載往返,CI 每次 push 都會重釘「空報表 = `Ok("")`」契約)、B2C 發票
+  下載往返,「空報表 = `Ok("")`」契約由 `stage-sandbox` job 每月重釘)、B2C 發票
   三支無狀態查詢(統編/政府字軌/自有字軌)、國內物流 C2C 取消與更新門市
   (未確認訂單的 judged-rejection 形狀)、物流 v2 取消/更新門市/逆物流的
   in-band 錯誤形狀;既有 sandbox 測試同步加強斷言(查詢回應須回

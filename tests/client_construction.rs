@@ -202,6 +202,90 @@ async fn logistics_falls_back_to_the_whole_payment_pair() {
     assert_eq!(out["RtnCode"], "300");
 }
 
+/// The whole-pair fallback and a dedicated logistics pair carrying the SAME
+/// key/IV must put IDENTICAL BYTES on the wire — only the setter differs.
+///
+/// This is what lets `tests/sandbox_logistics.rs` prove the fallback against
+/// the live server without a live order of its own: its round-trip runs
+/// through `fallback_sdk()`, and the dedicated path is covered by the other
+/// `sdk()` tests. If that equivalence ever breaks, the live suite would go
+/// on passing while silently covering only one of the two paths — so it is
+/// pinned HERE, offline, with a negative control that proves the comparison
+/// can fail.
+#[tokio::test]
+async fn fallback_and_dedicated_pairs_emit_identical_request_bytes() {
+    use std::sync::{Arc, Mutex};
+    let seen: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&seen);
+    let server = spawn_http_server(move |_path, body| {
+        sink.lock().unwrap().push(body.to_vec());
+        let mut reply = std::collections::HashMap::new();
+        reply.insert("AllPayLogisticsID".to_string(), "3657295".to_string());
+        reply.insert("RtnCode".to_string(), "300".to_string());
+        let mac = ecpay::check_mac_value(&reply, KEY, IV, ecpay::EncryptType::Md5);
+        (
+            200,
+            "text/plain".into(),
+            format!("1|AllPayLogisticsID=3657295&RtnCode=300&CheckMacValue={mac}").into_bytes(),
+        )
+    });
+    let urls = || Urls {
+        logistics: Some(BaseUrl::new(&server).unwrap()),
+        ..Default::default()
+    };
+    // Fixed input: every field constant, so any byte difference between the
+    // three requests can only come from key selection.
+    let order = || ecpay::logistics::LogisticsCreateInput {
+        merchant_trade_no: "PAIRIDENTITY0001".into(),
+        merchant_trade_date: "2026/09/23 12:00:00".into(),
+        logistics_type: "CVS".into(),
+        logistics_sub_type: "FAMI".into(),
+        goods_amount: 1000,
+        sender_name: "陳大明".into(),
+        sender_cell_phone: "0911222333".into(),
+        receiver_name: "王小美".into(),
+        receiver_cell_phone: "0933222111".into(),
+        server_reply_url: "https://www.ecpay.com.tw/example/server-reply".into(),
+        ..Default::default()
+    };
+
+    // 1: dedicated logistics pair. 2: payment pair only (the fallback).
+    // 3: negative control — a DIFFERENT pair, which must not match.
+    let dedicated = Ecpay::new(MERCHANT, Env::Custom(urls()))
+        .unwrap()
+        .with_logistics_keys(Keys::new(KEY, IV).unwrap());
+    let fallback = Ecpay::new(MERCHANT, Env::Custom(urls()))
+        .unwrap()
+        .with_payment_keys(Keys::new(KEY, IV).unwrap());
+    let other = Ecpay::new(MERCHANT, Env::Custom(urls()))
+        .unwrap()
+        .with_logistics_keys(Keys::new("5294y06JbISpM5x9", "v77hoKGq4kWxNNIS").unwrap());
+    dedicated
+        .logistics_create(&order())
+        .await
+        .expect("dedicated");
+    fallback.logistics_create(&order()).await.expect("fallback");
+    // The mock MACs its reply with KEY/IV, so the wrong pair fails the
+    // REPLY check — the request still reached the sink, which is all we
+    // need for the byte comparison below.
+    assert!(other.logistics_create(&order()).await.is_err());
+
+    let bodies = seen.lock().unwrap();
+    assert_eq!(bodies.len(), 3, "three requests reached the mock");
+    assert_eq!(
+        bodies[0],
+        bodies[1],
+        "whole-pair fallback must sign byte-identically to the dedicated pair\n\
+         dedicated = {}\nfallback  = {}",
+        String::from_utf8_lossy(&bodies[0]),
+        String::from_utf8_lossy(&bodies[1]),
+    );
+    assert_ne!(
+        bodies[0], bodies[2],
+        "negative control: a different pair must produce different bytes"
+    );
+}
+
 /// `Env::Stage` carries every family's stage URL — the successor of the
 /// old one-shot `Ecpay::stage` constructor, now via the uniform env.
 #[test]

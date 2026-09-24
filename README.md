@@ -439,8 +439,9 @@ submodule 只有 `.claude/skills/ecpay`(官方 ECPay-API-Skill,供 Claude Code
 需對外網路;每次執行會在 stage 建立真實沙盒資料——例如物流訂單,套件不會
 取消它們;`sandbox_ecpg` 不會驅動任何付款,但 `GetTokenbyTrade` 取號會在
 stage 留下未付款的交易與 Token(不清理);`sandbox_b2b` 每次消耗一個
-stage 字軌號——CI 的
-`cargo test --test sandbox … -- --ignored` 步驟即以此做端對端驗證):
+stage 字軌號。CI 以 `stage-sandbox` job 跑這些套件,與 `stage_smoke` 同樣
+只在**每月排程**與手動 **Run workflow** 觸發,push/PR 不會跑——每次執行
+都會留下無法移除的紀錄,而 ECPay 的國內物流沒有可用的取消途徑):
 
 ```bash
 cargo test --test sandbox --test sandbox_b2b --test sandbox_logistics --test sandbox_ecpg --test sandbox_payment -- --ignored
