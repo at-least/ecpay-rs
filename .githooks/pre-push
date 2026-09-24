@@ -25,8 +25,8 @@
 # rustfmt and rustup also read config (.cargo/config.toml, rustfmt.toml,
 # rust-toolchain.toml) from every parent directory: neither an ignored file
 # in the repo nor one another user drops into /tmp may reach the checks.
-# (Directories others can write to through group bits or ACLs are not
-# checked.)
+# (Only the world-writable bit is checked: a directory another user owns, or
+# can write to through group bits or an ACL, is not detected.)
 # The build dir is never the main
 # tree's: two trees of one package that share a target dir fill the same
 # artifact slots, and cargo then takes the other tree's output as fresh —
@@ -106,10 +106,10 @@ while :; do
 done
 export CARGO_TARGET_DIR=$root/build
 # A push run from a make recipe inherits that make's MAKEFLAGS, and a shell
-# may export MAKEFLAGS or GNUMAKEFLAGS (make reads both): their command-line
-# variables would beat the export above in `make gates`, and their -i or -n
-# would let a red gate pass.
-unset MAKEFLAGS MFLAGS MAKELEVEL GNUMAKEFLAGS
+# may export MAKEFLAGS, GNUMAKEFLAGS or MAKEFILES (make reads each): their
+# command-line variables or extra makefiles would beat the export above in
+# `make gates`, and their -i, -n or .IGNORE would let a red gate pass.
+unset MAKEFLAGS MFLAGS MAKELEVEL GNUMAKEFLAGS MAKEFILES
 
 wt=$(mktemp -d "$root/wt.XXXXXX")
 cleanup() { git worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"; }

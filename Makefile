@@ -20,14 +20,6 @@ SHELL := bash
 SELF := $(abspath $(lastword $(MAKEFILE_LIST)))
 export SELF
 
-# Read from the [package] table's rust-version in Cargo.toml (ci.yml's msrv
-# job pins its own copy), in either TOML string form, indented or not. Stops
-# at the closing quote, so a trailing comment is not part of the value.
-MSRV := $(shell sed -n '/^[[:space:]]*\[package\]/,/^[[:space:]]*\[/{ \
-	s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p; \
-	s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*'"'"'\([^'"'"']*\)'"'"'.*/\1/p; \
-	}' Cargo.toml 2>/dev/null)
-
 .DEFAULT_GOAL := gates
 .PHONY: ci gates fmt lint nt test doctest doc msrv audit hooks stage-run
 # The steps are meant to run one after another in the listed order; `make -j`
@@ -54,13 +46,13 @@ gates: fmt lint nt
 ## counts as a red step.
 CI_STEPS := fmt lint test doctest doc msrv audit
 ci:
-	@$(fresh_copy) cd "$(FRESH_TREE)" && set -x && cargo generate-lockfile
+	@$(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile
 	@failed=; \
 	for t in $(CI_STEPS); do \
 		case $$t in \
 		msrv | audit) $(MAKE) --no-print-directory -f "$$SELF" $$t ;; \
-		*) $(MAKE) --no-print-directory -f "$$SELF" -C "$(FRESH_TREE)" \
-			CARGO_TARGET_DIR="$(FRESH_BUILD)" $$t ;; \
+		*) $(MAKE) --no-print-directory -f "$$SELF" -C "$$FRESH_TREE" \
+			CARGO_TARGET_DIR="$${FRESH_BUILD//\$$/\$$\$$}" $$t ;; \
 		esac; rc=$$?; \
 		if [ $$rc -gt 128 ]; then exit $$rc; fi; \
 		if [ $$rc -ne 0 ]; then failed="$$failed $$t"; fi; \
@@ -120,8 +112,9 @@ doc:
 #   refuses to run otherwise), because cargo, rustfmt and clippy also read
 #   config (.cargo/config.toml, rustfmt.toml, clippy.toml) from every parent
 #   directory: neither an ignored one in the repo nor one another user drops
-#   into /tmp may reach the copy. (Directories others can write to through
-#   group bits or ACLs are not checked.)
+#   into /tmp may reach the copy. (Only the world-writable bit is checked: a
+#   directory another user owns, or can write to through group bits or an
+#   ACL, is not detected.)
 # - Per clone, because clones sharing one copy would refill it under each
 #   other mid-run. (Two runs from ONE clone at the same time still share it;
 #   don't.)
@@ -137,13 +130,17 @@ CACHE_HOME := $(shell case "$$XDG_CACHE_HOME" in (/*) printf %s "$$XDG_CACHE_HOM
 SCRATCH := $(CACHE_HOME)/ecpay-rs/$(shell pwd -P | git hash-object --stdin)
 FRESH_TREE := $(SCRATCH)/ci/tree
 FRESH_BUILD := $(SCRATCH)/ci/build
+# Recipes read these from the environment too, as with SELF. The ci loop
+# doubles any $ in FRESH_BUILD, since make would expand it in a command-line
+# variable.
+export SCRATCH FRESH_TREE FRESH_BUILD
 fresh_copy = \
 	set -o pipefail; \
 	[ -f Cargo.toml ] || { echo "no Cargo.toml here: run make from the crate root"; exit 1; }; \
-	mkdir -p "$(SCRATCH)" && d=$$(cd "$(SCRATCH)" && pwd -P) || exit 1; \
+	mkdir -p "$$SCRATCH" && d=$$(cd "$$SCRATCH" && pwd -P) || exit 1; \
 	while :; do \
 		if [ "$$d" -ef . ]; then \
-			echo "$(SCRATCH) is inside this clone: set XDG_CACHE_HOME outside it"; exit 1; \
+			echo "$$SCRATCH is inside this clone: set XDG_CACHE_HOME outside it"; exit 1; \
 		fi; \
 		ww=$$(find "$$d" -prune -perm -0002) || \
 			{ echo "could not check whether $$d is world-writable (find failed)"; exit 1; }; \
@@ -151,23 +148,28 @@ fresh_copy = \
 			{ echo "$$d is writable by anyone: set XDG_CACHE_HOME to a private dir"; exit 1; }; \
 		[ "$$d" = / ] && break; d=$$(dirname "$$d"); \
 	done; \
-	rm -rf "$(FRESH_TREE)" && mkdir -p "$(FRESH_TREE)" && \
+	rm -rf "$$FRESH_TREE" && mkdir -p "$$FRESH_TREE" && \
 	git ls-files -z --cached --others --exclude-standard --deduplicate | \
 		while IFS= read -r -d '' f; do \
 			if [ -f "$$f" ] || [ -L "$$f" ]; then printf '%s\0' "$$f"; fi; \
 		done | \
-		tar --null --no-recursion -T - -cf - | tar -xmf - -C "$(FRESH_TREE)" || exit 1;
+		tar --null --no-recursion -T - -cf - | tar -xmf - -C "$$FRESH_TREE" || exit 1;
 
+# The MSRV is the package's rust-version as cargo itself reads it (ci.yml's
+# msrv job pins its own copy). `cargo metadata --no-deps` resolves nothing and
+# writes no Cargo.lock, so the check below still resolves with the MSRV cargo.
 msrv:
-	@[[ '$(MSRV)' =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$$ ]] || \
-		{ echo "no plain rust-version in Cargo.toml (read: '$(MSRV)')"; exit 1; }
-	@$(fresh_copy) cd "$(FRESH_TREE)" && export CARGO_TARGET_DIR="$(FRESH_BUILD)" && \
-		set -x && cargo +$(MSRV) check --all-targets
+	@$(fresh_copy) cd "$$FRESH_TREE" && \
+	meta=$$(cargo metadata --no-deps --offline --format-version 1) || exit 1; \
+	msrv=$$(printf '%s' "$$meta" | grep -o '"rust_version":"[^"]*"' | cut -d'"' -f4 || true); \
+	[[ $$msrv =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$$ ]] || \
+		{ echo "no single plain rust-version in Cargo.toml (cargo metadata: '$$msrv')"; exit 1; }; \
+	export CARGO_TARGET_DIR="$$FRESH_BUILD" && set -x && cargo +$$msrv check --all-targets
 
 # A red audit is often a NEW upstream advisory against an OLD requirement,
 # not a regression you introduced. Kept out of `gates` for that reason.
 audit:
-	@$(fresh_copy) cd "$(FRESH_TREE)" && set -x && cargo generate-lockfile && cargo audit
+	@$(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile && cargo audit
 
 # --- setup ----------------------------------------------------------------
 ## hooks — install the tracked pre-push hook (opt-in, per clone).
