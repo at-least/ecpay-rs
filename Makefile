@@ -19,10 +19,11 @@ SHELL := bash
 # .SHELLFLAGS exists since GNU make 3.82. Older make (macOS ships 3.81 as
 # /usr/bin/make) takes it for an ordinary variable and runs every recipe as
 # `bash -c`, without pipefail, which would mask a failing `git ls-files` or
-# `cargo metadata` at the head of a pipe. The recipes that pipe (ci, msrv and
-# audit, through fresh_copy) therefore test for pipefail first and refuse
-# such a make (need_pipefail below); the rest, gates and so the pre-push hook
-# among them, pipe nothing and run on 3.81 as well.
+# `cargo metadata` at the head of a pipe. Every recipe that pipes (ci, msrv,
+# print-msrv and audit) therefore OPENS with need_pipefail (below) and refuses
+# a shell without the option, before any other check; a new recipe that pipes
+# must open the same way. The rest, gates and so the pre-push hook among them,
+# pipe nothing and run on 3.81 as well.
 
 # This file's own path, so the sub-makes of `ci` read it under `make -f` too.
 # (MAKEFILE_LIST ends with this file only before any include. A -f path with
@@ -33,7 +34,7 @@ SELF := $(abspath $(lastword $(MAKEFILE_LIST)))
 export SELF
 
 .DEFAULT_GOAL := gates
-.PHONY: ci gates fmt lint nt test doctest doc msrv audit hooks stage-run
+.PHONY: ci gates fmt lint nt test doctest doc msrv print-msrv audit hooks stage-run
 # The steps are meant to run one after another in the listed order; `make -j`
 # would otherwise start every cargo step at once.
 .NOTPARALLEL:
@@ -54,13 +55,14 @@ gates: fmt lint nt
 ## succeeds, every step runs regardless, so all the failures show at once;
 ## the red ones are listed at the end and make exits non-zero. (If the
 ## resolution itself fails — no network, or a requirement nothing satisfies —
-## make stops there with cargo's error; a missing jq or cargo-audit stops it
-## before that, not as a red msrv or audit after every other step ran.)
+## make stops there with cargo's error; a make without pipefail, a missing jq
+## or cargo-audit stops it before that, not as a red msrv or audit after
+## every other step ran.)
 ## Ctrl-C, or a signal to a step's make, stops the run; a step whose cargo
 ## alone is killed counts as a red step.
 CI_STEPS := fmt lint test doctest doc msrv audit
 ci:
-	@$(need_jq) $(need_audit) $(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile
+	@$(need_pipefail) $(need_jq) $(need_audit) $(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile
 	@failed=; \
 	for t in $(CI_STEPS); do \
 		case $$t in \
@@ -150,23 +152,27 @@ FRESH_BUILD := $(SCRATCH)/ci/build
 # doubles any $ in FRESH_BUILD, since make would expand it in a command-line
 # variable.
 export SCRATCH FRESH_TREE FRESH_BUILD
-# The recipes that pipe refuse a make that ignores .SHELLFLAGS (see the
-# header): [[ -o pipefail ]] is true only when the option is on in this shell.
+# Every recipe that pipes opens with this (see the header): [[ -o pipefail ]]
+# is true only when the option is on in this shell, whatever turned it off —
+# a make older than 3.82, or SHELL / .SHELLFLAGS overridden on the command
+# line or through MAKEFLAGS. The message names both. Refusals go to stderr,
+# as every check's message here does: ci.yml captures `make -s print-msrv`'s
+# stdout into a variable, where a reason would vanish.
 need_pipefail = \
 	[[ -o pipefail ]] || \
-		{ echo "pipefail is off: this make ($(MAKE_VERSION)) ignores .SHELLFLAGS; GNU make 3.82 or newer is needed (macOS: put Homebrew make's gnubin dir first on PATH)"; exit 1; };
+		{ echo "pipefail is off in this recipe's shell (make $(MAKE_VERSION)): either this make is older than 3.82 and takes .SHELLFLAGS for an ordinary variable (macOS ships 3.81 as /usr/bin/make: put Homebrew make's gnubin dir first on PATH), or SHELL / .SHELLFLAGS was overridden on the command line or in MAKEFLAGS" >&2; exit 1; };
+# Pipes (git ls-files | ... | tar): the caller opened with need_pipefail.
 fresh_copy = \
-	$(need_pipefail) \
-	[ -f Cargo.toml ] || { echo "no Cargo.toml here: run make from the crate root"; exit 1; }; \
+	[ -f Cargo.toml ] || { echo "no Cargo.toml here: run make from the crate root" >&2; exit 1; }; \
 	mkdir -p "$$SCRATCH" && d=$$(cd "$$SCRATCH" && pwd -P) || exit 1; \
 	while :; do \
 		if [ "$$d" -ef . ]; then \
-			echo "$$SCRATCH is inside this clone: set XDG_CACHE_HOME outside it"; exit 1; \
+			echo "$$SCRATCH is inside this clone: set XDG_CACHE_HOME outside it" >&2; exit 1; \
 		fi; \
 		ww=$$(find "$$d" -prune -perm -0002) || \
-			{ echo "could not check whether $$d is world-writable (find failed)"; exit 1; }; \
+			{ echo "could not check whether $$d is world-writable (find failed)" >&2; exit 1; }; \
 		[ -z "$$ww" ] || \
-			{ echo "$$d is writable by anyone: set XDG_CACHE_HOME to a private dir"; exit 1; }; \
+			{ echo "$$d is writable by anyone: set XDG_CACHE_HOME to a private dir" >&2; exit 1; }; \
 		[ "$$d" = / ] && break; d=$$(dirname "$$d"); \
 	done; \
 	rm -rf "$$FRESH_TREE" && mkdir -p "$$FRESH_TREE" && \
@@ -176,28 +182,45 @@ fresh_copy = \
 		done | \
 		tar --null --no-recursion -T - -cf - | (cd "$$FRESH_TREE" && tar -xmf -) || exit 1;
 
-# The MSRV is the package's rust-version as cargo itself reads it; ci.yml's
-# msrv job reads it with this same command, so the number lives only in
-# Cargo.toml (a toolchain pinned in ci.yml would pass silently once
-# Cargo.toml is lowered or the pin raised: cargo only refuses a rustc OLDER
-# than rust-version). `cargo metadata --no-deps` resolves nothing and
-# writes no Cargo.lock, so the check below still resolves with the MSRV cargo.
+# The MSRV is the package's rust-version as cargo itself reads it. read_msrv
+# below is the only reader: `msrv` expands it, and ci.yml's msrv job runs
+# `make -s print-msrv`, so the number lives only in Cargo.toml and the way it
+# is read lives only here (a toolchain pinned in ci.yml would pass silently
+# once Cargo.toml is lowered or the pin raised: cargo only refuses a rustc
+# OLDER than rust-version). `cargo metadata --no-deps` resolves nothing and
+# writes no Cargo.lock, so `msrv` still resolves with the MSRV cargo.
 # jq reads the field: a text match on that JSON also hits any rust_version
-# key inside a [package.metadata] or [workspace.metadata] table. It prints
-# `null` for a package without one and a line per workspace member, so both
-# fail the single-version check below instead of picking a member's value.
-# `ci` runs need_jq and need_audit first too, so a missing tool stops it
-# before any step.
+# key inside a [package.metadata] or [workspace.metadata] table. Two guards,
+# for different failures: pipefail (the recipe opened with need_pipefail)
+# makes a failed cargo fail the assignment, so the step stops at cargo's own
+# error; the regex refuses what a SUCCESSFUL cargo can still print — `null`
+# for a package without the field, a line per workspace member, the empty
+# string of a workspace with no package — instead of picking a member's
+# value. A two-component rust-version names its .0 release: "1.89" is 1.89.0
+# to cargo, and the check runs on exactly that floor, not on the newest
+# 1.89.x that the channel `1.89` would select. rustup keeps `1.89` and
+# `1.89.0` as separate toolchains, so `cargo +1.89.0` may need
+# `rustup toolchain install 1.89.0` first (rustup does that itself when its
+# auto-install is on).
 need_jq = \
 	command -v jq >/dev/null 2>&1 || \
-		{ echo "jq not found: make msrv reads cargo metadata's JSON with it"; exit 1; };
-msrv:
-	@$(need_jq) $(fresh_copy) cd "$$FRESH_TREE" && \
+		{ echo "jq not found: make msrv reads cargo metadata's JSON with it" >&2; exit 1; };
+read_msrv = \
 	msrv=$$(cargo metadata --no-deps --offline --format-version 1 | \
 		jq -r '.packages[].rust_version') || exit 1; \
 	[[ $$msrv =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$$ ]] || \
-		{ echo "no single plain rust-version in Cargo.toml (cargo metadata: '$$msrv')"; exit 1; }; \
+		{ echo "no single plain rust-version in Cargo.toml (cargo metadata: '$$msrv')" >&2; exit 1; }; \
+	case $$msrv in *.*.*) ;; *) msrv=$$msrv.0 ;; esac;
+msrv:
+	@$(need_pipefail) $(need_jq) $(fresh_copy) cd "$$FRESH_TREE" && \
+	$(read_msrv) \
 	export CARGO_TARGET_DIR="$$FRESH_BUILD" && set -x && cargo +$$msrv check --all-targets
+
+## print-msrv — print the MSRV toolchain (rust-version, .0 added to a
+## two-component value) and nothing else; ci.yml's msrv job reads it with
+## `make -s print-msrv`. Reads the manifest in place: no copy, no build.
+print-msrv:
+	@$(need_pipefail) $(need_jq) $(read_msrv) echo "$$msrv"
 
 # A red audit is often a NEW upstream advisory against an OLD requirement,
 # not a regression you introduced. Kept out of `gates` for that reason.
@@ -206,9 +229,9 @@ msrv:
 # itself, not `command -v cargo-audit`.
 need_audit = \
 	cargo audit --version >/dev/null 2>&1 || \
-		{ echo "cargo audit does not run: make audit needs cargo-audit (cargo install cargo-audit)"; exit 1; };
+		{ echo "cargo audit does not run: make audit needs cargo-audit (cargo install cargo-audit)" >&2; exit 1; };
 audit:
-	@$(need_audit) $(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile && cargo audit
+	@$(need_pipefail) $(need_audit) $(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile && cargo audit
 
 # --- setup ----------------------------------------------------------------
 ## hooks — install the tracked pre-push hook (opt-in, per clone).

@@ -79,25 +79,38 @@ _breaking changes（程式碼審查後的型別/一致性修正）：_
 
 _非破壞性：_
 
-- **MSRV 只寫在 `Cargo.toml` 一處**(程式碼審查:重複釘住):`ci.yml` 的
-  `msrv` job 原本自帶一份 `dtolnay/rust-toolchain@1.89`,與 `rust-version =
-  "1.89"` 沒有任何綁定——cargo 只擋「rust-version 高於已裝 rustc」這一個
-  方向,`Cargo.toml` 調低或 `ci.yml` 調高都會靜默通過。該 job 現在以
-  `make msrv` 同一條 `cargo metadata --no-deps | jq` 讀出 `rust-version`,
-  餵給 `dtolnay/rust-toolchain@master` 的 `toolchain` 輸入(版本分支寫死
-  號碼、不收此輸入;README 明言此用法要走 `@master`),再以
-  `cargo +<name> check --all-targets` 實測(該 action 的 `rustup default`
-  是 continue-on-error,裸 `cargo` 可能落到映像的 stable)。step 本體已在
-  本機以 GitHub 的 `bash -eo pipefail` 實跑:repo → `msrv=1.89`、無
-  rust-version → 拒絕、壞 manifest → cargo 自己的錯誤(rc 101);GitHub 上
-  的首次執行待推送後確認。Makefile 同批:`.SHELLFLAGS` 自 GNU make 3.82
-  起才存在,3.81(macOS 內建 `/usr/bin/make`)會當一般變數、配方全數失去
-  pipefail(容器內 3.81 實測 `false | true` 狀態為 0;原版 3.82 雖已支援
-  `.SHELLFLAGS`,`.FEATURES` 卻要到 4.0 才列出 `oneshell`,故不以版本判斷),
-  會用到管線的 recipe(`ci`/`msrv`/`audit`,經 `fresh_copy`)改為先以
-  `[[ -o pipefail ]]` 實測,不生效即明確拒絕;`gates` 與 pre-push hook 沒有
-  管線,3.81 照跑。`make ci`/`make audit` 開跑前先確認 cargo-audit 可用
-  (缺它過去要等前六步全跑完、第七步 audit 才紅在 `cargo audit`)。
+- **MSRV 只寫在 `Cargo.toml` 一處,讀法只寫在 Makefile 一處**(程式碼審查:
+  重複釘住、重複讀取):`ci.yml` 的 `msrv` job 原本自帶一份
+  `dtolnay/rust-toolchain@1.89`,與 `rust-version = "1.89"` 沒有任何綁定——
+  cargo 只擋「rust-version 高於已裝 rustc」這一個方向,`Cargo.toml` 調低或
+  `ci.yml` 調高都會靜默通過。該 job 現在先裝 stable(不再依賴 runner 映像
+  自帶的 cargo),以 `make -s print-msrv` 讀出 MSRV 工具鏈(讀取邏輯只在
+  Makefile 的 `read_msrv`,`make msrv` 同用:`cargo metadata --no-deps | jq`
+  + 正則,只接受單一純版本號;兩段式的 `"1.89"` 對 cargo 就是 1.89.0,補上
+  `.0`,如舊 `@1.89` 分支一樣在**正好**這個下限上實測,而非 channel `1.89`
+  的最新 patch——rustup 把 `1.89` 與 `1.89.0` 視為兩個工具鏈,本機
+  `make msrv` 會自動裝後者,rustup 1.29.1 實測),餵給釘在 master 歷史上
+  的完整 SHA `dtolnay/rust-toolchain@02cb101…`(2026-09-12;版本分支寫死
+  號碼、不收 `toolchain` 輸入,`@master` 則會移動,README 對此用法的建議
+  正是完整 SHA)的 `toolchain` 輸入,再以 `cargo "+$MSRV" check
+  --all-targets` 實測(該 action 的 `rustup default` 是 continue-on-error,
+  裸 `cargo` 可能落到 stable;值經 `env` 加引號進 shell,不在 run 行內寫
+  `${{ }}`,且是 Makefile 正則框住的輸出,不是 action 的解析輸出)。step
+  本體已在本機以 GitHub 預設的 `bash -e` 實跑:repo → `msrv=1.89.0`、無
+  rust-version / 雙成員 workspace / 壞 manifest → make 非零、`GITHUB_OUTPUT`
+  空、原因在 stderr(Makefile 各項檢查的訊息一律走 stderr,stdout 被
+  `$(make -s print-msrv)` 收走);GitHub 上的首次執行待推送後確認。
+  Makefile 同批:`.SHELLFLAGS` 自 GNU make 3.82 起才存在,3.81(macOS 內建
+  `/usr/bin/make`)會當一般變數、配方全數失去 pipefail(容器內 3.81 實測
+  `false | true` 狀態為 0;原版 3.82 雖已支援 `.SHELLFLAGS`,`.FEATURES` 卻要
+  到 4.0 才列出 `oneshell`,故不以版本判斷),每個用到管線的 recipe
+  (`ci`/`msrv`/`print-msrv`/`audit`)**開頭**即以 `[[ -o pipefail ]]` 實測、
+  不生效即拒絕(不再藏在 `fresh_copy` 內、排在 jq/cargo-audit 檢查之後;
+  訊息並列兩種成因:make 早於 3.82,或 `SHELL`/`.SHELLFLAGS` 被命令列或
+  MAKEFLAGS 覆寫——4.4.1 加 `.SHELLFLAGS=-c` 實測會進同一分支);`gates` 與
+  pre-push hook 沒有管線,3.81 照跑(容器實測 `make -n gates` rc 0、
+  `make print-msrv` 拒絕)。`make ci`/`make audit` 開跑前先確認 cargo-audit
+  可用(缺它過去要等前六步全跑完、第七步 audit 才紅在 `cargo audit`)。
 - **重塑後的 live-stage 驗證補全**(staging 缺口):建構期驗證重塑後,五個
   sandbox 套件 + `stage_smoke` 首次對**真實 stage** 全數執行通過
   (12+4+5+8+2+6 全綠,2026-09 實測,早於 7a57b7c)。whole-pair fallback 此前
