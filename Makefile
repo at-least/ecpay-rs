@@ -15,16 +15,18 @@ SHELL := bash
 # This file's own path, so the sub-makes of `ci` read it under `make -f` too.
 # (MAKEFILE_LIST ends with this file only before any include. A -f path with
 # a space in it is not supported: make splits the list on whitespace.)
+# Recipes read it from the environment, as "$$SELF" (a recipe that pasted
+# the path in would have the shell expand any $ in it).
 SELF := $(abspath $(lastword $(MAKEFILE_LIST)))
+export SELF
 
-# Read from Cargo.toml's rust-version (ci.yml's msrv job pins its own copy),
-# in either TOML string form, indented or not. Stops at the closing quote, so
-# a trailing comment is not part of the value; a rust-version key in another
-# table as well gives two values, which msrv refuses.
-MSRV := $(shell sed -n \
-	-e 's/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
-	-e "s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" \
-	Cargo.toml 2>/dev/null)
+# Read from the [package] table's rust-version in Cargo.toml (ci.yml's msrv
+# job pins its own copy), in either TOML string form, indented or not. Stops
+# at the closing quote, so a trailing comment is not part of the value.
+MSRV := $(shell sed -n '/^[[:space:]]*\[package\]/,/^[[:space:]]*\[/{ \
+	s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p; \
+	s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*'"'"'\([^'"'"']*\)'"'"'.*/\1/p; \
+	}' Cargo.toml 2>/dev/null)
 
 .DEFAULT_GOAL := gates
 .PHONY: ci gates fmt lint nt test doctest doc msrv audit hooks stage-run
@@ -34,8 +36,8 @@ MSRV := $(shell sed -n \
 
 ## gates — the fast pre-push loop: fmt, clippy, nextest, in place, on your
 ## Cargo.lock. The pre-push hook runs this target on a clean checkout of the
-## tip of each pushed ref. Not a full CI mirror: nextest runs each test in its own
-## process, while CI's `cargo test` runs a test binary's tests in one shared
+## tip of each pushed ref. Not a full CI mirror: nextest runs each test in its
+## own process, while CI's `cargo test` runs a test binary's tests in one shared
 ## process (see the shared HTTP client note in src/client.rs) — `make test` /
 ## `make ci` cover that.
 gates: fmt lint nt
@@ -56,8 +58,8 @@ ci:
 	@failed=; \
 	for t in $(CI_STEPS); do \
 		case $$t in \
-		msrv | audit) $(MAKE) --no-print-directory -f "$(SELF)" $$t ;; \
-		*) $(MAKE) --no-print-directory -f "$(SELF)" -C "$(FRESH_TREE)" \
+		msrv | audit) $(MAKE) --no-print-directory -f "$$SELF" $$t ;; \
+		*) $(MAKE) --no-print-directory -f "$$SELF" -C "$(FRESH_TREE)" \
 			CARGO_TARGET_DIR="$(FRESH_BUILD)" $$t ;; \
 		esac; rc=$$?; \
 		if [ $$rc -gt 128 ]; then exit $$rc; fi; \
@@ -111,14 +113,15 @@ doc:
 # root.
 #
 # The copy lives in a per-clone cache dir, $(SCRATCH):
-# <cache>/ecpay-rs/<checksum of the clone's path>, where <cache> is
+# <cache>/ecpay-rs/<hash of the clone's path>, where <cache> is
 # $XDG_CACHE_HOME when that is an absolute path (the XDG spec says to ignore
-# a relative one), else ~/.cache.
-# - Outside the repo and below no directory others can write to (fresh_copy
+# a relative one), else ~/.cache — the same rule as the pre-push hook.
+# - Outside the repo and below no world-writable directory (fresh_copy
 #   refuses to run otherwise), because cargo, rustfmt and clippy also read
 #   config (.cargo/config.toml, rustfmt.toml, clippy.toml) from every parent
 #   directory: neither an ignored one in the repo nor one another user drops
-#   into a shared dir may reach the copy.
+#   into /tmp may reach the copy. (Directories others can write to through
+#   group bits or ACLs are not checked.)
 # - Per clone, because clones sharing one copy would refill it under each
 #   other mid-run. (Two runs from ONE clone at the same time still share it;
 #   don't.)
@@ -129,19 +132,22 @@ doc:
 # files get the copy time as their mtime, so every run rebuilds this crate
 # (not its registry dependencies): with the original mtimes, a file saved
 # during a run can be older than that run's build and never be rebuilt.
-CACHE_HOME := $(if $(filter x/%,x$(XDG_CACHE_HOME)),$(XDG_CACHE_HOME),$(HOME)/.cache)
-SCRATCH := $(CACHE_HOME)/ecpay-rs/$(shell pwd -P | cksum | tr ' ' -)
+CACHE_HOME := $(shell case "$$XDG_CACHE_HOME" in (/*) printf %s "$$XDG_CACHE_HOME" ;; \
+	(*) printf %s/.cache "$${HOME:-$$(unset HOME; echo ~)}" ;; esac)
+SCRATCH := $(CACHE_HOME)/ecpay-rs/$(shell pwd -P | git hash-object --stdin)
 FRESH_TREE := $(SCRATCH)/ci/tree
 FRESH_BUILD := $(SCRATCH)/ci/build
 fresh_copy = \
 	set -o pipefail; \
 	[ -f Cargo.toml ] || { echo "no Cargo.toml here: run make from the crate root"; exit 1; }; \
 	mkdir -p "$(SCRATCH)" && d=$$(cd "$(SCRATCH)" && pwd -P) || exit 1; \
-	case "$$d/" in "$$(pwd -P)"/*) \
-		echo "$(SCRATCH) is inside this clone: set XDG_CACHE_HOME outside it"; exit 1 ;; \
-	esac; \
 	while :; do \
-		[ -z "$$(find "$$d" -prune -perm -0002)" ] || \
+		if [ "$$d" -ef . ]; then \
+			echo "$(SCRATCH) is inside this clone: set XDG_CACHE_HOME outside it"; exit 1; \
+		fi; \
+		ww=$$(find "$$d" -prune -perm -0002) || \
+			{ echo "could not check whether $$d is world-writable (find failed)"; exit 1; }; \
+		[ -z "$$ww" ] || \
 			{ echo "$$d is writable by anyone: set XDG_CACHE_HOME to a private dir"; exit 1; }; \
 		[ "$$d" = / ] && break; d=$$(dirname "$$d"); \
 	done; \

@@ -9,21 +9,24 @@
 # checked out into a temporary worktree and `make gates` runs there, as that
 # commit's own Makefile defines it. Uncommitted edits, untracked or ignored
 # files (a fixture you forgot to add), a sparse checkout, and submodule state
-# cannot make a push pass or fail — with one exception: when the commit
+# cannot change what the checks see — with one exception: when the commit
 # tracks no Cargo.lock, your local one is copied in, so the dependency
 # versions match your local loop (`make ci` is what resolves them fresh,
-# like CI). (A sparse checkout that leaves out .githooks/ leaves out this
-# hook too, and git then runs no pre-push hook at all.) The worktree leaves
-# the .claude/skills/ecpay submodule empty; nothing cargo builds reads it.
+# like CI). A sparse checkout that leaves out .githooks/ is another matter:
+# it leaves out this hook too, and git then runs no pre-push hook at all.
+# The worktree leaves the .claude/skills/ecpay submodule empty; nothing
+# cargo builds reads it.
 #
 # The worktree and its build dir live in a per-clone cache dir,
-# <cache>/ecpay-rs/<checksum of the clone's path>/pre-push, where <cache> is
+# <cache>/ecpay-rs/<hash of the clone's path>/pre-push, where <cache> is
 # $XDG_CACHE_HOME when that is an absolute path (the XDG spec says to ignore
 # a relative one), else ~/.cache. It must be outside the repo and below no
-# directory others can write to (the hook refuses otherwise), because cargo,
+# world-writable directory (the hook refuses otherwise), because cargo,
 # rustfmt and rustup also read config (.cargo/config.toml, rustfmt.toml,
 # rust-toolchain.toml) from every parent directory: neither an ignored file
 # in the repo nor one another user drops into /tmp may reach the checks.
+# (Directories others can write to through group bits or ACLs are not
+# checked.)
 # The build dir is never the main
 # tree's: two trees of one package that share a target dir fill the same
 # artifact slots, and cargo then takes the other tree's output as fresh —
@@ -89,21 +92,24 @@ case ${XDG_CACHE_HOME-} in
 /*) cache=$XDG_CACHE_HOME ;;
 *) cache=${HOME:-$(unset HOME; echo ~)}/.cache ;; # no HOME: ~ is from passwd
 esac
-root=$cache/ecpay-rs/$(pwd -P | cksum | tr ' ' -)/pre-push
+root=$cache/ecpay-rs/$(pwd -P | git hash-object --stdin)/pre-push
 mkdir -p "$root"
 d=$(cd "$root" && pwd -P)
-case "$d/" in "$(pwd -P)"/*) fail "$root is inside this clone; set XDG_CACHE_HOME outside it" ;; esac
 while :; do
-	[ -z "$(find "$d" -prune -perm -0002)" ] ||
+	[ ! "$d" -ef . ] || fail "$root is inside this clone; set XDG_CACHE_HOME outside it"
+	ww=$(find "$d" -prune -perm -0002) ||
+		fail "could not check whether $d is world-writable (find failed)"
+	[ -z "$ww" ] ||
 		fail "$d (holding $root) is writable by anyone; set XDG_CACHE_HOME to a private directory"
 	[ "$d" = / ] && break
 	d=$(dirname "$d")
 done
 export CARGO_TARGET_DIR=$root/build
-# A push run from a make recipe inherits that make's MAKEFLAGS, whose
-# command-line variables would beat the export above in `make gates` (and
-# whose -i would let a red gate pass).
-unset MAKEFLAGS MFLAGS MAKELEVEL
+# A push run from a make recipe inherits that make's MAKEFLAGS, and a shell
+# may export MAKEFLAGS or GNUMAKEFLAGS (make reads both): their command-line
+# variables would beat the export above in `make gates`, and their -i or -n
+# would let a red gate pass.
+unset MAKEFLAGS MFLAGS MAKELEVEL GNUMAKEFLAGS
 
 wt=$(mktemp -d "$root/wt.XXXXXX")
 cleanup() { git worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"; }
