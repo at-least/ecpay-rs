@@ -37,7 +37,12 @@ jobs:
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
-  # rust-version = "1.89" is asserted metadata; this job makes it true.
+  # Cargo.toml's rust-version is asserted metadata; this job makes it true,
+  # with the toolchain read from that field (the same cargo metadata | jq
+  # command as `make msrv`), so the number exists once. Cargo only catches
+  # one direction of drift (a rust-version above the installed rustc fails
+  # `cargo check`); a job pinned to its own copy of the number would pass
+  # silently when Cargo.toml is lowered or the pin is raised.
   # Dependency floors that need a newer rustc fail HERE (no lockfile — the
   # job resolves fresh), which is real MSRV signal, not a flake: fix it by
   # pinning the offending dependency floor in Cargo.toml.
@@ -45,9 +50,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.89
+      # Runs on the runner image's own cargo and jq, before any toolchain is
+      # installed (should an image ever drop either, the step fails with
+      # "command not found": put dtolnay/rust-toolchain@stable before it).
+      # `--no-deps` resolves nothing and writes no Cargo.lock, so the check
+      # below still resolves fresh with the MSRV cargo. The regex refuses
+      # `null` (no rust-version), a per-member workspace list, and the empty
+      # string a failed cargo leaves; `shell: bash` adds pipefail, as the
+      # Makefile has, so a failed cargo stops the step at its own error.
+      - id: msrv
+        shell: bash
+        run: |
+          msrv=$(cargo metadata --no-deps --offline --format-version 1 |
+            jq -r '.packages[].rust_version')
+          [[ $msrv =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] ||
+            { echo "no single plain rust-version in Cargo.toml (cargo metadata: '$msrv')"; exit 1; }
+          echo "msrv=$msrv" >> "$GITHUB_OUTPUT"
+      # @master, not @<version>: the version branches hardcode their number
+      # and take no `toolchain` input (README: "When passing an explicit
+      # toolchain as an input instead of @rev, you'll want to use
+      # dtolnay/rust-toolchain@master").
+      - id: toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.msrv }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --all-targets
+      # `cargo +<name>`, as `make msrv` does: the action's `rustup default`
+      # step is continue-on-error, so a bare `cargo` could fall through to
+      # the image's stable rustc. The `${{ }}` in a run line is not an
+      # expression-injection surface only because the value traces back to
+      # one the regex above bounded to digits and dots; loosening that
+      # regex would make it one.
+      - run: cargo +${{ steps.toolchain.outputs.name }} check --all-targets
   # Supply-chain check: RustSec advisories against the dependency graph.
   # Cargo.lock is not tracked (library crate), so resolve it first — the
   # audit then covers exactly the versions CI is about to build with.

@@ -11,9 +11,18 @@
 
 # Recipes use bash features (read -d '', [[ =~ ]]) and all run with pipefail
 # (no -e: the ci loop reads each step's exit status). .SHELLFLAGS is set
-# explicitly because make would otherwise take it from the environment.
+# explicitly because make would otherwise take it from the environment. It
+# governs $(shell ...) too, which changes nothing: make does not act on a
+# $(shell) exit status.
 SHELL := bash
 .SHELLFLAGS := -o pipefail -c
+# .SHELLFLAGS exists since GNU make 3.82. Older make (macOS ships 3.81 as
+# /usr/bin/make) takes it for an ordinary variable and runs every recipe as
+# `bash -c`, without pipefail, which would mask a failing `git ls-files` or
+# `cargo metadata` at the head of a pipe. The recipes that pipe (ci, msrv and
+# audit, through fresh_copy) therefore test for pipefail first and refuse
+# such a make (need_pipefail below); the rest, gates and so the pre-push hook
+# among them, pipe nothing and run on 3.81 as well.
 
 # This file's own path, so the sub-makes of `ci` read it under `make -f` too.
 # (MAKEFILE_LIST ends with this file only before any include. A -f path with
@@ -39,18 +48,19 @@ gates: fmt lint nt
 
 ## ci — the full mirror of ci.yml's non-stage jobs, in ci.yml's order, on a
 ## fresh dependency resolution in a copy of the working tree (see "fresh
-## resolution" below; needs network, and jq for msrv). fmt → doc are the
-## steps of ONE CI job, where a red step skips the rest; msrv and audit are
-## separate jobs. Here, once the fresh resolution succeeds, every step runs
-## regardless, so all the failures show at once; the red ones are listed at
-## the end and make exits non-zero. (If the resolution itself fails — no
-## network, or a requirement nothing satisfies — make stops there with
-## cargo's error; a missing jq stops it before that, not as a red msrv after
-## every other step ran.) Ctrl-C, or a signal to a step's make, stops the
-## run; a step whose cargo alone is killed counts as a red step.
+## resolution" below; needs network, jq for msrv and cargo-audit for audit).
+## fmt → doc are the steps of ONE CI job, where a red step skips the rest;
+## msrv and audit are separate jobs. Here, once the fresh resolution
+## succeeds, every step runs regardless, so all the failures show at once;
+## the red ones are listed at the end and make exits non-zero. (If the
+## resolution itself fails — no network, or a requirement nothing satisfies —
+## make stops there with cargo's error; a missing jq or cargo-audit stops it
+## before that, not as a red msrv or audit after every other step ran.)
+## Ctrl-C, or a signal to a step's make, stops the run; a step whose cargo
+## alone is killed counts as a red step.
 CI_STEPS := fmt lint test doctest doc msrv audit
 ci:
-	@$(need_jq) $(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile
+	@$(need_jq) $(need_audit) $(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile
 	@failed=; \
 	for t in $(CI_STEPS); do \
 		case $$t in \
@@ -140,7 +150,13 @@ FRESH_BUILD := $(SCRATCH)/ci/build
 # doubles any $ in FRESH_BUILD, since make would expand it in a command-line
 # variable.
 export SCRATCH FRESH_TREE FRESH_BUILD
+# The recipes that pipe refuse a make that ignores .SHELLFLAGS (see the
+# header): [[ -o pipefail ]] is true only when the option is on in this shell.
+need_pipefail = \
+	[[ -o pipefail ]] || \
+		{ echo "pipefail is off: this make ($(MAKE_VERSION)) ignores .SHELLFLAGS; GNU make 3.82 or newer is needed (macOS: put Homebrew make's gnubin dir first on PATH)"; exit 1; };
 fresh_copy = \
+	$(need_pipefail) \
 	[ -f Cargo.toml ] || { echo "no Cargo.toml here: run make from the crate root"; exit 1; }; \
 	mkdir -p "$$SCRATCH" && d=$$(cd "$$SCRATCH" && pwd -P) || exit 1; \
 	while :; do \
@@ -160,14 +176,18 @@ fresh_copy = \
 		done | \
 		tar --null --no-recursion -T - -cf - | (cd "$$FRESH_TREE" && tar -xmf -) || exit 1;
 
-# The MSRV is the package's rust-version as cargo itself reads it (ci.yml's
-# msrv job pins its own copy). `cargo metadata --no-deps` resolves nothing and
+# The MSRV is the package's rust-version as cargo itself reads it; ci.yml's
+# msrv job reads it with this same command, so the number lives only in
+# Cargo.toml (a toolchain pinned in ci.yml would pass silently once
+# Cargo.toml is lowered or the pin raised: cargo only refuses a rustc OLDER
+# than rust-version). `cargo metadata --no-deps` resolves nothing and
 # writes no Cargo.lock, so the check below still resolves with the MSRV cargo.
 # jq reads the field: a text match on that JSON also hits any rust_version
 # key inside a [package.metadata] or [workspace.metadata] table. It prints
 # `null` for a package without one and a line per workspace member, so both
 # fail the single-version check below instead of picking a member's value.
-# `ci` runs need_jq first too, so a missing jq stops it before any step.
+# `ci` runs need_jq and need_audit first too, so a missing tool stops it
+# before any step.
 need_jq = \
 	command -v jq >/dev/null 2>&1 || \
 		{ echo "jq not found: make msrv reads cargo metadata's JSON with it"; exit 1; };
@@ -181,8 +201,14 @@ msrv:
 
 # A red audit is often a NEW upstream advisory against an OLD requirement,
 # not a regression you introduced. Kept out of `gates` for that reason.
+# `cargo audit` is an external subcommand that cargo also finds in
+# $CARGO_HOME/bin when that is not on PATH, so the probe is the subcommand
+# itself, not `command -v cargo-audit`.
+need_audit = \
+	cargo audit --version >/dev/null 2>&1 || \
+		{ echo "cargo audit does not run: make audit needs cargo-audit (cargo install cargo-audit)"; exit 1; };
 audit:
-	@$(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile && cargo audit
+	@$(need_audit) $(fresh_copy) cd "$$FRESH_TREE" && set -x && cargo generate-lockfile && cargo audit
 
 # --- setup ----------------------------------------------------------------
 ## hooks — install the tracked pre-push hook (opt-in, per clone).
