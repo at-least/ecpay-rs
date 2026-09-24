@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Pre-push gate: the three checks from ~/.claude/CLAUDE.md, in that order.
+# Install with `make hooks` (sets core.hooksPath); bypass once with
+# `git push --no-verify`.
+#
+# Deliberately NOT run here: `cargo test --doc`, `msrv`, `audit` — slower,
+# network-dependent, or red for reasons that are not your change. Run the
+# full offline mirror with `make ci` when you want those.
+#
+# Never runs the live-stage suites: they are #[ignore]d and leave permanent
+# records on ECPay's shared public test account.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+fail() {
+	echo ""
+	echo "pre-push BLOCKED: $1"
+	echo "  fix it, or bypass this once with: git push --no-verify"
+	exit 1
+}
+
+echo "==> cargo fmt --check"
+cargo fmt --check || fail "formatting"
+
+echo "==> cargo clippy --all-targets -- -D warnings"
+cargo clippy --all-targets -- -D warnings || fail "clippy"
+
+echo "==> cargo nextest run --no-fail-fast"
+if command -v cargo-nextest >/dev/null 2>&1; then
+	cargo nextest run --no-fail-fast || fail "tests"
+else
+	cargo test --all-targets --no-fail-fast || fail "tests"
+fi
+
+echo ""
+echo "pre-push OK"
