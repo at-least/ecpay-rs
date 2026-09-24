@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# Pre-push gate: the three checks from ~/.claude/CLAUDE.md, in that order.
+# Pre-push gate: fmt, clippy, then nextest (cargo test when nextest is not
+# installed) — the same three commands as `make gates`.
 # Install with `make hooks` (sets core.hooksPath); bypass once with
 # `git push --no-verify`.
 #
+# The checks run on the WORKING TREE, so the hook only vouches for a push when
+# that tree IS the commit being pushed. It therefore blocks when a pushed
+# branch is not HEAD, when tracked files differ from HEAD, or when untracked
+# *.rs / *.toml files exist (cargo auto-discovers tests/ and examples/ and
+# reads rustfmt/clippy configs). Other untracked files are ignored. Ref
+# deletions and tags on commits other than HEAD are not checked (a tag adds
+# no code; tag a commit whose branch push already passed).
+#
 # Deliberately NOT run here: `cargo test --doc`, `msrv`, `audit` — slower,
 # network-dependent, or red for reasons that are not your change. Run the
-# full offline mirror with `make ci` when you want those.
+# full mirror with `make ci` when you want those.
 #
 # Never runs the live-stage suites: they are #[ignore]d and leave permanent
-# records on ECPay's shared public test account.
+# records on ECPay's shared public test accounts.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -20,16 +29,56 @@ fail() {
 	exit 1
 }
 
+# Git feeds one "<local ref> <local sha> <remote ref> <remote sha>" line per
+# ref it is about to update. Read them all before any cargo step runs.
+head=$(git rev-parse HEAD)
+refs=0
+updates=0
+if [ ! -t 0 ]; then
+	while read -r local_ref local_sha remote_ref _remote_sha; do
+		refs=$((refs + 1))
+		case "$local_sha" in
+		*[!0]*) ;;
+		*) continue ;; # all zeros: deleting a remote ref, nothing to check
+		esac
+		commit=$(git rev-parse --verify -q "$local_sha^{commit}" || true)
+		if [ "$commit" != "$head" ]; then
+			case "$remote_ref" in
+			refs/tags/*)
+				echo "note: not checking tag $remote_ref (not at HEAD)"
+				continue
+				;;
+			esac
+			fail "pushing $local_ref, which is not HEAD — the checks run on the working tree, so check $local_ref out first"
+		fi
+		updates=$((updates + 1))
+	done
+fi
+# Only deletions: nothing to check. (No lines at all = run by hand: check HEAD.)
+if [ "$refs" -gt 0 ] && [ "$updates" -eq 0 ]; then
+	exit 0
+fi
+
+git diff --quiet HEAD -- ||
+	fail "uncommitted changes to tracked files — the checks would test them, not the pushed commit (commit or stash them)"
+untracked=$(git ls-files --others --exclude-standard -- '*.rs' '*.toml')
+[ -z "$untracked" ] ||
+	fail "untracked files cargo would pick up: $(echo "$untracked" | tr '\n' ' ')(commit, stash -u, or ignore them)"
+
+command -v cargo >/dev/null 2>&1 ||
+	fail "cargo not found on PATH (GUI git clients often run hooks with a reduced PATH)"
+
 echo "==> cargo fmt --check"
 cargo fmt --check || fail "formatting"
 
 echo "==> cargo clippy --all-targets -- -D warnings"
 cargo clippy --all-targets -- -D warnings || fail "clippy"
 
-echo "==> cargo nextest run --no-fail-fast"
 if command -v cargo-nextest >/dev/null 2>&1; then
+	echo "==> cargo nextest run --no-fail-fast"
 	cargo nextest run --no-fail-fast || fail "tests"
 else
+	echo "==> cargo test --all-targets --no-fail-fast (cargo-nextest not installed)"
 	cargo test --all-targets --no-fail-fast || fail "tests"
 fi
 
