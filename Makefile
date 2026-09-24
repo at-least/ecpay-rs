@@ -9,8 +9,22 @@
 # exactly what running them in CI costs, with nobody reading the log.
 # Trigger them on GitHub instead (see `make stage-run`).
 
-# Read from Cargo.toml's rust-version (ci.yml's msrv job pins its own copy).
-MSRV := $(shell sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
+# Recipes use bash features (pipefail, read -d '', [[ =~ ]]).
+SHELL := bash
+
+# This file's own path, so the sub-makes of `ci` read it under `make -f` too.
+# (MAKEFILE_LIST ends with this file only before any include. A -f path with
+# a space in it is not supported: make splits the list on whitespace.)
+SELF := $(abspath $(lastword $(MAKEFILE_LIST)))
+
+# Read from Cargo.toml's rust-version (ci.yml's msrv job pins its own copy),
+# in either TOML string form, indented or not. Stops at the closing quote, so
+# a trailing comment is not part of the value; a rust-version key in another
+# table as well gives two values, which msrv refuses.
+MSRV := $(shell sed -n \
+	-e 's/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+	-e "s/^[[:space:]]*rust-version[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" \
+	Cargo.toml 2>/dev/null)
 
 .DEFAULT_GOAL := gates
 .PHONY: ci gates fmt lint nt test doctest doc msrv audit hooks stage-run
@@ -18,16 +32,39 @@ MSRV := $(shell sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)
 # would otherwise start every cargo step at once.
 .NOTPARALLEL:
 
-## gates — the fast pre-push loop: fmt, clippy, nextest. The pre-push hook
-## runs the same three commands. Not a full CI mirror: nextest runs each test
-## in its own process, while CI's `cargo test` runs a test binary's tests in
-## one shared process (see the shared HTTP client note in src/client.rs) —
-## `make test` / `make ci` cover that.
+## gates — the fast pre-push loop: fmt, clippy, nextest, in place, on your
+## Cargo.lock. The pre-push hook runs this target on a clean checkout of the
+## tip of each pushed ref. Not a full CI mirror: nextest runs each test in its own
+## process, while CI's `cargo test` runs a test binary's tests in one shared
+## process (see the shared HTTP client note in src/client.rs) — `make test` /
+## `make ci` cover that.
 gates: fmt lint nt
 
-## ci — the full mirror of ci.yml's non-stage jobs, in the order GitHub runs
-## them (audit fetches the advisory DB, so this one is not fully offline).
-ci: fmt lint test doctest doc msrv audit
+## ci — the full mirror of ci.yml's non-stage jobs, in ci.yml's order, on a
+## fresh dependency resolution in a copy of the working tree (see "fresh
+## resolution" below; needs network). fmt → doc are the steps of ONE CI job,
+## where a red step skips the rest; msrv and audit are separate jobs. Here,
+## once the fresh resolution succeeds, every step runs regardless, so all the
+## failures show at once; the red ones are listed at the end and make exits
+## non-zero. (If the resolution itself fails — no network, or a requirement
+## nothing satisfies — make stops there with cargo's error.) Ctrl-C, or a
+## signal to a step's make, stops the run; a step whose cargo alone is killed
+## counts as a red step.
+CI_STEPS := fmt lint test doctest doc msrv audit
+ci:
+	@$(fresh_copy) cd "$(FRESH_TREE)" && set -x && cargo generate-lockfile
+	@failed=; \
+	for t in $(CI_STEPS); do \
+		case $$t in \
+		msrv | audit) $(MAKE) --no-print-directory -f "$(SELF)" $$t ;; \
+		*) $(MAKE) --no-print-directory -f "$(SELF)" -C "$(FRESH_TREE)" \
+			CARGO_TARGET_DIR="$(FRESH_BUILD)" $$t ;; \
+		esac; rc=$$?; \
+		if [ $$rc -gt 128 ]; then exit $$rc; fi; \
+		if [ $$rc -ne 0 ]; then failed="$$failed $$t"; fi; \
+	done; \
+	if [ -n "$$failed" ]; then echo "make ci: FAILED:$$failed"; exit 1; fi; \
+	echo "make ci: all $(words $(CI_STEPS)) steps passed"
 
 # --- test job -------------------------------------------------------------
 fmt:
@@ -38,14 +75,15 @@ lint:
 
 # nextest for the local loop: no fail-fast, so every failure shows at once.
 # It does NOT run doctests — that is what the `doctest` target is for.
-# Without cargo-nextest it falls back to cargo test, like the hook does.
+# Without cargo-nextest it falls back to `cargo test --no-fail-fast`, which
+# runs the doctests too.
 nt:
 	@if command -v cargo-nextest >/dev/null 2>&1; then \
 		echo "cargo nextest run --no-fail-fast"; \
 		cargo nextest run --no-fail-fast; \
 	else \
-		echo "cargo test --all-targets --no-fail-fast (cargo-nextest not installed)"; \
-		cargo test --all-targets --no-fail-fast; \
+		echo "cargo test --no-fail-fast (cargo-nextest not installed)"; \
+		cargo test --no-fail-fast; \
 	fi
 
 # What CI actually runs. Every live-stage suite is #[ignore]d, so this stays
@@ -61,40 +99,87 @@ doctest:
 doc:
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
-# --- msrv job -------------------------------------------------------------
-# NOTE: CI resolves dependencies FRESH (Cargo.lock is untracked for this
-# library crate), so it catches dependency floors that need a newer rustc.
-# Locally a Cargo.lock usually exists and pins them away, so a green local
-# msrv is weaker evidence than a green CI msrv. Delete Cargo.lock first if
-# you want the real thing.
-msrv:
-	@[ -n "$(MSRV)" ] || { echo "rust-version not found in Cargo.toml"; exit 1; }
-	cargo +$(MSRV) check --all-targets
+# --- fresh resolution: ci, msrv, audit ------------------------------------
+# Cargo.lock is untracked for this library crate, so every CI job starts
+# without one and resolves each dependency fresh: msrv with the MSRV cargo
+# itself, the rest with stable. A local lock pins older versions and hides
+# exactly what CI would hit (a new release that breaks or deprecates an API
+# used here, a dependency floor that needs a newer rustc, a new advisory).
+# So `ci`, `msrv` and `audit` run in a COPY of the working tree: every file
+# git does not ignore, tracked or not (what `git add -A` would commit), so no
+# Cargo.lock. Your own Cargo.lock is never touched. Run them from the crate
+# root.
+#
+# The copy lives in a per-clone cache dir, $(SCRATCH):
+# <cache>/ecpay-rs/<checksum of the clone's path>, where <cache> is
+# $XDG_CACHE_HOME when that is an absolute path (the XDG spec says to ignore
+# a relative one), else ~/.cache.
+# - Outside the repo and below no directory others can write to (fresh_copy
+#   refuses to run otherwise), because cargo, rustfmt and clippy also read
+#   config (.cargo/config.toml, rustfmt.toml, clippy.toml) from every parent
+#   directory: neither an ignored one in the repo nor one another user drops
+#   into a shared dir may reach the copy.
+# - Per clone, because clones sharing one copy would refill it under each
+#   other mid-run. (Two runs from ONE clone at the same time still share it;
+#   don't.)
+# It builds into its own target dir there, never the main tree's: two trees
+# of one package that share a target dir fill the same artifact slots, and
+# cargo then takes the other tree's output as fresh — your next in-place
+# build would silently run the copy's code instead of your edits. The copied
+# files get the copy time as their mtime, so every run rebuilds this crate
+# (not its registry dependencies): with the original mtimes, a file saved
+# during a run can be older than that run's build and never be rebuilt.
+CACHE_HOME := $(if $(filter x/%,x$(XDG_CACHE_HOME)),$(XDG_CACHE_HOME),$(HOME)/.cache)
+SCRATCH := $(CACHE_HOME)/ecpay-rs/$(shell pwd -P | cksum | tr ' ' -)
+FRESH_TREE := $(SCRATCH)/ci/tree
+FRESH_BUILD := $(SCRATCH)/ci/build
+fresh_copy = \
+	set -o pipefail; \
+	[ -f Cargo.toml ] || { echo "no Cargo.toml here: run make from the crate root"; exit 1; }; \
+	mkdir -p "$(SCRATCH)" && d=$$(cd "$(SCRATCH)" && pwd -P) || exit 1; \
+	case "$$d/" in "$$(pwd -P)"/*) \
+		echo "$(SCRATCH) is inside this clone: set XDG_CACHE_HOME outside it"; exit 1 ;; \
+	esac; \
+	while :; do \
+		[ -z "$$(find "$$d" -prune -perm -0002)" ] || \
+			{ echo "$$d is writable by anyone: set XDG_CACHE_HOME to a private dir"; exit 1; }; \
+		[ "$$d" = / ] && break; d=$$(dirname "$$d"); \
+	done; \
+	rm -rf "$(FRESH_TREE)" && mkdir -p "$(FRESH_TREE)" && \
+	git ls-files -z --cached --others --exclude-standard --deduplicate | \
+		while IFS= read -r -d '' f; do \
+			if [ -f "$$f" ] || [ -L "$$f" ]; then printf '%s\0' "$$f"; fi; \
+		done | \
+		tar --null --no-recursion -T - -cf - | tar -xmf - -C "$(FRESH_TREE)" || exit 1;
 
-# --- audit job ------------------------------------------------------------
-# CI has no Cargo.lock, so its audit covers a fresh resolution. Locally this
-# audits the Cargo.lock you build with and only generates one when none
-# exists: `cargo generate-lockfile` would re-resolve every dependency to its
-# latest version and silently discard any local pin. As with msrv, delete
-# Cargo.lock first to audit exactly what CI audits.
+msrv:
+	@[[ '$(MSRV)' =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$$ ]] || \
+		{ echo "no plain rust-version in Cargo.toml (read: '$(MSRV)')"; exit 1; }
+	@$(fresh_copy) cd "$(FRESH_TREE)" && export CARGO_TARGET_DIR="$(FRESH_BUILD)" && \
+		set -x && cargo +$(MSRV) check --all-targets
+
 # A red audit is often a NEW upstream advisory against an OLD requirement,
 # not a regression you introduced. Kept out of `gates` for that reason.
 audit:
-	[ -f Cargo.lock ] || cargo generate-lockfile
-	cargo audit
+	@$(fresh_copy) cd "$(FRESH_TREE)" && set -x && cargo generate-lockfile && cargo audit
 
 # --- setup ----------------------------------------------------------------
 ## hooks — install the tracked pre-push hook (opt-in, per clone).
-## core.hooksPath replaces .git/hooks wholesale, so any hook already there
-## stops running; the recipe names them.
+## core.hooksPath replaces the hooks directory in effect until now (.git/hooks,
+## or a global core.hooksPath) wholesale, so any hook there stops running for
+## this clone; the recipe names them.
 hooks:
-	git config core.hooksPath .githooks
-	@old="$$(git rev-parse --git-common-dir)/hooks"; \
-	for h in "$$old"/*; do \
-		case "$$h" in *.sample | "$$old/*") ;; \
-		*) echo "note: $$h no longer runs — move it into .githooks/ to keep it" ;; \
-		esac; \
-	done
+	@old="$$(git rev-parse --git-path hooks)"; \
+	echo "git config core.hooksPath .githooks"; \
+	git config core.hooksPath .githooks || exit 1; \
+	if [ "$$(cd "$$old" 2>/dev/null && pwd -P)" != "$$(cd .githooks && pwd -P)" ]; then \
+		for h in "$$old"/*; do \
+			case "$$h" in *.sample) continue ;; esac; \
+			if [ -f "$$h" ] && [ -x "$$h" ]; then \
+				echo "note: $$h no longer runs — move it into .githooks/ to keep it"; \
+			fi; \
+		done; \
+	fi
 	@echo "pre-push hook active — bypass a single push with: git push --no-verify"
 
 ## stage-run — trigger the LIVE stage jobs on GitHub, where the log is kept.
@@ -109,9 +194,16 @@ stage-run:
 	if [ -z "$$ref" ]; then \
 		echo "detached HEAD: run as 'make stage-run STAGE_REF=<branch>'"; exit 1; \
 	fi; \
-	if [ "$$ref" = "$$(git branch --show-current)" ] && \
-	   [ "$$(git rev-parse HEAD)" != "$$(git ls-remote origin "refs/heads/$$ref" | cut -f1)" ]; then \
-		echo "origin's '$$ref' is not HEAD (unpushed commits, not pushed, or origin moved) — sync first."; exit 1; \
+	if [ "$$ref" = "$$(git branch --show-current)" ]; then \
+		if ! remote="$$(git ls-remote origin "refs/heads/$$ref")"; then \
+			echo "could not read '$$ref' from origin (git ls-remote failed: network or auth?) — nothing triggered."; exit 1; \
+		fi; \
+		if [ -z "$$remote" ]; then \
+			echo "'$$ref' is not on origin — push it first."; exit 1; \
+		fi; \
+		if [ "$${remote%%[[:space:]]*}" != "$$(git rev-parse HEAD)" ]; then \
+			echo "origin's '$$ref' is not HEAD (unpushed commits, or origin moved) — sync first."; exit 1; \
+		fi; \
 	fi; \
 	echo "This mints permanent records on ECPay stage accounts 2000132 and 3002607."; \
 	echo "It runs stage-smoke + stage-sandbox + stage-manual (probes included)"; \

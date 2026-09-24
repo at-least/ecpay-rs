@@ -1,26 +1,48 @@
 #!/usr/bin/env bash
-# Pre-push gate: fmt, clippy, then nextest (cargo test when nextest is not
-# installed) — the same three commands as `make gates`.
+# Pre-push gate: `make gates` (fmt, clippy, then nextest — cargo test when
+# nextest is not installed) on the tip of each ref being pushed. Commits
+# below a tip are not checked (CI's push run checks only the tip too).
 # Install with `make hooks` (sets core.hooksPath); bypass once with
 # `git push --no-verify`.
 #
-# The checks run on the WORKING TREE, so the hook only vouches for a push when
-# that tree IS the commit being pushed. It therefore blocks when a pushed
-# branch is not HEAD, when tracked files differ from HEAD, or when untracked
-# *.rs / *.toml files exist (cargo auto-discovers tests/ and examples/ and
-# reads rustfmt/clippy configs). Other untracked files are ignored. Ref
-# deletions and tags on commits other than HEAD are not checked (a tag adds
-# no code; tag a commit whose branch push already passed).
+# The checks run on the PUSHED TIP, not on your working tree: each tip is
+# checked out into a temporary worktree and `make gates` runs there, as that
+# commit's own Makefile defines it. Uncommitted edits, untracked or ignored
+# files (a fixture you forgot to add), a sparse checkout, and submodule state
+# cannot make a push pass or fail — with one exception: when the commit
+# tracks no Cargo.lock, your local one is copied in, so the dependency
+# versions match your local loop (`make ci` is what resolves them fresh,
+# like CI). (A sparse checkout that leaves out .githooks/ leaves out this
+# hook too, and git then runs no pre-push hook at all.) The worktree leaves
+# the .claude/skills/ecpay submodule empty; nothing cargo builds reads it.
 #
-# Deliberately NOT run here: `cargo test --doc`, `msrv`, `audit` — slower,
-# network-dependent, or red for reasons that are not your change. Run the
-# full mirror with `make ci` when you want those.
+# The worktree and its build dir live in a per-clone cache dir,
+# <cache>/ecpay-rs/<checksum of the clone's path>/pre-push, where <cache> is
+# $XDG_CACHE_HOME when that is an absolute path (the XDG spec says to ignore
+# a relative one), else ~/.cache. It must be outside the repo and below no
+# directory others can write to (the hook refuses otherwise), because cargo,
+# rustfmt and rustup also read config (.cargo/config.toml, rustfmt.toml,
+# rust-toolchain.toml) from every parent directory: neither an ignored file
+# in the repo nor one another user drops into /tmp may reach the checks.
+# The build dir is never the main
+# tree's: two trees of one package that share a target dir fill the same
+# artifact slots, and cargo then takes the other tree's output as fresh —
+# your next in-place build would silently run the pushed commit's code
+# instead of your edits. So the first push from a clone builds every
+# dependency there once. (Two pushes from one clone at the same time would
+# share that dir; don't.)
+#
+# Deliberately NOT run here: `cargo test --doc` (except in the cargo test
+# fallback), `msrv`, `audit` — slower, network-dependent, or red for reasons
+# that are not your change. Run the full mirror with `make ci` when you want
+# those.
 #
 # Never runs the live-stage suites: they are #[ignore]d and leave permanent
 # records on ECPay's shared public test accounts.
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+top=$(git rev-parse --show-toplevel)
+cd "$top"
 
 fail() {
 	echo ""
@@ -29,58 +51,75 @@ fail() {
 	exit 1
 }
 
-# Git feeds one "<local ref> <local sha> <remote ref> <remote sha>" line per
-# ref it is about to update. Read them all before any cargo step runs.
-head=$(git rev-parse HEAD)
-refs=0
-updates=0
-if [ ! -t 0 ]; then
-	while read -r local_ref local_sha remote_ref _remote_sha; do
-		refs=$((refs + 1))
+# Git passes the remote's name and URL and feeds one
+# "<local ref> <local sha> <remote ref> <remote sha>" line per ref to push.
+# It leaves out refs already up to date and refs it already knows to be
+# non-fast-forward, so a push with no lines has nothing to check. Some pushes
+# git will still reject do get a line (the remote has commits you have not
+# fetched; a tag that already exists there), so their checks run before git
+# refuses: to the hook they look the same as a --force push of that ref.
+# Run by hand (no arguments), the hook checks HEAD.
+commits=()
+if [ "$#" -eq 0 ]; then
+	commits=("$(git rev-parse HEAD)")
+else
+	while read -r local_ref local_sha _remote_ref _remote_sha; do
 		case "$local_sha" in
 		*[!0]*) ;;
 		*) continue ;; # all zeros: deleting a remote ref, nothing to check
 		esac
-		commit=$(git rev-parse --verify -q "$local_sha^{commit}" || true)
-		if [ "$commit" != "$head" ]; then
-			case "$remote_ref" in
-			refs/tags/*)
-				echo "note: not checking tag $remote_ref (not at HEAD)"
-				continue
-				;;
-			esac
-			fail "pushing $local_ref, which is not HEAD — the checks run on the working tree, so check $local_ref out first"
+		if ! commit=$(git rev-parse --verify -q "$local_sha^{commit}"); then
+			echo "note: not checking $local_ref (it is not a commit)"
+			continue
 		fi
-		updates=$((updates + 1))
+		case " ${commits[*]-} " in
+		*" $commit "*) ;; # a branch and a tag on one commit: check it once
+		*) commits+=("$commit") ;;
+		esac
 	done
 fi
-# Only deletions: nothing to check. (No lines at all = run by hand: check HEAD.)
-if [ "$refs" -gt 0 ] && [ "$updates" -eq 0 ]; then
-	exit 0
-fi
+[ "${#commits[@]}" -gt 0 ] || exit 0
 
-git diff --quiet HEAD -- ||
-	fail "uncommitted changes to tracked files — the checks would test them, not the pushed commit (commit or stash them)"
-untracked=$(git ls-files --others --exclude-standard -- '*.rs' '*.toml')
-[ -z "$untracked" ] ||
-	fail "untracked files cargo would pick up: $(echo "$untracked" | tr '\n' ' ')(commit, stash -u, or ignore them)"
+for tool in make cargo; do
+	command -v "$tool" >/dev/null 2>&1 ||
+		fail "$tool not found on PATH (GUI git clients often run hooks with a reduced PATH)"
+done
 
-command -v cargo >/dev/null 2>&1 ||
-	fail "cargo not found on PATH (GUI git clients often run hooks with a reduced PATH)"
+case ${XDG_CACHE_HOME-} in
+/*) cache=$XDG_CACHE_HOME ;;
+*) cache=${HOME:-$(unset HOME; echo ~)}/.cache ;; # no HOME: ~ is from passwd
+esac
+root=$cache/ecpay-rs/$(pwd -P | cksum | tr ' ' -)/pre-push
+mkdir -p "$root"
+d=$(cd "$root" && pwd -P)
+case "$d/" in "$(pwd -P)"/*) fail "$root is inside this clone; set XDG_CACHE_HOME outside it" ;; esac
+while :; do
+	[ -z "$(find "$d" -prune -perm -0002)" ] ||
+		fail "$d (holding $root) is writable by anyone; set XDG_CACHE_HOME to a private directory"
+	[ "$d" = / ] && break
+	d=$(dirname "$d")
+done
+export CARGO_TARGET_DIR=$root/build
+# A push run from a make recipe inherits that make's MAKEFLAGS, whose
+# command-line variables would beat the export above in `make gates` (and
+# whose -i would let a red gate pass).
+unset MAKEFLAGS MFLAGS MAKELEVEL
 
-echo "==> cargo fmt --check"
-cargo fmt --check || fail "formatting"
+wt=$(mktemp -d "$root/wt.XXXXXX")
+cleanup() { git worktree remove --force "$wt" 2>/dev/null || rm -rf "$wt"; }
+trap cleanup EXIT
 
-echo "==> cargo clippy --all-targets -- -D warnings"
-cargo clippy --all-targets -- -D warnings || fail "clippy"
-
-if command -v cargo-nextest >/dev/null 2>&1; then
-	echo "==> cargo nextest run --no-fail-fast"
-	cargo nextest run --no-fail-fast || fail "tests"
-else
-	echo "==> cargo test --all-targets --no-fail-fast (cargo-nextest not installed)"
-	cargo test --all-targets --no-fail-fast || fail "tests"
-fi
+for commit in "${commits[@]}"; do
+	echo "==> make gates on $(git log -1 --format='%h %s' "$commit")"
+	# A new worktree inherits the main tree's sparse-checkout patterns, and
+	# with core.fsmonitor its checkout starts a daemon that outlives it.
+	git -c core.sparseCheckout=false -c core.fsmonitor=false \
+		worktree add --quiet --detach "$wt" "$commit"
+	if [ -f Cargo.lock ] && [ ! -e "$wt/Cargo.lock" ]; then cp Cargo.lock "$wt/"; fi
+	(cd "$wt" && make --no-print-directory gates) ||
+		fail "make gates on $(git rev-parse --short "$commit")"
+	git worktree remove --force "$wt"
+done
 
 echo ""
 echo "pre-push OK"
